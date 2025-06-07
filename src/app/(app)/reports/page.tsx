@@ -1,6 +1,7 @@
+
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Table,
   TableBody,
@@ -11,58 +12,97 @@ import {
 } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { mockUsers, mockAttendanceRecords, mockSessions } from '@/lib/mock-data';
-import type { User } from '@/types';
+import type { User, AttendanceRecord as AttendanceRecordType } from '@/types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { db } from '@/lib/firebase';
+import { collection, getDocs, query, where } from 'firebase/firestore';
+import { Loader2 } from 'lucide-react';
+import { useToast } from '@/hooks/use-toast';
 
 interface UserAttendanceStats {
   userId: string;
   userName: string;
-  totalSessions: number;
+  totalSessionsWithRecord: number; // Renamed for clarity
   present: number;
   absent: number;
   late: number;
-  attendanceRate: number;
+  attendanceRate: number; // (present + late) / totalSessionsWithRecord
 }
 
 export default function AttendanceReportsPage() {
   const [selectedUserId, setSelectedUserId] = useState<string | 'all'>('all');
+  const [allStudents, setAllStudents] = useState<User[]>([]);
+  const [allAttendanceRecords, setAllAttendanceRecords] = useState<AttendanceRecordType[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const { toast } = useToast();
 
-  const students = mockUsers.filter(user => user.role === 'student');
+  useEffect(() => {
+    const fetchData = async () => {
+      setIsLoading(true);
+      try {
+        const studentQuery = query(collection(db, 'users'), where('role', '==', 'student'));
+        const usersSnapshot = await getDocs(studentQuery);
+        setAllStudents(usersSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as User)));
+
+        const attendanceSnapshot = await getDocs(collection(db, 'attendanceRecords'));
+        setAllAttendanceRecords(attendanceSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AttendanceRecordType)));
+      } catch (error) {
+        console.error("Error fetching report data:", error);
+        toast({ title: 'Error fetching data', description: 'Could not load data for reports.', variant: 'destructive' });
+      }
+      setIsLoading(false);
+    };
+    fetchData();
+  }, [toast]);
 
   const userAttendanceStats = useMemo((): UserAttendanceStats[] => {
-    return students.map(student => {
-      const studentRecords = mockAttendanceRecords.filter(r => r.userId === student.id);
+    if (isLoading) return [];
+    return allStudents.map(student => {
+      const studentRecords = allAttendanceRecords.filter(r => r.userId === student.id);
       const present = studentRecords.filter(r => r.status === 'present').length;
       const absent = studentRecords.filter(r => r.status === 'absent').length;
       const late = studentRecords.filter(r => r.status === 'late').length;
+      
       const totalAttendedOrLate = present + late;
-      // Total sessions for a student could be complex. For simplicity, count distinct sessions they have a record for.
-      // A better approach would be to count total scheduled sessions for their classes.
-      const totalSessionsForStudent = new Set(studentRecords.map(r => r.sessionId)).size;
+      const totalSessionsWithRecord = new Set(studentRecords.map(r => r.sessionId)).size;
 
       return {
         userId: student.id,
         userName: student.name,
-        totalSessions: totalSessionsForStudent,
+        totalSessionsWithRecord: totalSessionsWithRecord,
         present,
         absent,
         late,
-        attendanceRate: totalSessionsForStudent > 0 ? (totalAttendedOrLate / totalSessionsForStudent) * 100 : 0,
+        attendanceRate: totalSessionsWithRecord > 0 ? (totalAttendedOrLate / totalSessionsWithRecord) * 100 : 0,
       };
     });
-  }, [students]);
+  }, [allStudents, allAttendanceRecords, isLoading]);
 
   const displayedStats = selectedUserId === 'all' 
     ? userAttendanceStats 
     : userAttendanceStats.filter(stat => stat.userId === selectedUserId);
 
   const chartData = displayedStats.map(stat => ({
-    name: stat.userName.split(' ')[0], // Short name for chart
+    name: stat.userName.split(' ')[0], 
     Present: stat.present,
     Late: stat.late,
     Absent: stat.absent,
   }));
+  
+  if (isLoading) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Attendance Reports</CardTitle>
+          <CardDescription>View attendance statistics for students.</CardDescription>
+        </CardHeader>
+        <CardContent className="flex items-center justify-center py-10">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <p className="ml-2">Loading report data...</p>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -79,7 +119,7 @@ export default function AttendanceReportsPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Students</SelectItem>
-                {students.map(student => (
+                {allStudents.map(student => (
                   <SelectItem key={student.id} value={student.id}>{student.name}</SelectItem>
                 ))}
               </SelectContent>
@@ -90,7 +130,7 @@ export default function AttendanceReportsPage() {
             <TableHeader>
               <TableRow>
                 <TableHead>Student</TableHead>
-                <TableHead>Total Sessions</TableHead>
+                <TableHead>Sessions with Records</TableHead>
                 <TableHead>Present</TableHead>
                 <TableHead>Late</TableHead>
                 <TableHead>Absent</TableHead>
@@ -101,7 +141,7 @@ export default function AttendanceReportsPage() {
               {displayedStats.length > 0 ? displayedStats.map((stat) => (
                 <TableRow key={stat.userId}>
                   <TableCell>{stat.userName}</TableCell>
-                  <TableCell>{stat.totalSessions}</TableCell>
+                  <TableCell>{stat.totalSessionsWithRecord}</TableCell>
                   <TableCell>{stat.present}</TableCell>
                   <TableCell>{stat.late}</TableCell>
                   <TableCell>{stat.absent}</TableCell>
@@ -130,12 +170,12 @@ export default function AttendanceReportsPage() {
               <BarChart data={chartData}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="name" />
-                <YAxis />
+                <YAxis allowDecimals={false}/>
                 <Tooltip />
                 <Legend />
-                <Bar dataKey="Present" fill="hsl(var(--primary))" />
-                <Bar dataKey="Late" fill="hsl(var(--accent))" />
-                <Bar dataKey="Absent" fill="hsl(var(--destructive))" />
+                <Bar dataKey="Present" fill="hsl(var(--chart-1))" />
+                <Bar dataKey="Late" fill="hsl(var(--chart-2))" />
+                <Bar dataKey="Absent" fill="hsl(var(--chart-3))" />
               </BarChart>
             </ResponsiveContainer>
           </CardContent>

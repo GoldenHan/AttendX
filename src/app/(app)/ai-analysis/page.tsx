@@ -1,6 +1,7 @@
+
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
@@ -8,19 +9,56 @@ import { Label } from '@/components/ui/label';
 import { analyzeAttendance } from '@/ai/flows/attendance-analysis';
 import { useToast } from '@/hooks/use-toast';
 import { Brain, Loader2 } from 'lucide-react';
-import { generateAttendanceStringForAI } from '@/lib/mock-data';
+import { db } from '@/lib/firebase';
+import { collection, getDocs } from 'firebase/firestore';
+import type { AttendanceRecord, User, Session } from '@/types';
+import { generateAttendanceStringFromRecords } from '@/lib/mock-data'; // Adjusted import
 
 export default function AiAnalysisPage() {
-  const [attendanceData, setAttendanceData] = useState('');
+  const [attendanceDataString, setAttendanceDataString] = useState(''); // This will hold the string for AI
   const [analysisResult, setAnalysisResult] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isFetchingData, setIsFetchingData] = useState(false);
   const { toast } = useToast();
 
+  // Fetches data from Firestore and prepares it for AI analysis
+  const prepareDataForAI = async () => {
+    setIsFetchingData(true);
+    setAttendanceDataString(''); // Clear previous data
+    try {
+      const [recordsSnapshot, usersSnapshot, sessionsSnapshot] = await Promise.all([
+        getDocs(collection(db, 'attendanceRecords')),
+        getDocs(collection(db, 'users')),
+        getDocs(collection(db, 'sessions')),
+      ]);
+
+      const fetchedRecords = recordsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AttendanceRecord));
+      const fetchedUsers = usersSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as User));
+      const fetchedSessions = sessionsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Session));
+      
+      const aiInputString = generateAttendanceStringFromRecords(fetchedRecords, fetchedUsers, fetchedSessions);
+      setAttendanceDataString(aiInputString);
+      toast({
+        title: 'Data Prepared',
+        description: 'Attendance data fetched from Firestore and formatted for AI analysis.',
+      });
+    } catch (error) {
+      console.error('Error fetching data for AI:', error);
+      toast({
+        title: 'Data Fetch Failed',
+        description: 'Could not fetch attendance data from Firestore.',
+        variant: 'destructive',
+      });
+    }
+    setIsFetchingData(false);
+  };
+
+
   const handleAnalyze = async () => {
-    if (!attendanceData.trim()) {
+    if (!attendanceDataString.trim()) {
       toast({
         title: 'Input Required',
-        description: 'Please provide attendance data for analysis.',
+        description: 'Please prepare data from Firestore first or provide attendance data for analysis.',
         variant: 'destructive',
       });
       return;
@@ -29,7 +67,7 @@ export default function AiAnalysisPage() {
     setIsLoading(true);
     setAnalysisResult(null);
     try {
-      const result = await analyzeAttendance({ attendanceRecords: attendanceData });
+      const result = await analyzeAttendance({ attendanceRecords: attendanceDataString });
       setAnalysisResult(result.atRiskStudents);
       toast({
         title: 'Analysis Complete',
@@ -47,14 +85,6 @@ export default function AiAnalysisPage() {
     }
   };
 
-  const loadSampleData = () => {
-    setAttendanceData(generateAttendanceStringForAI());
-     toast({
-        title: 'Sample Data Loaded',
-        description: 'Sample attendance data has been loaded into the textarea.',
-      });
-  };
-
   return (
     <Card>
       <CardHeader>
@@ -63,26 +93,35 @@ export default function AiAnalysisPage() {
           Attendance AI Analysis
         </CardTitle>
         <CardDescription>
-          Identify students at risk based on their attendance patterns. Paste attendance records below.
-          Example format: <br />
-          <code>Student Name A: YYYY-MM-DD: present, YYYY-MM-DD: absent;</code><br />
-          <code>Student Name B: YYYY-MM-DD: late, YYYY-MM-DD: present;</code>
+          Identify students at risk based on their attendance patterns.
+          Click "Prepare Data from Firestore" to load and format records for analysis.
+          Alternatively, you can manually paste records.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <div>
-          <Label htmlFor="attendanceData">Attendance Records</Label>
+          <Label htmlFor="attendanceData">Attendance Records (for AI)</Label>
           <Textarea
             id="attendanceData"
-            value={attendanceData}
-            onChange={(e) => setAttendanceData(e.target.value)}
-            placeholder="Paste attendance records here..."
+            value={attendanceDataString}
+            onChange={(e) => setAttendanceDataString(e.target.value)}
+            placeholder="Click 'Prepare Data from Firestore' or paste records here in the format: Student Name: YYYY-MM-DD: status, ..."
             rows={10}
             className="font-code"
           />
         </div>
         <div className="flex gap-2">
-          <Button onClick={handleAnalyze} disabled={isLoading}>
+          <Button onClick={prepareDataForAI} variant="outline" disabled={isFetchingData || isLoading}>
+            {isFetchingData ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Preparing Data...
+              </>
+            ) : (
+              'Prepare Data from Firestore'
+            )}
+          </Button>
+          <Button onClick={handleAnalyze} disabled={isLoading || isFetchingData || !attendanceDataString.trim()}>
             {isLoading ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -91,9 +130,6 @@ export default function AiAnalysisPage() {
             ) : (
               'Analyze Attendance'
             )}
-          </Button>
-          <Button onClick={loadSampleData} variant="outline" disabled={isLoading}>
-            Load Sample Data
           </Button>
         </div>
 

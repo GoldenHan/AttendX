@@ -1,14 +1,17 @@
+
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { QrCode } from 'lucide-react';
-import { mockClasses, mockSessions } from '@/lib/mock-data';
+import { QrCode, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { db } from '@/lib/firebase';
+import { collection, getDocs } from 'firebase/firestore';
+import type { ClassInfo, Session } from '@/types';
 
 export default function QrLoginSetupPage() {
   const router = useRouter();
@@ -17,7 +20,29 @@ export default function QrLoginSetupPage() {
   const [selectedSessionId, setSelectedSessionId] = useState<string>('');
   const [generatedLink, setGeneratedLink] = useState<string>('');
 
-  const availableSessions = selectedClassId ? mockSessions.filter(s => s.classId === selectedClassId) : [];
+  const [classes, setClasses] = useState<ClassInfo[]>([]);
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [isLoadingData, setIsLoadingData] = useState(true);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      setIsLoadingData(true);
+      try {
+        const classesSnapshot = await getDocs(collection(db, 'classes'));
+        setClasses(classesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ClassInfo)));
+
+        const sessionsSnapshot = await getDocs(collection(db, 'sessions'));
+        setSessions(sessionsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Session)));
+      } catch (error) {
+        console.error("Error fetching data for QR setup:", error);
+        toast({ title: 'Error fetching data', description: 'Could not load classes or sessions.', variant: 'destructive' });
+      }
+      setIsLoadingData(false);
+    };
+    fetchData();
+  }, [toast]);
+
+  const availableSessions = selectedClassId ? sessions.filter(s => s.classId === selectedClassId) : [];
 
   const handleGenerateLink = () => {
     if (!selectedSessionId) {
@@ -28,6 +53,7 @@ export default function QrLoginSetupPage() {
       });
       return;
     }
+    // Generate link relative to current origin
     const link = `/attendance-log?session_id=${selectedSessionId}`;
     setGeneratedLink(link);
     toast({
@@ -41,6 +67,23 @@ export default function QrLoginSetupPage() {
       router.push(generatedLink);
     }
   };
+  
+  if (isLoadingData) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <QrCode className="h-6 w-6 text-primary" />
+            QR Code Session Login Setup
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="flex items-center justify-center py-10">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <p className="ml-2">Loading data...</p>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <Card>
@@ -61,7 +104,7 @@ export default function QrLoginSetupPage() {
             value={selectedClassId}
             onValueChange={(value) => {
               setSelectedClassId(value);
-              setSelectedSessionId(''); // Reset session when class changes
+              setSelectedSessionId(''); 
               setGeneratedLink('');
             }}
           >
@@ -69,7 +112,7 @@ export default function QrLoginSetupPage() {
               <SelectValue placeholder="Select a class" />
             </SelectTrigger>
             <SelectContent>
-              {mockClasses.map((c) => (
+              {classes.map((c) => (
                 <SelectItem key={c.id} value={c.id}>
                   {c.name}
                 </SelectItem>
@@ -104,7 +147,7 @@ export default function QrLoginSetupPage() {
           </div>
         )}
 
-        <Button onClick={handleGenerateLink} disabled={!selectedSessionId}>
+        <Button onClick={handleGenerateLink} disabled={!selectedSessionId || isLoadingData}>
           Generate Session Link
         </Button>
 
@@ -112,7 +155,7 @@ export default function QrLoginSetupPage() {
           <div className="space-y-2 pt-4 border-t">
             <Label>Generated Link (Simulated QR Code Content)</Label>
             <div className="p-2 border rounded-md bg-muted text-sm font-mono break-all">
-              {`${window.location.origin}${generatedLink}`}
+              {typeof window !== 'undefined' ? `${window.location.origin}${generatedLink}` : generatedLink}
             </div>
             <Button onClick={handleNavigateToLog} variant="outline" className="mt-2">
               Simulate Scan & Log Attendance

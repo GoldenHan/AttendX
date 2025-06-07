@@ -1,3 +1,4 @@
+
 'use client';
 
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -17,10 +18,12 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
-import { mockUsers, mockClasses, mockSessions } from '@/lib/mock-data';
-import type { AttendanceRecord } from '@/types';
+import type { AttendanceRecord, User, ClassInfo, Session } from '@/types';
 import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
+import { db } from '@/lib/firebase';
+import { collection, addDoc, getDocs, Timestamp, query, where } from 'firebase/firestore';
+import { Loader2 } from 'lucide-react';
 
 const attendanceFormSchema = z.object({
   userId: z.string().min(1, { message: 'Student selection is required.' }),
@@ -31,66 +34,105 @@ const attendanceFormSchema = z.object({
 
 type AttendanceFormValues = z.infer<typeof attendanceFormSchema>;
 
-// This would typically be stored in a global state or database
-let localAttendanceRecords: AttendanceRecord[] = [];
-
 export default function AttendanceLogPage() {
   const { toast } = useToast();
   const searchParams = useSearchParams();
   const qrSessionId = searchParams.get('session_id');
-  const qrUserId = searchParams.get('user_id'); // Assuming QR might also encode user
+  const qrUserId = searchParams.get('user_id');
 
-  const [selectedClassId, setSelectedClassId] = useState<string | undefined>(qrSessionId ? mockSessions.find(s => s.id === qrSessionId)?.classId : undefined);
+  const [students, setStudents] = useState<User[]>([]);
+  const [classes, setClasses] = useState<ClassInfo[]>([]);
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [isLoadingData, setIsLoadingData] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const [selectedClassId, setSelectedClassId] = useState<string | undefined>(undefined);
 
   const form = useForm<AttendanceFormValues>({
     resolver: zodResolver(attendanceFormSchema),
     defaultValues: {
-      userId: qrUserId || '',
-      classId: selectedClassId || '',
-      sessionId: qrSessionId || '',
+      userId: '',
+      classId: '',
+      sessionId: '',
       status: 'present',
     },
   });
-  
+
   useEffect(() => {
-    if (qrSessionId) {
-      const session = mockSessions.find(s => s.id === qrSessionId);
-      if (session) {
-        form.setValue('sessionId', qrSessionId);
-        form.setValue('classId', session.classId);
-        setSelectedClassId(session.classId);
-        if(qrUserId) form.setValue('userId', qrUserId);
+    const fetchData = async () => {
+      setIsLoadingData(true);
+      try {
+        const usersSnapshot = await getDocs(collection(db, 'users'));
+        setStudents(usersSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as User)).filter(u => u.role === 'student'));
 
-        toast({
-          title: "QR Session Loaded",
-          description: `Session ${qrSessionId} details pre-filled. Please select a student if not already selected.`,
-        });
+        const classesSnapshot = await getDocs(collection(db, 'classes'));
+        const fetchedClasses = classesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ClassInfo));
+        setClasses(fetchedClasses);
+        
+        const sessionsSnapshot = await getDocs(collection(db, 'sessions'));
+        const fetchedSessions = sessionsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Session));
+        setSessions(fetchedSessions);
+
+        if (qrSessionId) {
+          const session = fetchedSessions.find(s => s.id === qrSessionId);
+          if (session) {
+            form.setValue('sessionId', qrSessionId);
+            form.setValue('classId', session.classId);
+            setSelectedClassId(session.classId);
+            if (qrUserId) form.setValue('userId', qrUserId);
+            toast({
+              title: "QR Session Loaded",
+              description: `Session ${session.id} details pre-filled.`,
+            });
+          }
+        }
+
+      } catch (error) {
+        console.error("Error fetching data: ", error);
+        toast({ title: 'Error fetching data', description: 'Could not load students, classes, or sessions.', variant: 'destructive' });
       }
-    }
-  }, [qrSessionId, qrUserId, form, toast]);
-
-
-  function onSubmit(data: AttendanceFormValues) {
-    const newRecord: AttendanceRecord = {
-      id: `ar-${Date.now()}`, // simple unique ID
-      ...data,
-      timestamp: new Date().toISOString(),
+      setIsLoadingData(false);
     };
-    localAttendanceRecords.push(newRecord);
-    toast({
-      title: 'Attendance Logged',
-      description: (
-        <pre className="mt-2 w-[340px] rounded-md bg-slate-950 p-4">
-          <code className="text-white">{JSON.stringify(newRecord, null, 2)}</code>
-        </pre>
-      ),
-    });
-    form.reset({ userId: '', classId: '', sessionId: '', status: 'present' });
-    setSelectedClassId(undefined);
+    fetchData();
+  }, [form, toast, qrSessionId, qrUserId]);
+  
+  async function onSubmit(data: AttendanceFormValues) {
+    setIsSubmitting(true);
+    try {
+      const newRecord: Omit<AttendanceRecord, 'id'> = {
+        ...data,
+        timestamp: Timestamp.now().toDate().toISOString(),
+      };
+      const docRef = await addDoc(collection(db, 'attendanceRecords'), newRecord);
+      toast({
+        title: 'Attendance Logged',
+        description: `Record ID: ${docRef.id} successfully saved.`,
+      });
+      form.reset({ userId: '', classId: '', sessionId: '', status: 'present' });
+      setSelectedClassId(undefined);
+    } catch (error) {
+      console.error("Error adding document: ", error);
+      toast({ title: 'Logging Failed', description: 'Could not save attendance record.', variant: 'destructive' });
+    }
+    setIsSubmitting(false);
   }
 
-  const students = mockUsers.filter(u => u.role === 'student');
-  const availableSessions = selectedClassId ? mockSessions.filter(s => s.classId === selectedClassId) : [];
+  const availableSessions = selectedClassId ? sessions.filter(s => s.classId === selectedClassId) : [];
+
+  if (isLoadingData) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Log Attendance</CardTitle>
+          <CardDescription>Record student attendance for classes and sessions.</CardDescription>
+        </CardHeader>
+        <CardContent className="flex items-center justify-center py-10">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <p className="ml-2">Loading data...</p>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <Card>
@@ -111,7 +153,7 @@ export default function AttendanceLogPage() {
                     onValueChange={(value) => {
                       field.onChange(value);
                       setSelectedClassId(value);
-                      form.setValue('sessionId', ''); // Reset session on class change
+                      form.setValue('sessionId', ''); 
                     }}
                     defaultValue={field.value}
                     value={field.value}
@@ -122,7 +164,7 @@ export default function AttendanceLogPage() {
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      {mockClasses.map((c) => (
+                      {classes.map((c) => (
                         <SelectItem key={c.id} value={c.id}>
                           {c.name}
                         </SelectItem>
@@ -222,7 +264,10 @@ export default function AttendanceLogPage() {
                 </FormItem>
               )}
             />
-            <Button type="submit">Log Attendance</Button>
+            <Button type="submit" disabled={isSubmitting || isLoadingData}>
+              {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Log Attendance
+            </Button>
           </form>
         </Form>
       </CardContent>
