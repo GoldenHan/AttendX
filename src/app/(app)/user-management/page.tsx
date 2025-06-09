@@ -15,24 +15,56 @@ import { Button } from '@/components/ui/button';
 import { Loader2, Pencil, Trash2, PlusCircle, Users } from 'lucide-react';
 import type { User } from '@/types';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, deleteDoc, doc } from 'firebase/firestore';
+import { collection, getDocs, deleteDoc, doc, addDoc } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
-// TODO: Implement Add/Edit User Dialog/Form
-// import {
-//   Dialog,
-//   DialogContent,
-//   DialogHeader,
-//   DialogTitle,
-//   DialogTrigger,
-// } from "@/components/ui/dialog";
-// import { Input } from "@/components/ui/input";
-// import { Label } from "@/components/ui/label";
-// import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+  DialogTrigger,
+  DialogClose,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import * as z from 'zod';
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from '@/components/ui/form';
+
+const userFormSchema = z.object({
+  name: z.string().min(2, { message: "Name must be at least 2 characters." }),
+  email: z.string().email({ message: "Invalid email address." }).optional().or(z.literal('')), // Optional email
+  role: z.enum(['student', 'teacher', 'admin'], { required_error: "Role is required." }),
+});
+
+type UserFormValues = z.infer<typeof userFormSchema>;
 
 export default function UserManagementPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isAddUserDialogOpen, setIsAddUserDialogOpen] = useState(false);
   const { toast } = useToast();
+
+  const form = useForm<UserFormValues>({
+    resolver: zodResolver(userFormSchema),
+    defaultValues: {
+      name: '',
+      email: '',
+      role: 'student',
+    },
+  });
 
   const fetchUsers = async () => {
     setIsLoading(true);
@@ -42,8 +74,9 @@ export default function UserManagementPage() {
     } catch (error) {
       console.error("Error fetching users:", error);
       toast({ title: 'Error fetching users', description: 'Could not load users from Firestore.', variant: 'destructive' });
+    } finally {
+      setIsLoading(false);
     }
-    setIsLoading(false);
   };
 
   useEffect(() => {
@@ -62,10 +95,27 @@ export default function UserManagementPage() {
     }
   };
 
-  // Placeholder for Add User functionality
-  const handleAddUser = () => {
-    toast({ title: 'Not Implemented', description: 'Add user functionality will be implemented soon.' });
-    // TODO: Open Add User Dialog
+  const handleAddUserSubmit = async (data: UserFormValues) => {
+    setIsSubmitting(true);
+    try {
+      const newUser: Omit<User, 'id'> = {
+        name: data.name,
+        email: data.email || undefined, // Store as undefined if empty
+        role: data.role,
+      };
+      const docRef = await addDoc(collection(db, 'users'), newUser);
+      toast({ title: 'User Added', description: `${data.name} added successfully.` });
+      form.reset();
+      setIsAddUserDialogOpen(false);
+      // Refetch users or optimistically update UI
+      // For simplicity, refetching:
+      await fetchUsers(); 
+    } catch (error) {
+      console.error("Error adding user:", error);
+      toast({ title: 'Add User Failed', description: 'Could not add the user.', variant: 'destructive' });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   // Placeholder for Edit User functionality
@@ -74,7 +124,7 @@ export default function UserManagementPage() {
     // TODO: Open Edit User Dialog with user data
   };
   
-  if (isLoading) {
+  if (isLoading && users.length === 0) { // Show loader only on initial load
     return (
       <Card>
         <CardHeader>
@@ -91,15 +141,98 @@ export default function UserManagementPage() {
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2"><Users className="h-6 w-6 text-primary" /> User Management</CardTitle>
-        <CardDescription>Manage student, teacher, and administrator accounts.</CardDescription>
-        <Button size="sm" className="ml-auto gap-1.5 text-sm" onClick={handleAddUser}>
-          <PlusCircle className="size-3.5" />
-          Add User (Soon)
-        </Button>
+      <CardHeader className="flex flex-row items-center justify-between">
+        <div>
+          <CardTitle className="flex items-center gap-2"><Users className="h-6 w-6 text-primary" /> User Management</CardTitle>
+          <CardDescription>Manage student, teacher, and administrator accounts.</CardDescription>
+        </div>
+        <Dialog open={isAddUserDialogOpen} onOpenChange={setIsAddUserDialogOpen}>
+          <DialogTrigger asChild>
+            <Button size="sm" className="gap-1.5 text-sm" onClick={() => form.reset()}>
+              <PlusCircle className="size-3.5" />
+              Add User
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="sm:max-w-[425px]">
+            <DialogHeader>
+              <DialogTitle>Add New User</DialogTitle>
+              <DialogDescription>
+                Fill in the details for the new user. Click save when you're done.
+              </DialogDescription>
+            </DialogHeader>
+            <Form {...form}>
+              <form onSubmit={form.handleSubmit(handleAddUserSubmit)} className="space-y-4 py-4">
+                <FormField
+                  control={form.control}
+                  name="name"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Full Name</FormLabel>
+                      <FormControl>
+                        <Input placeholder="John Doe" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="email"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Email (Optional)</FormLabel>
+                      <FormControl>
+                        <Input type="email" placeholder="john.doe@example.com" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="role"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Role</FormLabel>
+                      <Select onValueChange={field.onChange} defaultValue={field.value}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select a role" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="student">Student</SelectItem>
+                          <SelectItem value="teacher">Teacher</SelectItem>
+                          <SelectItem value="admin">Admin</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <DialogFooter>
+                  <DialogClose asChild>
+                    <Button type="button" variant="outline" onClick={() => setIsAddUserDialogOpen(false)}>
+                      Cancel
+                    </Button>
+                  </DialogClose>
+                  <Button type="submit" disabled={isSubmitting}>
+                    {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    Save User
+                  </Button>
+                </DialogFooter>
+              </form>
+            </Form>
+          </DialogContent>
+        </Dialog>
       </CardHeader>
       <CardContent>
+        {isLoading && users.length > 0 && ( // Show spinner for refresh, but keep table visible
+             <div className="flex items-center justify-center py-4">
+                <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                <p className="ml-2 text-sm text-muted-foreground">Refreshing users...</p>
+             </div>
+        )}
         <Table>
           <TableHeader>
             <TableRow>
@@ -135,14 +268,20 @@ export default function UserManagementPage() {
                 </TableCell>
               </TableRow>
             )) : (
-              <TableRow>
-                <TableCell colSpan={4} className="text-center">No users found.</TableCell>
-              </TableRow>
+              !isLoading && ( // Only show "No users found" if not loading
+                <TableRow>
+                  <TableCell colSpan={4} className="text-center">No users found.</TableCell>
+                </TableRow>
+              )
             )}
           </TableBody>
         </Table>
+         {isLoading && users.length === 0 && ( // If still loading and no users, this message is covered by the main loader
+             <div className="text-center py-4 text-sm text-muted-foreground">
+                Loading initial user data...
+             </div>
+         )}
       </CardContent>
     </Card>
   );
 }
-
