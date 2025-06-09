@@ -1,3 +1,4 @@
+
 'use client';
 
 import React from 'react';
@@ -17,13 +18,10 @@ import { LogOut } from 'lucide-react';
 import Link from 'next/link';
 
 export function MainAppShell({ children }: { children: React.ReactNode }) {
-  // Example: retrieve sidebar state from cookie
-  const initialSidebarOpen = typeof window !== 'undefined' 
-    ? document.cookie.includes('sidebar_state=true') 
-    : true;
-
+  // Let SidebarProvider use its internal defaultOpen={true} for initial render.
+  // It will then sync with cookie via useEffect.
   return (
-    <SidebarProvider defaultOpen={initialSidebarOpen}>
+    <SidebarProvider>
       <Sidebar variant="sidebar" collapsible="icon" side="left">
         <SidebarHeader className="p-4 flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2 text-lg font-semibold font-headline text-primary">
