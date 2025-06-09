@@ -21,7 +21,7 @@ import { useToast } from '@/hooks/use-toast';
 import type { AttendanceRecord, User, Group, Session } from '@/types';
 import React, { useState, useEffect, useCallback } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, addDoc, getDocs, Timestamp, query, where, getDoc, doc } from 'firebase/firestore';
+import { collection, addDoc, getDocs, Timestamp, query, where, doc, writeBatch } from 'firebase/firestore';
 import { Loader2, CalendarIcon } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
@@ -63,16 +63,16 @@ export default function AttendanceLogPage() {
     },
   });
 
-  const { fields, append, remove, update } = useFieldArray({
+  const { fields, append, remove } = useFieldArray({
     control: form.control,
     name: 'attendances',
-    keyName: 'fieldId', // important to avoid issues with re-rendering
+    keyName: 'fieldId',
   });
 
   const watchedGroupId = form.watch('groupId');
 
   const populateStudentsForGroup = useCallback((groupId: string) => {
-    remove(); // Clear existing students
+    remove(); 
     const selectedGroup = groups.find(g => g.id === groupId);
     if (selectedGroup && Array.isArray(selectedGroup.studentIds)) {
       const studentsInGroup = selectedGroup.studentIds.map(studentId => {
@@ -115,7 +115,7 @@ export default function AttendanceLogPage() {
     const sessionDateStr = format(date, 'yyyy-MM-dd');
     const sessionsRef = collection(db, 'sessions');
     const q = query(sessionsRef, 
-      where('classId', '==', groupId), // Using groupId as classId for session context
+      where('classId', '==', groupId),
       where('date', '==', sessionDateStr),
       where('time', '==', time)
     );
@@ -125,7 +125,7 @@ export default function AttendanceLogPage() {
       return querySnapshot.docs[0].id;
     } else {
       const newSessionData: Omit<Session, 'id'> = {
-        classId: groupId, // Storing groupId here
+        classId: groupId,
         date: sessionDateStr,
         time: time,
       };
@@ -139,7 +139,11 @@ export default function AttendanceLogPage() {
     try {
       const sessionId = await findOrCreateSession(data.groupId, data.sessionDate, data.sessionTime);
       
-      const attendancePromises = data.attendances.map(att => {
+      const batch = writeBatch(db);
+      const attendanceRecordsCollectionRef = collection(db, 'attendanceRecords');
+
+      data.attendances.forEach(att => {
+        const newRecordRef = doc(attendanceRecordsCollectionRef); // Auto-generate ID
         const record: Omit<AttendanceRecord, 'id'> = {
           userId: att.userId,
           sessionId: sessionId,
@@ -149,10 +153,10 @@ export default function AttendanceLogPage() {
         if (att.status === 'absent' && att.observation) {
           record.observation = att.observation;
         }
-        return addDoc(collection(db, 'attendanceRecords'), record);
+        batch.set(newRecordRef, record);
       });
 
-      await Promise.all(attendancePromises);
+      await batch.commit();
 
       toast({
         title: 'Attendance Logged',
@@ -164,7 +168,7 @@ export default function AttendanceLogPage() {
         sessionTime: '09:00',
         attendances: [],
       });
-      remove(); // Clear students from form array
+      remove(); 
     } catch (error) {
       console.error("Error logging attendance: ", error);
       toast({ title: 'Logging Failed', description: 'Could not save attendance records.', variant: 'destructive' });
@@ -206,7 +210,6 @@ export default function AttendanceLogPage() {
                     <Select
                       onValueChange={(value) => {
                         field.onChange(value);
-                        // Students will be populated by the useEffect watching watchedGroupId
                       }}
                       value={field.value}
                     >
@@ -301,7 +304,6 @@ export default function AttendanceLogPage() {
                               <RadioGroup
                                 onValueChange={(value) => {
                                   statusField.onChange(value);
-                                  // Clear observation if not absent
                                   if (value !== 'absent') {
                                     form.setValue(`attendances.${index}.observation`, '');
                                   }
