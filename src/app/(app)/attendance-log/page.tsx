@@ -2,7 +2,7 @@
 'use client';
 
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useForm } from 'react-hook-form';
+import { useForm, useFieldArray, Controller } from 'react-hook-form';
 import * as z from 'zod';
 import { Button } from '@/components/ui/button';
 import {
@@ -18,125 +18,166 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
-import type { AttendanceRecord, User, ClassInfo, Session } from '@/types';
-import React, { useState, useEffect } from 'react';
-import { useSearchParams } from 'next/navigation';
+import type { AttendanceRecord, User, Group, Session } from '@/types';
+import React, { useState, useEffect, useCallback } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, addDoc, getDocs, Timestamp, query, where } from 'firebase/firestore';
-import { Loader2 } from 'lucide-react';
+import { collection, addDoc, getDocs, Timestamp, query, where, getDoc, doc } from 'firebase/firestore';
+import { Loader2, CalendarIcon } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar } from '@/components/ui/calendar';
+import { format, isValid } from 'date-fns';
+import { cn } from '@/lib/utils';
 
-const attendanceFormSchema = z.object({
-  userId: z.string().min(1, { message: 'Student selection is required.' }),
-  classId: z.string().min(1, { message: 'Class selection is required.' }),
-  sessionId: z.string().min(1, { message: 'Session selection is required.' }),
-  status: z.enum(['present', 'absent', 'late'], { required_error: 'Status is required.' }),
+const studentAttendanceSchema = z.object({
+  userId: z.string(),
+  name: z.string(),
+  status: z.enum(['present', 'absent'], { required_error: 'Status is required.' }),
   observation: z.string().optional(),
 });
 
-type AttendanceFormValues = z.infer<typeof attendanceFormSchema>;
+const attendanceLogFormSchema = z.object({
+  groupId: z.string().min(1, { message: 'Group selection is required.' }),
+  sessionDate: z.date({ required_error: 'Session date is required.' }),
+  sessionTime: z.string().regex(/^([01]\d|2[0-3]):([0-5]\d)$/, { message: 'Invalid time format. Use HH:MM.' }),
+  attendances: z.array(studentAttendanceSchema),
+});
+
+type AttendanceLogFormValues = z.infer<typeof attendanceLogFormSchema>;
 
 export default function AttendanceLogPage() {
   const { toast } = useToast();
-  const searchParams = useSearchParams();
-  const qrSessionId = searchParams.get('session_id');
-  const qrUserId = searchParams.get('user_id');
-
-  const [students, setStudents] = useState<User[]>([]);
-  const [classes, setClasses] = useState<ClassInfo[]>([]);
-  const [sessions, setSessions] = useState<Session[]>([]);
+  const [groups, setGroups] = useState<Group[]>([]);
+  const [allStudents, setAllStudents] = useState<User[]>([]);
   const [isLoadingData, setIsLoadingData] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const [selectedClassId, setSelectedClassId] = useState<string | undefined>(undefined);
-
-  const form = useForm<AttendanceFormValues>({
-    resolver: zodResolver(attendanceFormSchema),
+  const form = useForm<AttendanceLogFormValues>({
+    resolver: zodResolver(attendanceLogFormSchema),
     defaultValues: {
-      userId: '',
-      classId: '',
-      sessionId: '',
-      status: 'present',
-      observation: '',
+      groupId: '',
+      sessionDate: new Date(),
+      sessionTime: '09:00',
+      attendances: [],
     },
   });
 
-  const watchedStatus = form.watch('status');
+  const { fields, append, remove, update } = useFieldArray({
+    control: form.control,
+    name: 'attendances',
+    keyName: 'fieldId', // important to avoid issues with re-rendering
+  });
+
+  const watchedGroupId = form.watch('groupId');
+
+  const populateStudentsForGroup = useCallback((groupId: string) => {
+    remove(); // Clear existing students
+    const selectedGroup = groups.find(g => g.id === groupId);
+    if (selectedGroup && Array.isArray(selectedGroup.studentIds)) {
+      const studentsInGroup = selectedGroup.studentIds.map(studentId => {
+        const student = allStudents.find(s => s.id === studentId);
+        return student ? { userId: student.id, name: student.name, status: 'present' as 'present' | 'absent', observation: '' } : null;
+      }).filter(Boolean);
+      
+      studentsInGroup.forEach(studentData => {
+        if (studentData) append(studentData);
+      });
+    }
+  }, [groups, allStudents, append, remove]);
+
+  useEffect(() => {
+    if (watchedGroupId && groups.length > 0 && allStudents.length > 0) {
+      populateStudentsForGroup(watchedGroupId);
+    }
+  }, [watchedGroupId, groups, allStudents, populateStudentsForGroup]);
 
   useEffect(() => {
     const fetchData = async () => {
       setIsLoadingData(true);
       try {
-        const usersSnapshot = await getDocs(collection(db, 'users'));
-        setStudents(usersSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as User)).filter(u => u.role === 'student'));
+        const groupsSnapshot = await getDocs(collection(db, 'groups'));
+        setGroups(groupsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Group)));
 
-        const classesSnapshot = await getDocs(collection(db, 'classes'));
-        const fetchedClasses = classesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ClassInfo));
-        setClasses(fetchedClasses);
-        
-        const sessionsSnapshot = await getDocs(collection(db, 'sessions'));
-        const fetchedSessions = sessionsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Session));
-        setSessions(fetchedSessions);
-
-        if (qrSessionId) {
-          const session = fetchedSessions.find(s => s.id === qrSessionId);
-          if (session) {
-            form.setValue('sessionId', qrSessionId);
-            form.setValue('classId', session.classId);
-            setSelectedClassId(session.classId);
-            if (qrUserId) form.setValue('userId', qrUserId);
-            toast({
-              title: "QR Session Loaded",
-              description: `Session ${session.id} details pre-filled.`,
-            });
-          }
-        }
+        const studentsSnapshot = await getDocs(query(collection(db, 'users'), where('role', '==', 'student')));
+        setAllStudents(studentsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as User)));
 
       } catch (error) {
         console.error("Error fetching data: ", error);
-        toast({ title: 'Error fetching data', description: 'Could not load students, classes, or sessions.', variant: 'destructive' });
+        toast({ title: 'Error fetching data', description: 'Could not load groups or students.', variant: 'destructive' });
       }
       setIsLoadingData(false);
     };
     fetchData();
-  }, [form, toast, qrSessionId, qrUserId]);
+  }, [toast]);
+
+  const findOrCreateSession = async (groupId: string, date: Date, time: string): Promise<string> => {
+    const sessionDateStr = format(date, 'yyyy-MM-dd');
+    const sessionsRef = collection(db, 'sessions');
+    const q = query(sessionsRef, 
+      where('classId', '==', groupId), // Using groupId as classId for session context
+      where('date', '==', sessionDateStr),
+      where('time', '==', time)
+    );
+
+    const querySnapshot = await getDocs(q);
+    if (!querySnapshot.empty) {
+      return querySnapshot.docs[0].id;
+    } else {
+      const newSessionData: Omit<Session, 'id'> = {
+        classId: groupId, // Storing groupId here
+        date: sessionDateStr,
+        time: time,
+      };
+      const sessionDocRef = await addDoc(sessionsRef, newSessionData);
+      return sessionDocRef.id;
+    }
+  };
   
-  async function onSubmit(data: AttendanceFormValues) {
+  async function onSubmit(data: AttendanceLogFormValues) {
     setIsSubmitting(true);
     try {
-      const newRecord: Omit<AttendanceRecord, 'id'> = {
-        userId: data.userId,
-        classId: data.classId, // Although not directly on AttendanceRecord, often useful context for queries
-        sessionId: data.sessionId,
-        status: data.status,
-        timestamp: Timestamp.now().toDate().toISOString(),
-      };
-      if (data.status === 'absent' && data.observation) {
-        newRecord.observation = data.observation;
-      }
+      const sessionId = await findOrCreateSession(data.groupId, data.sessionDate, data.sessionTime);
+      
+      const attendancePromises = data.attendances.map(att => {
+        const record: Omit<AttendanceRecord, 'id'> = {
+          userId: att.userId,
+          sessionId: sessionId,
+          status: att.status,
+          timestamp: Timestamp.now().toDate().toISOString(),
+        };
+        if (att.status === 'absent' && att.observation) {
+          record.observation = att.observation;
+        }
+        return addDoc(collection(db, 'attendanceRecords'), record);
+      });
 
-      const docRef = await addDoc(collection(db, 'attendanceRecords'), newRecord);
+      await Promise.all(attendancePromises);
+
       toast({
         title: 'Attendance Logged',
-        description: `Record ID: ${docRef.id} successfully saved.`,
+        description: `Attendance for group recorded successfully for session ID: ${sessionId}.`,
       });
-      form.reset({ userId: '', classId: '', sessionId: '', status: 'present', observation: '' });
-      setSelectedClassId(undefined);
+      form.reset({
+        groupId: '',
+        sessionDate: new Date(),
+        sessionTime: '09:00',
+        attendances: [],
+      });
+      remove(); // Clear students from form array
     } catch (error) {
-      console.error("Error adding document: ", error);
-      toast({ title: 'Logging Failed', description: 'Could not save attendance record.', variant: 'destructive' });
+      console.error("Error logging attendance: ", error);
+      toast({ title: 'Logging Failed', description: 'Could not save attendance records.', variant: 'destructive' });
     }
     setIsSubmitting(false);
   }
-
-  const availableSessions = selectedClassId ? sessions.filter(s => s.classId === selectedClassId) : [];
-
+  
   if (isLoadingData) {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Log Attendance</CardTitle>
-          <CardDescription>Record student attendance for classes and sessions.</CardDescription>
+          <CardTitle>Log Group Attendance</CardTitle>
+          <CardDescription>Record student attendance for a specific group, date, and time.</CardDescription>
         </CardHeader>
         <CardContent className="flex items-center justify-center py-10">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -149,162 +190,177 @@ export default function AttendanceLogPage() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Log Attendance</CardTitle>
-        <CardDescription>Record student attendance for classes and sessions.</CardDescription>
+        <CardTitle>Log Group Attendance</CardTitle>
+        <CardDescription>Select a group, date, and time, then mark attendance for each student.</CardDescription>
       </CardHeader>
       <CardContent>
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-8">
-            <FormField
-              control={form.control}
-              name="classId"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Class</FormLabel>
-                  <Select
-                    onValueChange={(value) => {
-                      field.onChange(value);
-                      setSelectedClassId(value);
-                      form.setValue('sessionId', ''); 
-                    }}
-                    defaultValue={field.value}
-                    value={field.value}
-                  >
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select a class" />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      {classes.map((c) => (
-                        <SelectItem key={c.id} value={c.id}>
-                          {c.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <FormField
-              control={form.control}
-              name="sessionId"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Session</FormLabel>
-                  <Select 
-                    onValueChange={field.onChange} 
-                    defaultValue={field.value}
-                    value={field.value}
-                    disabled={!selectedClassId}
-                  >
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select a session" />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      {availableSessions.map((s) => (
-                        <SelectItem key={s.id} value={s.id}>
-                          {s.date} - {s.time}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <FormDescription>
-                    Select class first to see available sessions.
-                  </FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            
-            <FormField
-              control={form.control}
-              name="userId"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Student</FormLabel>
-                  <Select 
-                    onValueChange={field.onChange} 
-                    defaultValue={field.value}
-                    value={field.value}
-                  >
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select a student" />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      {students.map((student) => (
-                        <SelectItem key={student.id} value={student.id}>
-                          {student.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <FormField
-              control={form.control}
-              name="status"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Status</FormLabel>
-                  <Select 
-                    onValueChange={(value) => {
-                      field.onChange(value);
-                      if (value !== 'absent') {
-                        form.setValue('observation', ''); // Clear observation if not absent
-                      }
-                    }} 
-                    defaultValue={field.value}
-                    value={field.value}
-                  >
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select status" />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      <SelectItem value="present">Present</SelectItem>
-                      <SelectItem value="absent">Absent</SelectItem>
-                      <SelectItem value="late">Late</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            {watchedStatus === 'absent' && (
+            <div className="grid md:grid-cols-3 gap-4">
               <FormField
                 control={form.control}
-                name="observation"
+                name="groupId"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Observation / Justification for Absence</FormLabel>
-                    <FormControl>
-                      <Textarea
-                        placeholder="Enter reason for absence..."
-                        {...field}
-                        rows={3}
-                      />
-                    </FormControl>
+                    <FormLabel>Group</FormLabel>
+                    <Select
+                      onValueChange={(value) => {
+                        field.onChange(value);
+                        // Students will be populated by the useEffect watching watchedGroupId
+                      }}
+                      value={field.value}
+                    >
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select a group" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {groups.map((g) => (
+                          <SelectItem key={g.id} value={g.id}>
+                            {g.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                     <FormMessage />
                   </FormItem>
                 )}
               />
+              <FormField
+                control={form.control}
+                name="sessionDate"
+                render={({ field }) => (
+                  <FormItem className="flex flex-col">
+                    <FormLabel>Session Date</FormLabel>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <FormControl>
+                          <Button
+                            variant={"outline"}
+                            className={cn(
+                              "w-full pl-3 text-left font-normal",
+                              !field.value && "text-muted-foreground"
+                            )}
+                          >
+                            {field.value ? (
+                              format(field.value, "PPP")
+                            ) : (
+                              <span>Pick a date</span>
+                            )}
+                            <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                          </Button>
+                        </FormControl>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0" align="start">
+                        <Calendar
+                          mode="single"
+                          selected={field.value}
+                          onSelect={field.onChange}
+                          disabled={(date) =>
+                            date > new Date() || date < new Date("1900-01-01")
+                          }
+                          initialFocus
+                        />
+                      </PopoverContent>
+                    </Popover>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="sessionTime"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Session Time (HH:MM)</FormLabel>
+                    <FormControl>
+                      <Input type="time" {...field} />
+                    </FormControl>
+                     <FormDescription>Enter time in 24-hour format (e.g., 14:30).</FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+
+            {fields.length > 0 && (
+              <div className="space-y-6">
+                <h3 className="text-lg font-medium">Student Attendance</h3>
+                {fields.map((item, index) => (
+                  <Card key={item.fieldId} className="p-4">
+                    <div className="flex flex-col md:flex-row md:items-center gap-4">
+                      <p className="font-medium flex-1">{form.getValues(`attendances.${index}.name`)}</p>
+                      
+                      <Controller
+                        control={form.control}
+                        name={`attendances.${index}.status`}
+                        render={({ field: statusField }) => (
+                          <FormItem className="space-y-0">
+                            <FormControl>
+                              <RadioGroup
+                                onValueChange={(value) => {
+                                  statusField.onChange(value);
+                                  // Clear observation if not absent
+                                  if (value !== 'absent') {
+                                    form.setValue(`attendances.${index}.observation`, '');
+                                  }
+                                }}
+                                value={statusField.value}
+                                className="flex space-x-2"
+                              >
+                                <FormItem className="flex items-center space-x-1 space-y-0">
+                                  <FormControl>
+                                    <RadioGroupItem value="present" />
+                                  </FormControl>
+                                  <FormLabel className="font-normal">Present</FormLabel>
+                                </FormItem>
+                                <FormItem className="flex items-center space-x-1 space-y-0">
+                                  <FormControl>
+                                    <RadioGroupItem value="absent" />
+                                  </FormControl>
+                                  <FormLabel className="font-normal">Absent</FormLabel>
+                                </FormItem>
+                              </RadioGroup>
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      
+                      {form.watch(`attendances.${index}.status`) === 'absent' && (
+                        <Controller
+                          control={form.control}
+                          name={`attendances.${index}.observation`}
+                          render={({ field: obsField }) => (
+                            <FormItem className="flex-1 min-w-[200px]">
+                              <FormLabel className="sr-only">Observation</FormLabel>
+                              <FormControl>
+                                <Textarea
+                                  placeholder="Reason for absence..."
+                                  {...obsField}
+                                  rows={1}
+                                />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      )}
+                    </div>
+                  </Card>
+                ))}
+              </div>
             )}
 
-            <Button type="submit" disabled={isSubmitting || isLoadingData}>
+            {fields.length === 0 && watchedGroupId && !isLoadingData && (
+                <p className="text-muted-foreground">No students found in the selected group or group data is still loading.</p>
+            )}
+
+
+            <Button type="submit" disabled={isSubmitting || isLoadingData || fields.length === 0}>
               {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Log Attendance
+              Log All Attendance
             </Button>
           </form>
         </Form>
@@ -312,3 +368,4 @@ export default function AttendanceLogPage() {
     </Card>
   );
 }
+
