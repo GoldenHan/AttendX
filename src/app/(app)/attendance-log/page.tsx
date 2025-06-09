@@ -24,12 +24,14 @@ import { useSearchParams } from 'next/navigation';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, Timestamp, query, where } from 'firebase/firestore';
 import { Loader2 } from 'lucide-react';
+import { Textarea } from '@/components/ui/textarea';
 
 const attendanceFormSchema = z.object({
   userId: z.string().min(1, { message: 'Student selection is required.' }),
   classId: z.string().min(1, { message: 'Class selection is required.' }),
   sessionId: z.string().min(1, { message: 'Session selection is required.' }),
   status: z.enum(['present', 'absent', 'late'], { required_error: 'Status is required.' }),
+  observation: z.string().optional(),
 });
 
 type AttendanceFormValues = z.infer<typeof attendanceFormSchema>;
@@ -55,8 +57,11 @@ export default function AttendanceLogPage() {
       classId: '',
       sessionId: '',
       status: 'present',
+      observation: '',
     },
   });
+
+  const watchedStatus = form.watch('status');
 
   useEffect(() => {
     const fetchData = async () => {
@@ -100,15 +105,22 @@ export default function AttendanceLogPage() {
     setIsSubmitting(true);
     try {
       const newRecord: Omit<AttendanceRecord, 'id'> = {
-        ...data,
+        userId: data.userId,
+        classId: data.classId, // Although not directly on AttendanceRecord, often useful context for queries
+        sessionId: data.sessionId,
+        status: data.status,
         timestamp: Timestamp.now().toDate().toISOString(),
       };
+      if (data.status === 'absent' && data.observation) {
+        newRecord.observation = data.observation;
+      }
+
       const docRef = await addDoc(collection(db, 'attendanceRecords'), newRecord);
       toast({
         title: 'Attendance Logged',
         description: `Record ID: ${docRef.id} successfully saved.`,
       });
-      form.reset({ userId: '', classId: '', sessionId: '', status: 'present' });
+      form.reset({ userId: '', classId: '', sessionId: '', status: 'present', observation: '' });
       setSelectedClassId(undefined);
     } catch (error) {
       console.error("Error adding document: ", error);
@@ -245,7 +257,12 @@ export default function AttendanceLogPage() {
                 <FormItem>
                   <FormLabel>Status</FormLabel>
                   <Select 
-                    onValueChange={field.onChange} 
+                    onValueChange={(value) => {
+                      field.onChange(value);
+                      if (value !== 'absent') {
+                        form.setValue('observation', ''); // Clear observation if not absent
+                      }
+                    }} 
                     defaultValue={field.value}
                     value={field.value}
                   >
@@ -264,6 +281,27 @@ export default function AttendanceLogPage() {
                 </FormItem>
               )}
             />
+
+            {watchedStatus === 'absent' && (
+              <FormField
+                control={form.control}
+                name="observation"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Observation / Justification for Absence</FormLabel>
+                    <FormControl>
+                      <Textarea
+                        placeholder="Enter reason for absence..."
+                        {...field}
+                        rows={3}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            )}
+
             <Button type="submit" disabled={isSubmitting || isLoadingData}>
               {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Log Attendance

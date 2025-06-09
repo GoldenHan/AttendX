@@ -30,6 +30,7 @@ export interface AttendanceRecord {
   userId: string;
   status: 'present' | 'absent' | 'late';
   timestamp: string; // ISO date string
+  observation?: string; // Optional observation/justification for absence
 }
 
 export interface Group {
