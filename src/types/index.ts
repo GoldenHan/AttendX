@@ -35,5 +35,9 @@ export interface AttendanceRecord {
 export interface Group {
   id: string;
   name: string;
+  type: 'Saturday' | 'Sunday';
+  startDate: string; // ISO Date string
+  endDate?: string; // ISO Date string, optional
   studentIds: string[];
 }
+
