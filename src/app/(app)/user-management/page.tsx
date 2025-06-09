@@ -2,6 +2,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import Link from 'next/link';
 import {
   Table,
   TableBody,
@@ -12,7 +13,7 @@ import {
 } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Loader2, Pencil, Trash2, PlusCircle, Users } from 'lucide-react';
+import { Loader2, Pencil, Trash2, PlusCircle, Users, UserPlus, FolderKanban } from 'lucide-react';
 import type { User } from '@/types';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, deleteDoc, doc, addDoc } from 'firebase/firestore';
@@ -47,7 +48,7 @@ const userFormSchema = z.object({
   name: z.string().min(2, { message: "Name must be at least 2 characters." }),
   email: z.string().email({ message: "Invalid email address." }).optional().or(z.literal('')),
   role: z.enum(['student', 'teacher', 'admin'], { required_error: "Role is required." }),
-  photoUrl: z.string().url({ message: "Please enter a valid URL." }).optional().or(z.literal('')),
+  photoUrl: z.string().url({ message: "Please enter a valid URL for photo." }).optional().or(z.literal('')),
   level: z.enum(['Beginner', 'Intermediate', 'Advanced', 'Other']).optional(),
   notes: z.string().optional(),
 });
@@ -109,17 +110,17 @@ export default function UserManagementPage() {
     try {
       const newUser: Omit<User, 'id'> = {
         name: data.name,
-        email: data.email || undefined,
+        email: data.email || undefined, // Store as undefined if empty for Firestore
         role: data.role,
       };
 
       if (data.role === 'student') {
-        if (data.photoUrl) newUser.photoUrl = data.photoUrl;
-        if (data.level) newUser.level = data.level;
-        if (data.notes) newUser.notes = data.notes;
+        if (data.photoUrl) newUser.photoUrl = data.photoUrl; else delete newUser.photoUrl;
+        if (data.level) newUser.level = data.level; else delete newUser.level;
+        if (data.notes) newUser.notes = data.notes; else delete newUser.notes;
       }
 
-      const docRef = await addDoc(collection(db, 'users'), newUser);
+      await addDoc(collection(db, 'users'), newUser);
       toast({ title: 'User Added', description: `${data.name} added successfully.` });
       form.reset({
         name: '',
@@ -165,152 +166,160 @@ export default function UserManagementPage() {
           <CardTitle className="flex items-center gap-2"><Users className="h-6 w-6 text-primary" /> User Management</CardTitle>
           <CardDescription>Manage student, teacher, and administrator accounts.</CardDescription>
         </div>
-        <Dialog open={isAddUserDialogOpen} onOpenChange={(isOpen) => {
-          setIsAddUserDialogOpen(isOpen);
-          if (!isOpen) {
-            form.reset({ // Reset form when dialog is closed
-                name: '',
-                email: '',
-                role: 'student',
-                photoUrl: '',
-                level: undefined,
-                notes: '',
-            });
-          }
-        }}>
-          <DialogTrigger asChild>
-            <Button size="sm" className="gap-1.5 text-sm" onClick={() => form.reset({ role: 'student' })}>
-              <PlusCircle className="size-3.5" />
-              Add User
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle>Add New User</DialogTitle>
-              <DialogDescription>
-                Fill in the details for the new user. Click save when you're done.
-              </DialogDescription>
-            </DialogHeader>
-            <Form {...form}>
-              <form onSubmit={form.handleSubmit(handleAddUserSubmit)} className="space-y-4 py-4">
-                <FormField
-                  control={form.control}
-                  name="name"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Full Name</FormLabel>
-                      <FormControl>
-                        <Input placeholder="John Doe" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="email"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Email (Optional)</FormLabel>
-                      <FormControl>
-                        <Input type="email" placeholder="john.doe@example.com" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="role"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Role</FormLabel>
-                      <Select onValueChange={field.onChange} defaultValue={field.value}>
+        <div className="flex gap-2">
+          <Button asChild size="sm" variant="outline" className="gap-1.5 text-sm">
+            <Link href="/group-management">
+              <FolderKanban className="size-3.5" />
+              Manage Groups
+            </Link>
+          </Button>
+          <Dialog open={isAddUserDialogOpen} onOpenChange={(isOpen) => {
+            setIsAddUserDialogOpen(isOpen);
+            if (!isOpen) {
+              form.reset({
+                  name: '',
+                  email: '',
+                  role: 'student',
+                  photoUrl: '',
+                  level: undefined,
+                  notes: '',
+              });
+            }
+          }}>
+            <DialogTrigger asChild>
+              <Button size="sm" className="gap-1.5 text-sm" onClick={() => form.reset({ role: 'student' })}>
+                <UserPlus className="size-3.5" />
+                Add User
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle>Add New User</DialogTitle>
+                <DialogDescription>
+                  Fill in the details for the new user. Click save when you're done.
+                </DialogDescription>
+              </DialogHeader>
+              <Form {...form}>
+                <form onSubmit={form.handleSubmit(handleAddUserSubmit)} className="space-y-4 py-4">
+                  <FormField
+                    control={form.control}
+                    name="name"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Full Name</FormLabel>
                         <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select a role" />
-                          </SelectTrigger>
+                          <Input placeholder="John Doe" {...field} />
                         </FormControl>
-                        <SelectContent>
-                          <SelectItem value="student">Student</SelectItem>
-                          <SelectItem value="teacher">Teacher</SelectItem>
-                          <SelectItem value="admin">Admin</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                {watchedRole === 'student' && (
-                  <>
-                    <FormField
-                      control={form.control}
-                      name="photoUrl"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Photo URL (Optional)</FormLabel>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="email"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Email (Optional)</FormLabel>
+                        <FormControl>
+                          <Input type="email" placeholder="john.doe@example.com" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="role"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Role</FormLabel>
+                        <Select onValueChange={field.onChange} defaultValue={field.value}>
                           <FormControl>
-                            <Input type="url" placeholder="https://example.com/photo.jpg" {...field} />
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select a role" />
+                            </SelectTrigger>
                           </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={form.control}
-                      name="level"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Level (Optional)</FormLabel>
-                          <Select onValueChange={field.onChange} defaultValue={field.value}>
+                          <SelectContent>
+                            <SelectItem value="student">Student</SelectItem>
+                            <SelectItem value="teacher">Teacher</SelectItem>
+                            <SelectItem value="admin">Admin</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  {watchedRole === 'student' && (
+                    <>
+                      <FormField
+                        control={form.control}
+                        name="photoUrl"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Photo URL (Optional)</FormLabel>
                             <FormControl>
-                              <SelectTrigger>
-                                <SelectValue placeholder="Select student's level" />
-                              </SelectTrigger>
+                              <Input type="url" placeholder="https://placehold.co/100x100.png" {...field} />
                             </FormControl>
-                            <SelectContent>
-                              <SelectItem value="Beginner">Beginner</SelectItem>
-                              <SelectItem value="Intermediate">Intermediate</SelectItem>
-                              <SelectItem value="Advanced">Advanced</SelectItem>
-                              <SelectItem value="Other">Other</SelectItem>
-                            </SelectContent>
-                          </Select>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={form.control}
-                      name="notes"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Notes (Optional)</FormLabel>
-                          <FormControl>
-                            <Textarea placeholder="Any relevant notes about the student..." {...field} />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                  </>
-                )}
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={form.control}
+                        name="level"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Level (Optional)</FormLabel>
+                            <Select onValueChange={field.onChange} value={field.value} defaultValue={field.value}>
+                              <FormControl>
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Select student's level" />
+                                </SelectTrigger>
+                              </FormControl>
+                              <SelectContent>
+                                <SelectItem value="Beginner">Beginner</SelectItem>
+                                <SelectItem value="Intermediate">Intermediate</SelectItem>
+                                <SelectItem value="Advanced">Advanced</SelectItem>
+                                <SelectItem value="Other">Other</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={form.control}
+                        name="notes"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Notes (Optional)</FormLabel>
+                            <FormControl>
+                              <Textarea placeholder="Any relevant notes about the student..." {...field} />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </>
+                  )}
 
-                <DialogFooter>
-                  <DialogClose asChild>
-                    <Button type="button" variant="outline">
-                      Cancel
+                  <DialogFooter>
+                    <DialogClose asChild>
+                      <Button type="button" variant="outline">
+                        Cancel
+                      </Button>
+                    </DialogClose>
+                    <Button type="submit" disabled={isSubmitting}>
+                      {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                      Save User
                     </Button>
-                  </DialogClose>
-                  <Button type="submit" disabled={isSubmitting}>
-                    {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    Save User
-                  </Button>
-                </DialogFooter>
-              </form>
-            </Form>
-          </DialogContent>
-        </Dialog>
+                  </DialogFooter>
+                </form>
+              </Form>
+            </DialogContent>
+          </Dialog>
+        </div>
       </CardHeader>
       <CardContent>
         {isLoading && users.length > 0 && (

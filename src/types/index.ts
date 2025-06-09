@@ -31,3 +31,9 @@ export interface AttendanceRecord {
   status: 'present' | 'absent' | 'late';
   timestamp: string; // ISO date string
 }
+
+export interface Group {
+  id: string;
+  name: string;
+  studentIds: string[];
+}

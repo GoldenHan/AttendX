@@ -21,6 +21,7 @@ import {
   QrCode,
   Users,
   Settings,
+  FolderKanban, // Added for Group Management
 } from 'lucide-react';
 
 const navItems = [
@@ -33,6 +34,7 @@ const navItems = [
 
 const adminNavItems = [
    { href: '/user-management', label: 'Users', icon: Users },
+   { href: '/group-management', label: 'Groups', icon: FolderKanban }, // Added Group Management
    { href: '/app-settings', label: 'Settings', icon: Settings },
 ];
 
@@ -47,7 +49,7 @@ export function SidebarNav() {
           <SidebarGroupLabel>Menu</SidebarGroupLabel>
           {navItems.map((item) => (
             <SidebarMenuItem key={item.href}>
-              <Link href={item.href}>
+              <Link href={item.href} >
                 <SidebarMenuButton
                   variant="ghost"
                   className={cn(
@@ -70,7 +72,7 @@ export function SidebarNav() {
           <SidebarGroupLabel>Administration</SidebarGroupLabel>
            {adminNavItems.map((item) => (
             <SidebarMenuItem key={item.href}>
-              <Link href={item.href}>
+              <Link href={item.href} >
                 <SidebarMenuButton
                   variant="ghost"
                   className={cn(
@@ -89,7 +91,7 @@ export function SidebarNav() {
             </SidebarMenuItem>
           ))}
           <SidebarMenuItem>
-             <Link href="/qr-login-setup">
+             <Link href="/qr-login-setup" >
                 <SidebarMenuButton
                     variant="ghost"
                     className={cn(
