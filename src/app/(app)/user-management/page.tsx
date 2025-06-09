@@ -30,6 +30,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from '@/components/ui/textarea';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -44,8 +45,11 @@ import {
 
 const userFormSchema = z.object({
   name: z.string().min(2, { message: "Name must be at least 2 characters." }),
-  email: z.string().email({ message: "Invalid email address." }).optional().or(z.literal('')), // Optional email
+  email: z.string().email({ message: "Invalid email address." }).optional().or(z.literal('')),
   role: z.enum(['student', 'teacher', 'admin'], { required_error: "Role is required." }),
+  photoUrl: z.string().url({ message: "Please enter a valid URL." }).optional().or(z.literal('')),
+  level: z.enum(['Beginner', 'Intermediate', 'Advanced', 'Other']).optional(),
+  notes: z.string().optional(),
 });
 
 type UserFormValues = z.infer<typeof userFormSchema>;
@@ -63,8 +67,13 @@ export default function UserManagementPage() {
       name: '',
       email: '',
       role: 'student',
+      photoUrl: '',
+      level: undefined,
+      notes: '',
     },
   });
+
+  const watchedRole = form.watch('role');
 
   const fetchUsers = async () => {
     setIsLoading(true);
@@ -100,15 +109,27 @@ export default function UserManagementPage() {
     try {
       const newUser: Omit<User, 'id'> = {
         name: data.name,
-        email: data.email || undefined, // Store as undefined if empty
+        email: data.email || undefined,
         role: data.role,
       };
+
+      if (data.role === 'student') {
+        if (data.photoUrl) newUser.photoUrl = data.photoUrl;
+        if (data.level) newUser.level = data.level;
+        if (data.notes) newUser.notes = data.notes;
+      }
+
       const docRef = await addDoc(collection(db, 'users'), newUser);
       toast({ title: 'User Added', description: `${data.name} added successfully.` });
-      form.reset();
+      form.reset({
+        name: '',
+        email: '',
+        role: 'student',
+        photoUrl: '',
+        level: undefined,
+        notes: '',
+      });
       setIsAddUserDialogOpen(false);
-      // Refetch users or optimistically update UI
-      // For simplicity, refetching:
       await fetchUsers(); 
     } catch (error) {
       console.error("Error adding user:", error);
@@ -118,13 +139,11 @@ export default function UserManagementPage() {
     }
   };
 
-  // Placeholder for Edit User functionality
   const handleEditUser = (userId: string) => {
     toast({ title: 'Not Implemented', description: `Edit user (ID: ${userId}) functionality will be implemented soon.` });
-    // TODO: Open Edit User Dialog with user data
   };
   
-  if (isLoading && users.length === 0) { // Show loader only on initial load
+  if (isLoading && users.length === 0) {
     return (
       <Card>
         <CardHeader>
@@ -146,14 +165,26 @@ export default function UserManagementPage() {
           <CardTitle className="flex items-center gap-2"><Users className="h-6 w-6 text-primary" /> User Management</CardTitle>
           <CardDescription>Manage student, teacher, and administrator accounts.</CardDescription>
         </div>
-        <Dialog open={isAddUserDialogOpen} onOpenChange={setIsAddUserDialogOpen}>
+        <Dialog open={isAddUserDialogOpen} onOpenChange={(isOpen) => {
+          setIsAddUserDialogOpen(isOpen);
+          if (!isOpen) {
+            form.reset({ // Reset form when dialog is closed
+                name: '',
+                email: '',
+                role: 'student',
+                photoUrl: '',
+                level: undefined,
+                notes: '',
+            });
+          }
+        }}>
           <DialogTrigger asChild>
-            <Button size="sm" className="gap-1.5 text-sm" onClick={() => form.reset()}>
+            <Button size="sm" className="gap-1.5 text-sm" onClick={() => form.reset({ role: 'student' })}>
               <PlusCircle className="size-3.5" />
               Add User
             </Button>
           </DialogTrigger>
-          <DialogContent className="sm:max-w-[425px]">
+          <DialogContent className="sm:max-w-md">
             <DialogHeader>
               <DialogTitle>Add New User</DialogTitle>
               <DialogDescription>
@@ -210,9 +241,64 @@ export default function UserManagementPage() {
                     </FormItem>
                   )}
                 />
+
+                {watchedRole === 'student' && (
+                  <>
+                    <FormField
+                      control={form.control}
+                      name="photoUrl"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Photo URL (Optional)</FormLabel>
+                          <FormControl>
+                            <Input type="url" placeholder="https://example.com/photo.jpg" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="level"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Level (Optional)</FormLabel>
+                          <Select onValueChange={field.onChange} defaultValue={field.value}>
+                            <FormControl>
+                              <SelectTrigger>
+                                <SelectValue placeholder="Select student's level" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              <SelectItem value="Beginner">Beginner</SelectItem>
+                              <SelectItem value="Intermediate">Intermediate</SelectItem>
+                              <SelectItem value="Advanced">Advanced</SelectItem>
+                              <SelectItem value="Other">Other</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="notes"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Notes (Optional)</FormLabel>
+                          <FormControl>
+                            <Textarea placeholder="Any relevant notes about the student..." {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </>
+                )}
+
                 <DialogFooter>
                   <DialogClose asChild>
-                    <Button type="button" variant="outline" onClick={() => setIsAddUserDialogOpen(false)}>
+                    <Button type="button" variant="outline">
                       Cancel
                     </Button>
                   </DialogClose>
@@ -227,7 +313,7 @@ export default function UserManagementPage() {
         </Dialog>
       </CardHeader>
       <CardContent>
-        {isLoading && users.length > 0 && ( // Show spinner for refresh, but keep table visible
+        {isLoading && users.length > 0 && (
              <div className="flex items-center justify-center py-4">
                 <Loader2 className="h-6 w-6 animate-spin text-primary" />
                 <p className="ml-2 text-sm text-muted-foreground">Refreshing users...</p>
@@ -251,7 +337,7 @@ export default function UserManagementPage() {
                   <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
                     user.role === 'admin' ? 'bg-purple-500/20 text-purple-700 dark:text-purple-400' :
                     user.role === 'teacher' ? 'bg-blue-500/20 text-blue-700 dark:text-blue-400' :
-                    'bg-green-500/20 text-green-700 dark:text-green-400' // student
+                    'bg-green-500/20 text-green-700 dark:text-green-400'
                   }`}>
                     {user.role.charAt(0).toUpperCase() + user.role.slice(1)}
                   </span>
@@ -268,7 +354,7 @@ export default function UserManagementPage() {
                 </TableCell>
               </TableRow>
             )) : (
-              !isLoading && ( // Only show "No users found" if not loading
+              !isLoading && (
                 <TableRow>
                   <TableCell colSpan={4} className="text-center">No users found.</TableCell>
                 </TableRow>
@@ -276,7 +362,7 @@ export default function UserManagementPage() {
             )}
           </TableBody>
         </Table>
-         {isLoading && users.length === 0 && ( // If still loading and no users, this message is covered by the main loader
+         {isLoading && users.length === 0 && (
              <div className="text-center py-4 text-sm text-muted-foreground">
                 Loading initial user data...
              </div>

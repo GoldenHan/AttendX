@@ -1,8 +1,12 @@
+
 export interface User {
   id: string;
   name: string;
   role: 'student' | 'teacher' | 'admin';
   email?: string;
+  photoUrl?: string; // Optional: URL to the student's photo
+  level?: 'Beginner' | 'Intermediate' | 'Advanced' | 'Other'; // Optional: Student's level
+  notes?: string; // Optional: General notes about the student
 }
 
 export interface ClassInfo {
