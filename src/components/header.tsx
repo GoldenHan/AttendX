@@ -18,7 +18,7 @@ export function Header() {
       <div className="flex items-center gap-2">
         <Sheet className="h-6 w-6 text-primary" />
         <Link href="/" className="text-xl font-semibold font-headline text-foreground">
-          AttendX
+          SERVEX
         </Link>
       </div>
       <div className="ml-auto flex items-center gap-2">

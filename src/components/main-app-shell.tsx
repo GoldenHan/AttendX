@@ -26,7 +26,7 @@ export function MainAppShell({ children }: { children: React.ReactNode }) {
         <SidebarHeader className="p-4 flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2 text-lg font-semibold font-headline text-primary">
             {/* Icon can be added here if needed */}
-            <span className="group-data-[collapsible=icon]:hidden">AttendX</span>
+            <span className="group-data-[collapsible=icon]:hidden">SERVEX</span>
           </Link>
           {/* Trigger is usually outside or in header, but can be here for specific layouts */}
           {/* <SidebarTrigger className="group-data-[collapsible=icon]:hidden" /> */}

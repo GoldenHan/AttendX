@@ -16,7 +16,7 @@ export default function AppSettingsPage() {
   // For dark mode toggle - this is a simplified example.
   // Real dark mode toggle would involve context or theme provider.
   const [isDarkMode, setIsDarkMode] = useState(false);
-  const [appName, setAppName] = useState("AttendX"); // Example app name
+  const [appName, setAppName] = useState("SERVEX"); // Example app name
 
   useEffect(() => {
     // Simulate fetching app name or theme preference
@@ -26,7 +26,7 @@ export default function AppSettingsPage() {
       setIsDarkMode(true);
     }
     // const storedAppName = ... fetch from somewhere
-    // setAppName(storedAppName || "AttendX");
+    // setAppName(storedAppName || "SERVEX");
   }, []);
 
   const handleThemeToggle = (checked: boolean) => {

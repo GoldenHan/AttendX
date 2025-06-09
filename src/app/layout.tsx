@@ -3,7 +3,7 @@ import './globals.css';
 import { Toaster } from "@/components/ui/toaster";
 
 export const metadata: Metadata = {
-  title: 'AttendX - Attendance Management',
+  title: 'SERVEX - Attendance Management',
   description: 'Professional attendance tracking for students and staff.',
 };
 
