@@ -1,3 +1,4 @@
+
 'use client';
 
 import Link from 'next/link';
@@ -46,7 +47,7 @@ export function SidebarNav() {
           <SidebarGroupLabel>Menu</SidebarGroupLabel>
           {navItems.map((item) => (
             <SidebarMenuItem key={item.href}>
-              <Link href={item.href} legacyBehavior passHref>
+              <Link href={item.href}>
                 <SidebarMenuButton
                   variant="ghost"
                   className={cn(
@@ -69,7 +70,7 @@ export function SidebarNav() {
           <SidebarGroupLabel>Administration</SidebarGroupLabel>
            {adminNavItems.map((item) => (
             <SidebarMenuItem key={item.href}>
-              <Link href={item.href} legacyBehavior passHref>
+              <Link href={item.href}>
                 <SidebarMenuButton
                   variant="ghost"
                   className={cn(
@@ -88,7 +89,7 @@ export function SidebarNav() {
             </SidebarMenuItem>
           ))}
           <SidebarMenuItem>
-             <Link href="/qr-login-setup" legacyBehavior passHref>
+             <Link href="/qr-login-setup">
                 <SidebarMenuButton
                     variant="ghost"
                     className={cn(
