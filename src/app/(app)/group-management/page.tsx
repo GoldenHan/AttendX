@@ -101,14 +101,14 @@ export default function GroupManagementPage() {
   const handleAddGroupSubmit = async (data: GroupFormValues) => {
     setIsSubmitting(true);
     try {
-      const newGroup: Omit<Group, 'id' | 'studentIds'> & { studentIds: string[] } = {
+      const newGroupData: Omit<Group, 'id'> = {
         name: data.name,
         type: data.type,
         startDate: data.startDate.toISOString(),
         endDate: data.endDate ? data.endDate.toISOString() : undefined,
-        studentIds: [],
+        studentIds: [], // Ensure studentIds is initialized as an empty array
       };
-      await addDoc(collection(db, 'groups'), newGroup);
+      await addDoc(collection(db, 'groups'), newGroupData);
       toast({ title: 'Group Created', description: `${data.name} created successfully.` });
       form.reset();
       setIsAddGroupDialogOpen(false);
@@ -139,7 +139,8 @@ export default function GroupManagementPage() {
 
   const openManageStudentsDialog = (group: Group) => {
     setSelectedGroupForStudentManagement(group);
-    setSelectedStudentIdsForGroup([...group.studentIds]);
+    // Defensively handle group.studentIds in case it's not an array
+    setSelectedStudentIdsForGroup(Array.isArray(group.studentIds) ? [...group.studentIds] : []);
     setIsManageStudentsDialogOpen(true);
   };
 
@@ -158,7 +159,7 @@ export default function GroupManagementPage() {
       toast({ title: 'Students Updated', description: `Student assignments for group "${selectedGroupForStudentManagement.name}" updated.` });
       setIsManageStudentsDialogOpen(false);
       setSelectedGroupForStudentManagement(null);
-      await fetchGroupsAndStudents(); // Refresh group list
+      await fetchGroupsAndStudents(); 
     } catch (error) {
       console.error("Error updating students in group:", error);
       toast({ title: 'Update Failed', description: 'Could not update student assignments.', variant: 'destructive' });
@@ -363,7 +364,7 @@ export default function GroupManagementPage() {
                     <TableCell>{group.type}</TableCell>
                     <TableCell>{formatDate(group.startDate)}</TableCell>
                     <TableCell>{formatDate(group.endDate)}</TableCell>
-                    <TableCell>{group.studentIds.length} student(s)</TableCell>
+                    <TableCell>{Array.isArray(group.studentIds) ? group.studentIds.length : 0} student(s)</TableCell>
                     <TableCell className="space-x-1">
                       <Button variant="outline" size="sm" onClick={() => openManageStudentsDialog(group)}>
                         <Users className="mr-1 h-3.5 w-3.5" /> Manage Students
@@ -431,3 +432,4 @@ export default function GroupManagementPage() {
     </>
   );
 }
+
