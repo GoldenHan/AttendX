@@ -13,10 +13,11 @@ import {
 } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Loader2, Pencil, Trash2, UserPlus, FolderKanban, Users as UsersIcon } from 'lucide-react'; // Renamed Users to UsersIcon
+import { Loader2, Pencil, Trash2, UserPlus, FolderKanban, Users as UsersIcon } from 'lucide-react'; 
 import type { User } from '@/types';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, deleteDoc, doc, addDoc } from 'firebase/firestore';
+import { useAuth } from '@/contexts/AuthContext'; // Added for re-authentication
 import { useToast } from '@/hooks/use-toast';
 import {
   Dialog,
@@ -29,7 +30,6 @@ import {
   DialogClose,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-// import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from '@/components/ui/textarea';
 import { useForm } from 'react-hook-form';
@@ -44,7 +44,6 @@ import {
   FormMessage,
 } from '@/components/ui/form';
 
-// Reverted userFormSchema: email optional, no password, age, or gender.
 const userFormSchema = z.object({
   name: z.string().min(2, { message: "Name must be at least 2 characters." }),
   email: z.string().email({ message: "Invalid email address." }).optional().or(z.literal('')),
@@ -52,6 +51,12 @@ const userFormSchema = z.object({
   photoUrl: z.string().url({ message: "Please enter a valid URL for photo." }).optional().or(z.literal('')),
   level: z.enum(['Beginner', 'Intermediate', 'Advanced', 'Other']).optional(),
   notes: z.string().optional(),
+  age: z.preprocess(
+    (val) => (val === "" || val === undefined || val === null ? undefined : Number(val)),
+    z.number({ invalid_type_error: "Age must be a number." }).positive("Age must be positive.").int("Age must be an integer.").optional()
+  ),
+  gender: z.enum(['male', 'female', 'other']).optional(),
+  adminPassword: z.string().min(6, { message: "Admin password must be at least 6 characters." }),
 });
 
 type UserFormValues = z.infer<typeof userFormSchema>;
@@ -62,6 +67,7 @@ export default function UserManagementPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isAddUserDialogOpen, setIsAddUserDialogOpen] = useState(false);
   const { toast } = useToast();
+  const { reauthenticateCurrentUser, authUser } = useAuth(); // Get reauthenticate function and authUser
 
   const form = useForm<UserFormValues>({
     resolver: zodResolver(userFormSchema),
@@ -72,6 +78,9 @@ export default function UserManagementPage() {
       photoUrl: '',
       level: undefined,
       notes: '',
+      age: undefined,
+      gender: undefined,
+      adminPassword: '',
     },
   });
 
@@ -106,36 +115,55 @@ export default function UserManagementPage() {
     }
   };
 
-  // Reverted handleAddUserSubmit to a placeholder/simple Firestore add
   const handleAddUserSubmit = async (data: UserFormValues) => {
+    if (!authUser || authUser.email !== 'admin@servex.com') { // Simple check, adjust as needed
+        toast({ title: 'Authorization Failed', description: 'Only the main admin can perform this action.', variant: 'destructive' });
+        return;
+    }
     setIsSubmitting(true);
     try {
-      // Placeholder: Simple Firestore add (without Auth user creation)
-      // This is NOT a secure way to create users with passwords.
-      // For a real app, a secure backend function (like the Genkit flow previously) is needed.
-      const newUserDocData: Omit<User, 'id' | 'uid'> = {
+      // Step 1: Re-authenticate Admin
+      await reauthenticateCurrentUser(data.adminPassword);
+      toast({ title: 'Admin Re-authenticated', description: 'Proceeding with user creation.' });
+
+      // Step 2: Add user to Firestore
+      const newUserDocData: Partial<User> = { // Use Partial<User> and build up
         name: data.name,
         role: data.role,
-        email: data.email || undefined,
-        photoUrl: data.photoUrl || undefined,
       };
+      if (data.email) newUserDocData.email = data.email;
+      if (data.photoUrl) newUserDocData.photoUrl = data.photoUrl;
+      
       if (data.role === 'student') {
-        if (data.level) (newUserDocData as Partial<User>).level = data.level;
-        if (data.notes) (newUserDocData as Partial<User>).notes = data.notes;
+        if (data.level) newUserDocData.level = data.level;
+        if (data.notes) newUserDocData.notes = data.notes;
+        if (data.age !== undefined) newUserDocData.age = data.age;
+        if (data.gender) newUserDocData.gender = data.gender;
       }
 
-      await addDoc(collection(db, 'users'), newUserDocData);
+      const docRef = await addDoc(collection(db, 'users'), newUserDocData);
 
-      toast({ title: 'User Added (Firestore Only)', description: `${data.name} added to Firestore. No Auth account created.` });
+      toast({ 
+        title: 'User Added to Firestore', 
+        description: `${data.name} (ID: ${docRef.id}) added to Firestore. Note: No Firebase Auth account was created for this user.` 
+      });
       form.reset({
         name: '', email: '', role: 'student', photoUrl: '',
-        level: undefined, notes: '',
+        level: undefined, notes: '', age: undefined, gender: undefined, adminPassword: ''
       });
       setIsAddUserDialogOpen(false);
       await fetchUsers(); 
     } catch (error: any) {
-      console.error("Error adding user directly to Firestore:", error);
-      toast({ title: 'Add User Failed', description: 'Could not add the user to Firestore.', variant: 'destructive' });
+      console.error("Error in user creation process:", error);
+      let errorMessage = 'Failed to add user.';
+      if (error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
+        errorMessage = 'Admin re-authentication failed: Incorrect password.';
+      } else if (error.code === 'auth/too-many-requests') {
+        errorMessage = 'Admin re-authentication failed: Too many attempts. Try again later.';
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      toast({ title: 'Add User Failed', description: errorMessage, variant: 'destructive' });
     } finally {
       setIsSubmitting(false);
     }
@@ -179,21 +207,21 @@ export default function UserManagementPage() {
             if (!isOpen) {
               form.reset({
                   name: '', email: '', role: 'student', photoUrl: '',
-                  level: undefined, notes: '',
+                  level: undefined, notes: '', age: undefined, gender: undefined, adminPassword: ''
               });
             }
           }}>
             <DialogTrigger asChild>
-              <Button size="sm" className="gap-1.5 text-sm" onClick={() => form.reset({ role: 'student' })}>
+              <Button size="sm" className="gap-1.5 text-sm" onClick={() => form.reset({ role: 'student', adminPassword: '' })}>
                 <UserPlus className="size-3.5" />
                 Add User
               </Button>
             </DialogTrigger>
             <DialogContent className="sm:max-w-md">
               <DialogHeader>
-                <DialogTitle>Add New User</DialogTitle>
+                <DialogTitle>Add New User (Firestore Only)</DialogTitle>
                 <DialogDescription>
-                  Fill in the details for the new user. (Note: This currently only adds to Firestore).
+                  Fill in user details. Admin password required to authorize. This adds to Firestore only.
                 </DialogDescription>
               </DialogHeader>
               <Form {...form}>
@@ -239,20 +267,20 @@ export default function UserManagementPage() {
                       </FormItem>
                     )}
                   />
+                   <FormField
+                    control={form.control}
+                    name="photoUrl"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Photo URL (Optional)</FormLabel>
+                        <FormControl><Input type="url" placeholder="https://placehold.co/100x100.png" {...field} /></FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
 
                   {watchedRole === 'student' && (
                     <>
-                      <FormField
-                        control={form.control}
-                        name="photoUrl"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Photo URL (Optional)</FormLabel>
-                            <FormControl><Input type="url" placeholder="https://placehold.co/100x100.png" {...field} /></FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
                       <FormField
                         control={form.control}
                         name="level"
@@ -274,6 +302,35 @@ export default function UserManagementPage() {
                       />
                       <FormField
                         control={form.control}
+                        name="age"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Age (Optional)</FormLabel>
+                            <FormControl><Input type="number" placeholder="18" {...field} value={field.value ?? ''} /></FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={form.control}
+                        name="gender"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Gender (Optional)</FormLabel>
+                             <Select onValueChange={field.onChange} value={field.value} defaultValue={field.value}>
+                              <FormControl><SelectTrigger><SelectValue placeholder="Select gender" /></SelectTrigger></FormControl>
+                              <SelectContent>
+                                <SelectItem value="male">Male</SelectItem>
+                                <SelectItem value="female">Female</SelectItem>
+                                <SelectItem value="other">Other</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={form.control}
                         name="notes"
                         render={({ field }) => (
                           <FormItem>
@@ -286,11 +343,24 @@ export default function UserManagementPage() {
                     </>
                   )}
 
+                  <FormField
+                    control={form.control}
+                    name="adminPassword"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Admin's Current Password</FormLabel>
+                        <FormControl><Input type="password" placeholder="Enter your admin password" {...field} /></FormControl>
+                        <FormDescription>Your password is required to authorize this action.</FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
                   <DialogFooter>
                     <DialogClose asChild><Button type="button" variant="outline">Cancel</Button></DialogClose>
                     <Button type="submit" disabled={isSubmitting}>
                       {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                      Save User
+                      Add User Record
                     </Button>
                   </DialogFooter>
                 </form>
@@ -312,6 +382,8 @@ export default function UserManagementPage() {
               <TableHead>Name</TableHead>
               <TableHead>Email</TableHead>
               <TableHead>Role</TableHead>
+              <TableHead>Age</TableHead>
+              <TableHead>Gender</TableHead>
               <TableHead>Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -330,6 +402,8 @@ export default function UserManagementPage() {
                     {user.role.charAt(0).toUpperCase() + user.role.slice(1)}
                   </span>
                 </TableCell>
+                <TableCell>{user.role === 'student' && user.age ? user.age : 'N/A'}</TableCell>
+                <TableCell>{user.role === 'student' && user.gender ? user.gender.charAt(0).toUpperCase() + user.gender.slice(1) : 'N/A'}</TableCell>
                 <TableCell>
                   <Button variant="ghost" size="icon" className="mr-2" onClick={() => handleEditUser(user.id)}>
                     <Pencil className="h-4 w-4" />
@@ -344,7 +418,7 @@ export default function UserManagementPage() {
             )) : (
               !isLoading && (
                 <TableRow>
-                  <TableCell colSpan={4} className="text-center">No users found.</TableCell>
+                  <TableCell colSpan={6} className="text-center">No users found.</TableCell>
                 </TableRow>
               )
             )}
