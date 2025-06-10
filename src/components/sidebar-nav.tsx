@@ -21,6 +21,7 @@ import {
   Users,
   Settings,
   FolderKanban,
+  ClipboardCheck, // Added icon for student grades
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import type { User } from '@/types';
@@ -35,8 +36,9 @@ interface NavItem {
 const allNavItems: NavItem[] = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['admin', 'teacher', 'caja', 'student'] },
   { href: '/attendance-log', label: 'Log Attendance', icon: ClipboardEdit, roles: ['admin', 'teacher', 'caja'] },
-  { href: '/attendance-records', label: 'Records', icon: BookUser, roles: ['admin', 'teacher', 'caja', 'student'] }, // Students might see their own
-  { href: '/reports', label: 'Reports', icon: BarChart3, roles: ['admin', 'teacher', 'caja', 'student'] }, // Students might see their own
+  { href: '/attendance-records', label: 'Records', icon: BookUser, roles: ['admin', 'teacher', 'caja', 'student'] },
+  { href: '/reports', label: 'Reports', icon: BarChart3, roles: ['admin', 'teacher', 'caja', 'student'] },
+  { href: '/student-grades', label: 'Student Grades', icon: ClipboardCheck, roles: ['admin', 'teacher'] }, // New item
   { href: '/ai-analysis', label: 'AI Analysis', icon: Brain, roles: ['admin', 'teacher'] },
 ];
 

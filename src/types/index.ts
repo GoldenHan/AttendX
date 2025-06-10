@@ -4,14 +4,17 @@ export interface User {
   uid?: string; // Firebase Auth UID
   name: string;
   role: 'student' | 'teacher' | 'admin' | 'caja';
-  email?: string; // Now optional for all
-  phoneNumber?: string; // New optional field for phone number
-  photoUrl?: string; // Optional: URL to the student's photo
-  level?: 'Beginner' | 'Intermediate' | 'Advanced' | 'Other'; // Optional: Student's level
-  notes?: string; // Optional: General notes about the student
-  age?: number; // Optional: Student's age
-  gender?: 'male' | 'female' | 'other'; // Optional: Student's gender
-  preferredShift?: 'Saturday' | 'Sunday'; // Optional: Student's preferred shift
+  email?: string; 
+  phoneNumber?: string; 
+  photoUrl?: string; 
+  level?: 'Beginner' | 'Intermediate' | 'Advanced' | 'Other'; 
+  notes?: string; 
+  age?: number; 
+  gender?: 'male' | 'female' | 'other'; 
+  preferredShift?: 'Saturday' | 'Sunday'; 
+  partial1Grade?: number; // Optional: Grade for partial 1
+  partial2Grade?: number; // Optional: Grade for partial 2
+  partial3Grade?: number; // Optional: Grade for partial 3
 }
 
 export interface Session {
@@ -39,3 +42,4 @@ export interface Group {
   endDate?: string; // ISO Date string, optional
   studentIds: string[];
 }
+
