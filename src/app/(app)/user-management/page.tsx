@@ -1,7 +1,7 @@
 
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import {
   Table,
@@ -13,10 +13,10 @@ import {
 } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Loader2, Pencil, Trash2, UserPlus, FolderKanban, Briefcase } from 'lucide-react'; // Changed UsersIcon to Briefcase
-import type { User } from '@/types';
+import { Loader2, Pencil, Trash2, UserPlus, FolderKanban, Briefcase } from 'lucide-react';
+import type { User, Group } from '@/types';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, deleteDoc, doc, addDoc, updateDoc, query, where } from 'firebase/firestore';
+import { collection, getDocs, deleteDoc, doc, addDoc, updateDoc, query, where, writeBatch } from 'firebase/firestore';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -31,7 +31,6 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-// Textarea might not be needed for staff, but Form components are.
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -48,23 +47,25 @@ import { Label } from "@/components/ui/label";
 // Schema for staff add/edit
 const staffFormSchema = z.object({
   name: z.string().min(2, { message: "Name must be at least 2 characters." }),
-  email: z.string().email({ message: "Invalid email address." }), // Email is primary for staff
-  role: z.enum(['teacher', 'admin', 'caja'], { required_error: "Role is required." }), // Staff roles only
+  email: z.string().email({ message: "Invalid email address." }),
+  role: z.enum(['teacher', 'admin', 'caja'], { required_error: "Role is required." }),
   photoUrl: z.string().url({ message: "Please enter a valid URL for photo." }).optional().or(z.literal('')),
+  assignedGroupId: z.string().optional(), // ID of the group the teacher is assigned to
 });
 
 type StaffFormValues = z.infer<typeof staffFormSchema>;
 
-export default function StaffManagementPage() { // Renamed component
-  const [staffUsers, setStaffUsers] = useState<User[]>([]); // Renamed state
+export default function StaffManagementPage() {
+  const [staffUsers, setStaffUsers] = useState<User[]>([]);
+  const [allGroups, setAllGroups] = useState<Group[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   
-  const [isStaffFormDialogOpen, setIsStaffFormDialogOpen] = useState(false); // Renamed state
-  const [editingStaff, setEditingStaff] = useState<User | null>(null); // Renamed state
+  const [isStaffFormDialogOpen, setIsStaffFormDialogOpen] = useState(false);
+  const [editingStaff, setEditingStaff] = useState<User | null>(null);
 
-  const [isDeleteStaffDialogOpen, setIsDeleteStaffDialogOpen] = useState(false); // Renamed state
-  const [staffToDelete, setStaffToDelete] = useState<User | null>(null); // Renamed state
+  const [isDeleteStaffDialogOpen, setIsDeleteStaffDialogOpen] = useState(false);
+  const [staffToDelete, setStaffToDelete] = useState<User | null>(null);
   const [deleteAdminPassword, setDeleteAdminPassword] = useState('');
 
   const { toast } = useToast();
@@ -75,89 +76,129 @@ export default function StaffManagementPage() { // Renamed component
     defaultValues: {
       name: '',
       email: '',
-      role: 'teacher', // Default to teacher for staff
+      role: 'teacher',
       photoUrl: '',
+      assignedGroupId: '',
     },
   });
 
-  const fetchStaffUsers = async () => { // Renamed function
+  const fetchData = async () => { // Combined fetching for staff and groups
     setIsLoading(true);
     try {
       const staffRoles: User['role'][] = ['admin', 'teacher', 'caja'];
       const usersQuery = query(collection(db, 'users'), where('role', 'in', staffRoles));
       const usersSnapshot = await getDocs(usersQuery);
       setStaffUsers(usersSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as User)));
+
+      const groupsSnapshot = await getDocs(collection(db, 'groups'));
+      setAllGroups(groupsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as Group)));
+
     } catch (error) {
-      console.error("Error fetching staff users:", error);
-      toast({ title: 'Error fetching staff users', description: 'Could not load staff users from Firestore.', variant: 'destructive' });
+      console.error("Error fetching data:", error);
+      toast({ title: 'Error fetching data', description: 'Could not load staff users or groups.', variant: 'destructive' });
     } finally {
       setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchStaffUsers();
+    fetchData();
   }, []);
   
   const handleOpenAddDialog = () => {
     setEditingStaff(null);
     form.reset({
-      name: '', email: '', role: 'teacher', photoUrl: '',
+      name: '', email: '', role: 'teacher', photoUrl: '', assignedGroupId: '',
     });
     setIsStaffFormDialogOpen(true);
   };
   
   const handleOpenEditDialog = (staffToEdit: User) => {
     setEditingStaff(staffToEdit);
+    const currentGroupAssignment = allGroups.find(g => g.teacherId === staffToEdit.id);
     form.reset({
       name: staffToEdit.name,
       email: staffToEdit.email || '',
-      role: staffToEdit.role as 'teacher' | 'admin' | 'caja', // Cast to staff roles
+      role: staffToEdit.role as 'teacher' | 'admin' | 'caja',
       photoUrl: staffToEdit.photoUrl || '',
+      assignedGroupId: currentGroupAssignment ? currentGroupAssignment.id : '',
     });
     setIsStaffFormDialogOpen(true);
   };
 
   const handleStaffFormSubmit = async (data: StaffFormValues) => {
     setIsSubmitting(true);
+    console.log("Submitting staff form with data:", data);
     
-    const firestoreData: Partial<User> = {
+    const firestoreUserData: Partial<User> = {
       name: data.name,
       email: data.email,
       role: data.role,
       photoUrl: data.photoUrl || '',
     };
     
-    if (editingStaff?.uid) {
-      (firestoreData as User).uid = editingStaff.uid;
-    }
-    
-    // Clean undefined values before saving
-    const firestoreDataForSave = Object.fromEntries(
-      Object.entries(firestoreData).filter(([_, v]) => v !== undefined)
-    ) as Partial<User>;
-
-    console.log("Data being sent to Firestore for staff add/edit:", firestoreDataForSave);
+    let staffMemberId: string | undefined = editingStaff?.id;
 
     try {
-      if (editingStaff) {
+      if (editingStaff) { // Editing existing staff
         const staffRef = doc(db, 'users', editingStaff.id);
-        await updateDoc(staffRef, firestoreDataForSave);
+        await updateDoc(staffRef, firestoreUserData);
         toast({ title: 'Staff User Updated', description: `${data.name}'s record updated successfully.` });
-      } else {
-        const docRef = await addDoc(collection(db, 'users'), firestoreDataForSave);
+      } else { // Adding new staff
+        const docRef = await addDoc(collection(db, 'users'), firestoreUserData);
+        staffMemberId = docRef.id; // Get ID of the newly created staff member
         toast({ 
           title: 'Staff User Record Added', 
           description: `${data.name} added to Firestore. No Auth account created by default.` 
         });
       }
+
+      // Handle group assignment if the role is teacher
+      if (data.role === 'teacher' && staffMemberId) {
+        const newlySelectedGroupId = data.assignedGroupId || null;
+        const previouslyAssignedGroup = allGroups.find(g => g.teacherId === staffMemberId);
+        const previouslyAssignedGroupId = previouslyAssignedGroup ? previouslyAssignedGroup.id : null;
+
+        console.log("Teacher ID:", staffMemberId);
+        console.log("Newly Selected Group ID:", newlySelectedGroupId);
+        console.log("Previously Assigned Group ID:", previouslyAssignedGroupId);
+
+        if (newlySelectedGroupId !== previouslyAssignedGroupId) {
+          const batch = writeBatch(db);
+
+          // Unassign from the old group
+          if (previouslyAssignedGroupId) {
+            console.log(`Unassigning teacher ${staffMemberId} from old group ${previouslyAssignedGroupId}`);
+            const oldGroupRef = doc(db, 'groups', previouslyAssignedGroupId);
+            batch.update(oldGroupRef, { teacherId: null });
+          }
+
+          // Assign to the new group
+          if (newlySelectedGroupId) {
+            console.log(`Assigning teacher ${staffMemberId} to new group ${newlySelectedGroupId}`);
+            const newGroupRef = doc(db, 'groups', newlySelectedGroupId);
+            // Check if the new group is already assigned to another teacher.
+            // For simplicity, this implementation will overwrite. A more robust solution might warn the user.
+            const groupDoc = allGroups.find(g => g.id === newlySelectedGroupId);
+            if(groupDoc && groupDoc.teacherId && groupDoc.teacherId !== staffMemberId) {
+                 toast({
+                    title: 'Group Reassignment',
+                    description: `Group ${groupDoc.name} was previously assigned to another teacher. It's now assigned to ${data.name}.`,
+                    variant: 'default'
+                });
+            }
+            batch.update(newGroupRef, { teacherId: staffMemberId });
+          }
+          console.log("Committing batch for group assignment changes.");
+          await batch.commit();
+          toast({ title: 'Group Assignment Updated', description: `Teacher ${data.name}'s group assignment has been updated.` });
+        }
+      }
       
-      form.reset({
-        name: '', email: '', role: 'teacher', photoUrl: '',
-      });
+      form.reset({ name: '', email: '', role: 'teacher', photoUrl: '', assignedGroupId: '' });
       setEditingStaff(null);
       setIsStaffFormDialogOpen(false);
-      await fetchStaffUsers();
+      await fetchData(); // Refetch staff users and groups
     } catch (error: any) {
       toast({ 
         title: editingStaff ? 'Update Staff User Failed' : 'Add Staff User Failed', 
@@ -177,7 +218,8 @@ export default function StaffManagementPage() { // Renamed component
     setIsDeleteStaffDialogOpen(true);
   };
 
-  const confirmDeleteStaffUser = async () => { // Renamed function
+  const confirmDeleteStaffUser = async () => {
+    console.log("Attempting to delete staff user:", staffToDelete?.id);
     if (!staffToDelete) {
         toast({ title: 'Error', description: 'No staff user selected for deletion.', variant: 'destructive' });
         setIsSubmitting(false);
@@ -197,15 +239,30 @@ export default function StaffManagementPage() { // Renamed component
     setIsSubmitting(true);
     try {
       await reauthenticateCurrentUser(deleteAdminPassword);
-      // toast({ title: 'Admin Re-authenticated', description: 'Proceeding with deletion.' }); // Optional success toast
+      
+      const batch = writeBatch(db);
+      // Remove user from Firestore
+      const userRef = doc(db, 'users', staffToDelete.id);
+      batch.delete(userRef);
 
-      await deleteDoc(doc(db, 'users', staffToDelete.id));
-      toast({ title: 'Staff User Record Deleted', description: `${staffToDelete.name}'s Firestore record removed successfully. Auth account (if any) not affected.` });
+      // If the deleted user was a teacher, unassign them from any group
+      if (staffToDelete.role === 'teacher') {
+        const assignedGroup = allGroups.find(g => g.teacherId === staffToDelete.id);
+        if (assignedGroup) {
+          console.log(`Unassigning deleted teacher ${staffToDelete.id} from group ${assignedGroup.id}`);
+          const groupRef = doc(db, 'groups', assignedGroup.id);
+          batch.update(groupRef, { teacherId: null });
+        }
+      }
+      
+      await batch.commit();
+
+      toast({ title: 'Staff User Record Deleted', description: `${staffToDelete.name}'s Firestore record removed and unassigned from groups if applicable. Auth account (if any) not affected.` });
       
       setStaffToDelete(null);
       setDeleteAdminPassword('');
       setIsDeleteStaffDialogOpen(false);
-      await fetchStaffUsers();
+      await fetchData(); // Refetch staff users and groups
     } catch (error: any) {
       let errorMessage = 'Failed to delete staff user record.';
       const reAuthErrorCodes = ['auth/wrong-password', 'auth/invalid-credential', 'auth/user-mismatch'];
@@ -222,10 +279,9 @@ export default function StaffManagementPage() { // Renamed component
       toast({ title: 'Delete Failed', description: errorMessage, variant: 'destructive' });
       
        if (!reAuthErrorCodes.includes(error.code) && error.code !== 'auth/too-many-requests' && error.code !== 'auth/requires-recent-login') {
-         // Keep dialog open only for re-auth failures
-         setIsDeleteStaffDialogOpen(true); // Keep open to allow re-try if it was not an auth error
+         setIsDeleteStaffDialogOpen(true); 
       } else {
-         setIsDeleteStaffDialogOpen(false); // Close on other errors or if auth error type that requires logout
+         setIsDeleteStaffDialogOpen(false); 
          setDeleteAdminPassword('');
       }
     } finally {
@@ -233,7 +289,9 @@ export default function StaffManagementPage() { // Renamed component
     }
   };
   
-  if (isLoading && staffUsers.length === 0) {
+  const watchedRole = form.watch('role');
+
+  if (isLoading && staffUsers.length === 0 && allGroups.length === 0) {
     return (
       <Card>
         <CardHeader>
@@ -242,7 +300,7 @@ export default function StaffManagementPage() { // Renamed component
         </CardHeader>
         <CardContent className="flex items-center justify-center py-10">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
-           <p className="ml-2">Loading staff users...</p>
+           <p className="ml-2">Loading staff and groups...</p>
         </CardContent>
       </Card>
     );
@@ -254,7 +312,7 @@ export default function StaffManagementPage() { // Renamed component
       <CardHeader className="flex flex-row items-center justify-between">
         <div>
           <CardTitle className="flex items-center gap-2"><Briefcase className="h-6 w-6 text-primary" /> Staff Management</CardTitle>
-          <CardDescription>Manage teacher, admin, and cashier accounts (Firestore records only).</CardDescription>
+          <CardDescription>Manage teacher, admin, and cashier accounts. Assign teachers to groups.</CardDescription>
         </div>
         <div className="flex gap-2">
           <Button asChild size="sm" variant="outline" className="gap-1.5 text-sm">
@@ -268,7 +326,7 @@ export default function StaffManagementPage() { // Renamed component
             if (!isOpen) {
               setEditingStaff(null); 
               form.reset({
-                  name: '', email: '', role: 'teacher', photoUrl: '',
+                  name: '', email: '', role: 'teacher', photoUrl: '', assignedGroupId: '',
               });
             }
           }}>
@@ -286,7 +344,7 @@ export default function StaffManagementPage() { // Renamed component
                 </DialogDescription>
               </DialogHeader>
               <Form {...form}>
-                <form onSubmit={form.handleSubmit(handleStaffFormSubmit)} className="space-y-4 py-4">
+                <form onSubmit={form.handleSubmit(handleStaffFormSubmit)} className="space-y-4 py-4 max-h-[70vh] overflow-y-auto pr-2">
                   <FormField
                     control={form.control}
                     name="name"
@@ -327,6 +385,37 @@ export default function StaffManagementPage() { // Renamed component
                       </FormItem>
                     )}
                   />
+                  {watchedRole === 'teacher' && (
+                    <FormField
+                      control={form.control}
+                      name="assignedGroupId"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Assign to Group (Optional)</FormLabel>
+                          <Select
+                            onValueChange={field.onChange}
+                            value={field.value || ''}
+                            defaultValue={field.value || ""}
+                          >
+                            <FormControl>
+                              <SelectTrigger>
+                                <SelectValue placeholder="Select a group or unassign" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              <SelectItem value="">Unassigned</SelectItem>
+                              {allGroups.map((group) => (
+                                <SelectItem key={group.id} value={group.id}>
+                                  {group.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  )}
                    <FormField
                     control={form.control}
                     name="photoUrl"
@@ -338,7 +427,7 @@ export default function StaffManagementPage() { // Renamed component
                       </FormItem>
                     )}
                   />
-                  <DialogFooter>
+                  <DialogFooter className="pt-4">
                     <DialogClose asChild><Button type="button" variant="outline">Cancel</Button></DialogClose>
                     <Button type="submit" disabled={isSubmitting}>
                       {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
@@ -364,11 +453,14 @@ export default function StaffManagementPage() { // Renamed component
               <TableHead>Name</TableHead>
               <TableHead>Email</TableHead>
               <TableHead>Role</TableHead>
+              <TableHead>Assigned Group</TableHead>
               <TableHead>Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {staffUsers.length > 0 ? staffUsers.map((staff) => (
+            {staffUsers.length > 0 ? staffUsers.map((staff) => {
+              const assignedGroup = staff.role === 'teacher' ? allGroups.find(g => g.teacherId === staff.id) : null;
+              return (
               <TableRow key={staff.id}>
                 <TableCell>{staff.name}</TableCell>
                 <TableCell>{staff.email || 'N/A'}</TableCell>
@@ -377,11 +469,12 @@ export default function StaffManagementPage() { // Renamed component
                     staff.role === 'admin' ? 'bg-purple-500/20 text-purple-700 dark:text-purple-400' :
                     staff.role === 'teacher' ? 'bg-blue-500/20 text-blue-700 dark:text-blue-400' :
                     staff.role === 'caja' ? 'bg-orange-500/20 text-orange-700 dark:text-orange-400' :
-                    'bg-gray-500/20 text-gray-700 dark:text-gray-400' // Fallback, though should not happen
+                    'bg-gray-500/20 text-gray-700 dark:text-gray-400'
                   }`}>
                     {staff.role.charAt(0).toUpperCase() + staff.role.slice(1)}
                   </span>
                 </TableCell>
+                <TableCell>{assignedGroup ? assignedGroup.name : (staff.role === 'teacher' ? 'Unassigned' : 'N/A')}</TableCell>
                 <TableCell>
                   <Button variant="ghost" size="icon" className="mr-2" onClick={() => handleOpenEditDialog(staff)}>
                     <Pencil className="h-4 w-4" />
@@ -393,10 +486,10 @@ export default function StaffManagementPage() { // Renamed component
                   </Button>
                 </TableCell>
               </TableRow>
-            )) : (
+            )}) : (
               !isLoading && (
                 <TableRow>
-                  <TableCell colSpan={4} className="text-center">No staff users found.</TableCell>
+                  <TableCell colSpan={5} className="text-center">No staff users found.</TableCell>
                 </TableRow>
               )
             )}
@@ -423,7 +516,7 @@ export default function StaffManagementPage() { // Renamed component
                 <DialogDescription>
                     Are you sure you want to delete the Firestore record for {staffToDelete?.name}?
                     This action cannot be undone. Enter your admin password to confirm.
-                    Auth account (if any) will NOT be deleted.
+                    Auth account (if any) will NOT be deleted. The teacher will also be unassigned from any group.
                 </DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-4">
@@ -457,3 +550,4 @@ export default function StaffManagementPage() { // Renamed component
     </>
   );
 }
+
