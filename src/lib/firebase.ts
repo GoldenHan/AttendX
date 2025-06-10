@@ -12,10 +12,17 @@ const firebaseConfig = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 };
 
+// Log the config to help debug API key issues.
+// Check your server console for this output.
+console.log("Firebase Config being used:", firebaseConfig);
+
+if (!firebaseConfig.apiKey) {
+  console.error("Firebase API Key is missing. Make sure NEXT_PUBLIC_FIREBASE_API_KEY is set in your .env file and the server is restarted.");
+}
+
 // Initialize Firebase
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 const db = getFirestore(app);
 const auth = getAuth(app);
 
 export { app, db, auth };
-
