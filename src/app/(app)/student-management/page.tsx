@@ -14,7 +14,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Loader2, Pencil, Trash2, UserPlus, Search, GraduationCap, NotebookPen } from 'lucide-react';
-import type { User, Group } from '@/types';
+import type { User, Group, PartialScores, ActivityScore, ExamScore } from '@/types';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, deleteDoc, doc, updateDoc, query, where, addDoc, writeBatch } from 'firebase/firestore';
 import { useAuth } from '@/contexts/AuthContext';
@@ -24,7 +24,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogDescription as DialogPrimitiveDescription, // Aliased to avoid conflict if any
+  DialogDescription as DialogPrimitiveDescription,
   DialogFooter,
   DialogTrigger,
   DialogClose,
@@ -38,7 +38,7 @@ import * as z from 'zod';
 import {
   Form,
   FormControl,
-  FormDescription, // Ensure FormDescription is imported here
+  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -63,6 +63,11 @@ const studentFormSchema = z.object({
 });
 
 type StudentFormValues = z.infer<typeof studentFormSchema>;
+
+const defaultPartialScore = (): PartialScores => ({
+  accumulatedActivities: [],
+  exam: { name: null, score: null }
+});
 
 
 export default function StudentManagementPage() {
@@ -105,7 +110,9 @@ export default function StudentManagementPage() {
     try {
       const studentsQuery = query(collection(db, 'students')); 
       const studentsSnapshot = await getDocs(studentsQuery);
-      setAllStudents(studentsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data(), role: 'student' } as User)));
+      const fetchedStudents = studentsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data(), role: 'student' } as User));
+      setAllStudents(fetchedStudents);
+      console.log('[DEBUG] Fetched students from Firestore:', fetchedStudents); // DEBUG
 
       const groupsSnapshot = await getDocs(collection(db, 'groups'));
       setGroups(groupsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as Group)));
@@ -140,6 +147,7 @@ export default function StudentManagementPage() {
         (student.preferredShift && student.preferredShift.toLowerCase().includes(searchTerm.toLowerCase()))
       );
     }
+    console.log('[DEBUG] Filtered students (after group and search filters):', studentsToDisplay); // DEBUG
     return studentsToDisplay;
   }, [allStudents, groups, selectedGroupIdForFilter, searchTerm]);
   
@@ -206,20 +214,17 @@ export default function StudentManagementPage() {
       }
     } else { 
       try {
-        const newStudentDocData: User = {
+        const newStudentDocData: Omit<User, 'id'> & { grades: User['grades'] } = {
           ...finalStudentDetails,
-          id: '', // Firestore will generate this, but satisfy type for a moment
           role: 'student' as 'student',
           grades: { 
-            partial1: { accumulatedActivities: [], exam: { name: null, score: null } },
-            partial2: { accumulatedActivities: [], exam: { name: null, score: null } },
-            partial3: { accumulatedActivities: [], exam: { name: null, score: null } },
+            partial1: defaultPartialScore(),
+            partial2: defaultPartialScore(),
+            partial3: defaultPartialScore(),
           },
         };
-        // Firestore will generate the ID, so we don't pass `id` to addDoc
-        const { id: _id, ...dataToSave } = newStudentDocData;
-
-        await addDoc(collection(db, 'students'), dataToSave);
+        
+        await addDoc(collection(db, 'students'), newStudentDocData);
 
         toast({
           title: 'Student Record Added',
@@ -639,3 +644,4 @@ export default function StudentManagementPage() {
     </>
   );
 }
+
