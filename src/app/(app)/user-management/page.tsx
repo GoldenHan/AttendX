@@ -13,10 +13,10 @@ import {
 } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Loader2, Pencil, Trash2, UserPlus, FolderKanban, Users as UsersIcon } from 'lucide-react';
+import { Loader2, Pencil, Trash2, UserPlus, FolderKanban, Briefcase } from 'lucide-react'; // Changed UsersIcon to Briefcase
 import type { User } from '@/types';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, deleteDoc, doc, addDoc, updateDoc } from 'firebase/firestore';
+import { collection, getDocs, deleteDoc, doc, addDoc, updateDoc, query, where } from 'firebase/firestore';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -31,7 +31,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Textarea } from '@/components/ui/textarea';
+// Textarea might not be needed for staff, but Form components are.
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -42,183 +42,125 @@ import {
   FormItem,
   FormLabel,
   FormMessage,
-  FormDescription,
 } from '@/components/ui/form';
 import { Label } from "@/components/ui/label";
 
-// Schema for add/edit
-const userFormSchema = z.object({
+// Schema for staff add/edit
+const staffFormSchema = z.object({
   name: z.string().min(2, { message: "Name must be at least 2 characters." }),
-  email: z.string().email({ message: "Invalid email address." }).optional().or(z.literal('')),
-  phoneNumber: z.string().optional().or(z.literal('')), // Added phoneNumber
-  role: z.enum(['student', 'teacher', 'admin', 'caja'], { required_error: "Role is required." }),
+  email: z.string().email({ message: "Invalid email address." }), // Email is primary for staff
+  role: z.enum(['teacher', 'admin', 'caja'], { required_error: "Role is required." }), // Staff roles only
   photoUrl: z.string().url({ message: "Please enter a valid URL for photo." }).optional().or(z.literal('')),
-  level: z.enum(['Beginner', 'Intermediate', 'Advanced', 'Other']).optional(),
-  notes: z.string().optional(),
-  age: z.preprocess(
-    (val) => (val === "" || val === undefined || val === null ? undefined : Number(val)),
-    z.number({ invalid_type_error: "Age must be a number." }).positive("Age must be positive.").int("Age must be an integer.").optional()
-  ),
-  gender: z.enum(['male', 'female', 'other']).optional(),
-  preferredShift: z.enum(['Saturday', 'Sunday']).optional(),
 });
 
-type UserFormValues = z.infer<typeof userFormSchema>;
+type StaffFormValues = z.infer<typeof staffFormSchema>;
 
-export default function UserManagementPage() {
-  const [users, setUsers] = useState<User[]>([]);
+export default function StaffManagementPage() { // Renamed component
+  const [staffUsers, setStaffUsers] = useState<User[]>([]); // Renamed state
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   
-  const [isUserFormDialogOpen, setIsUserFormDialogOpen] = useState(false);
-  const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [isStaffFormDialogOpen, setIsStaffFormDialogOpen] = useState(false); // Renamed state
+  const [editingStaff, setEditingStaff] = useState<User | null>(null); // Renamed state
 
-  const [isDeleteUserDialogOpen, setIsDeleteUserDialogOpen] = useState(false);
-  const [userToDelete, setUserToDelete] = useState<User | null>(null);
-  const [deletePassword, setDeletePassword] = useState('');
+  const [isDeleteStaffDialogOpen, setIsDeleteStaffDialogOpen] = useState(false); // Renamed state
+  const [staffToDelete, setStaffToDelete] = useState<User | null>(null); // Renamed state
+  const [deleteAdminPassword, setDeleteAdminPassword] = useState('');
 
   const { toast } = useToast();
   const { reauthenticateCurrentUser, authUser } = useAuth();
 
-  const form = useForm<UserFormValues>({
-    resolver: zodResolver(userFormSchema),
+  const form = useForm<StaffFormValues>({
+    resolver: zodResolver(staffFormSchema),
     defaultValues: {
       name: '',
       email: '',
-      phoneNumber: '',
-      role: 'student',
+      role: 'teacher', // Default to teacher for staff
       photoUrl: '',
-      level: undefined,
-      notes: '',
-      age: undefined,
-      gender: undefined,
-      preferredShift: undefined,
     },
   });
 
-  const watchedRole = form.watch('role');
-
-  const fetchUsers = async () => {
+  const fetchStaffUsers = async () => { // Renamed function
     setIsLoading(true);
     try {
-      const usersSnapshot = await getDocs(collection(db, 'users'));
-      setUsers(usersSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as User)));
+      const staffRoles: User['role'][] = ['admin', 'teacher', 'caja'];
+      const usersQuery = query(collection(db, 'users'), where('role', 'in', staffRoles));
+      const usersSnapshot = await getDocs(usersQuery);
+      setStaffUsers(usersSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as User)));
     } catch (error) {
-      console.error("Error fetching users:", error);
-      toast({ title: 'Error fetching users', description: 'Could not load users from Firestore.', variant: 'destructive' });
+      console.error("Error fetching staff users:", error);
+      toast({ title: 'Error fetching staff users', description: 'Could not load staff users from Firestore.', variant: 'destructive' });
     } finally {
       setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchUsers();
+    fetchStaffUsers();
   }, []);
   
-  useEffect(() => {
-    if (watchedRole !== 'student') {
-      form.setValue('level', undefined);
-      form.setValue('notes', '');
-      form.setValue('age', undefined);
-      form.setValue('gender', undefined);
-      form.setValue('preferredShift', undefined);
-      form.setValue('phoneNumber', ''); // Clear phone number if not student
-    } else {
-      form.setValue('email', ''); // Clear email if student
-    }
-  }, [watchedRole, form]);
-
   const handleOpenAddDialog = () => {
-    setEditingUser(null);
+    setEditingStaff(null);
     form.reset({
-      name: '', email: '', phoneNumber: '', role: 'student', photoUrl: '',
-      level: undefined, notes: '', age: undefined, gender: undefined, preferredShift: undefined,
+      name: '', email: '', role: 'teacher', photoUrl: '',
     });
-    setIsUserFormDialogOpen(true);
+    setIsStaffFormDialogOpen(true);
   };
   
-  const handleOpenEditDialog = (userToEdit: User) => {
-    setEditingUser(userToEdit);
+  const handleOpenEditDialog = (staffToEdit: User) => {
+    setEditingStaff(staffToEdit);
     form.reset({
-      name: userToEdit.name,
-      email: userToEdit.role !== 'student' ? (userToEdit.email || '') : '',
-      phoneNumber: userToEdit.role === 'student' ? (userToEdit.phoneNumber || '') : '',
-      role: userToEdit.role,
-      photoUrl: userToEdit.photoUrl || '',
-      level: userToEdit.level || undefined,
-      notes: userToEdit.notes || '',
-      age: userToEdit.age ?? undefined,
-      gender: userToEdit.gender || undefined,
-      preferredShift: userToEdit.preferredShift || undefined,
+      name: staffToEdit.name,
+      email: staffToEdit.email || '',
+      role: staffToEdit.role as 'teacher' | 'admin' | 'caja', // Cast to staff roles
+      photoUrl: staffToEdit.photoUrl || '',
     });
-    setIsUserFormDialogOpen(true);
+    setIsStaffFormDialogOpen(true);
   };
 
-  const handleUserFormSubmit = async (data: UserFormValues) => {
+  const handleStaffFormSubmit = async (data: StaffFormValues) => {
     setIsSubmitting(true);
     
-    const baseFirestoreData: Partial<User> = {
+    const firestoreData: Partial<User> = {
       name: data.name,
+      email: data.email,
       role: data.role,
-      photoUrl: data.photoUrl || '', 
+      photoUrl: data.photoUrl || '',
     };
     
-    if (editingUser?.uid) {
-      (baseFirestoreData as User).uid = editingUser.uid;
+    if (editingStaff?.uid) {
+      (firestoreData as User).uid = editingStaff.uid;
     }
+    
+    // Clean undefined values before saving
+    const firestoreDataForSave = Object.fromEntries(
+      Object.entries(firestoreData).filter(([_, v]) => v !== undefined)
+    ) as Partial<User>;
 
-    if (data.role === 'student') {
-      baseFirestoreData.phoneNumber = data.phoneNumber || '';
-      baseFirestoreData.email = ''; // Ensure email is empty for students
-      baseFirestoreData.level = data.level;
-      baseFirestoreData.notes = data.notes || '';
-      baseFirestoreData.age = data.age;
-      baseFirestoreData.gender = data.gender;
-      baseFirestoreData.preferredShift = data.preferredShift;
-    } else { 
-      baseFirestoreData.email = data.email || '';
-      baseFirestoreData.phoneNumber = ''; // Ensure phone number is empty for non-students
-      baseFirestoreData.level = undefined;
-      baseFirestoreData.notes = undefined;
-      baseFirestoreData.age = undefined;
-      baseFirestoreData.gender = undefined;
-      baseFirestoreData.preferredShift = undefined;
-    }
-        
-    const firestoreDataForSave = Object.entries(baseFirestoreData).reduce((acc, [key, value]) => {
-      if (value !== undefined) {
-        // @ts-ignore
-        acc[key] = value;
-      }
-      return acc;
-    }, {} as Partial<User>);
-
-    console.log("Data being sent to Firestore for add/edit:", firestoreDataForSave);
+    console.log("Data being sent to Firestore for staff add/edit:", firestoreDataForSave);
 
     try {
-      if (editingUser) {
-        const userRef = doc(db, 'users', editingUser.id);
-        await updateDoc(userRef, firestoreDataForSave);
-        toast({ title: 'User Updated', description: `${data.name}'s record updated successfully.` });
+      if (editingStaff) {
+        const staffRef = doc(db, 'users', editingStaff.id);
+        await updateDoc(staffRef, firestoreDataForSave);
+        toast({ title: 'Staff User Updated', description: `${data.name}'s record updated successfully.` });
       } else {
-        // @ts-ignore
         const docRef = await addDoc(collection(db, 'users'), firestoreDataForSave);
         toast({ 
-          title: 'User Record Added', 
-          description: `${data.name} added to Firestore. No Auth account created.` 
+          title: 'Staff User Record Added', 
+          description: `${data.name} added to Firestore. No Auth account created by default.` 
         });
       }
       
       form.reset({
-        name: '', email: '', phoneNumber: '', role: 'student', photoUrl: '',
-        level: undefined, notes: '', age: undefined, gender: undefined, preferredShift: undefined,
+        name: '', email: '', role: 'teacher', photoUrl: '',
       });
-      setEditingUser(null);
-      setIsUserFormDialogOpen(false);
-      await fetchUsers();
+      setEditingStaff(null);
+      setIsStaffFormDialogOpen(false);
+      await fetchStaffUsers();
     } catch (error: any) {
       toast({ 
-        title: editingUser ? 'Update User Failed' : 'Add User Failed', 
+        title: editingStaff ? 'Update Staff User Failed' : 'Add Staff User Failed', 
         description: `An error occurred: ${error.message || 'Please try again.'}`, 
         variant: 'destructive' 
       });
@@ -229,14 +171,19 @@ export default function UserManagementPage() {
     }
   };
 
-  const handleOpenDeleteDialog = (user: User) => {
-    setUserToDelete(user);
-    setDeletePassword(''); 
-    setIsDeleteUserDialogOpen(true);
+  const handleOpenDeleteDialog = (staffMember: User) => {
+    setStaffToDelete(staffMember);
+    setDeleteAdminPassword(''); 
+    setIsDeleteStaffDialogOpen(true);
   };
 
-  const confirmDeleteUser = async () => {
-    if (!userToDelete || !deletePassword) {
+  const confirmDeleteStaffUser = async () => { // Renamed function
+    if (!staffToDelete) {
+        toast({ title: 'Error', description: 'No staff user selected for deletion.', variant: 'destructive' });
+        setIsSubmitting(false);
+        return;
+    }
+     if (!deleteAdminPassword) {
       toast({ title: 'Input Required', description: 'Admin password is required to delete.', variant: 'destructive' });
       setIsSubmitting(false); 
       return;
@@ -249,18 +196,18 @@ export default function UserManagementPage() {
 
     setIsSubmitting(true);
     try {
-      await reauthenticateCurrentUser(deletePassword);
-      toast({ title: 'Admin Re-authenticated', description: 'Proceeding with deletion.' });
+      await reauthenticateCurrentUser(deleteAdminPassword);
+      // toast({ title: 'Admin Re-authenticated', description: 'Proceeding with deletion.' }); // Optional success toast
 
-      await deleteDoc(doc(db, 'users', userToDelete.id));
-      toast({ title: 'User Record Deleted', description: `${userToDelete.name}'s Firestore record removed successfully. Auth account (if any) not affected.` });
+      await deleteDoc(doc(db, 'users', staffToDelete.id));
+      toast({ title: 'Staff User Record Deleted', description: `${staffToDelete.name}'s Firestore record removed successfully. Auth account (if any) not affected.` });
       
-      setUserToDelete(null);
-      setDeletePassword('');
-      setIsDeleteUserDialogOpen(false);
-      await fetchUsers();
+      setStaffToDelete(null);
+      setDeleteAdminPassword('');
+      setIsDeleteStaffDialogOpen(false);
+      await fetchStaffUsers();
     } catch (error: any) {
-      let errorMessage = 'Failed to delete user record.';
+      let errorMessage = 'Failed to delete staff user record.';
       const reAuthErrorCodes = ['auth/wrong-password', 'auth/invalid-credential', 'auth/user-mismatch'];
       
       if (reAuthErrorCodes.includes(error.code)) {
@@ -274,25 +221,28 @@ export default function UserManagementPage() {
       }
       toast({ title: 'Delete Failed', description: errorMessage, variant: 'destructive' });
       
-      if (!reAuthErrorCodes.includes(error.code) && error.code !== 'auth/too-many-requests' && error.code !== 'auth/requires-recent-login') {
-         setIsDeleteUserDialogOpen(false); 
-         setDeletePassword(''); 
+       if (!reAuthErrorCodes.includes(error.code) && error.code !== 'auth/too-many-requests' && error.code !== 'auth/requires-recent-login') {
+         // Keep dialog open only for re-auth failures
+         setIsDeleteStaffDialogOpen(true); // Keep open to allow re-try if it was not an auth error
+      } else {
+         setIsDeleteStaffDialogOpen(false); // Close on other errors or if auth error type that requires logout
+         setDeleteAdminPassword('');
       }
     } finally {
       setIsSubmitting(false);
     }
   };
   
-  if (isLoading && users.length === 0) {
+  if (isLoading && staffUsers.length === 0) {
     return (
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2"><UsersIcon className="h-6 w-6 text-primary" /> User Management</CardTitle>
-          <CardDescription>Manage student, teacher, and administrator accounts.</CardDescription>
+          <CardTitle className="flex items-center gap-2"><Briefcase className="h-6 w-6 text-primary" /> Staff Management</CardTitle>
+          <CardDescription>Manage teacher, administrator, and cashier accounts.</CardDescription>
         </CardHeader>
         <CardContent className="flex items-center justify-center py-10">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
-           <p className="ml-2">Loading users...</p>
+           <p className="ml-2">Loading staff users...</p>
         </CardContent>
       </Card>
     );
@@ -303,8 +253,8 @@ export default function UserManagementPage() {
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
         <div>
-          <CardTitle className="flex items-center gap-2"><UsersIcon className="h-6 w-6 text-primary" /> User Management</CardTitle>
-          <CardDescription>Manage student, teacher, and administrator accounts (Firestore records only).</CardDescription>
+          <CardTitle className="flex items-center gap-2"><Briefcase className="h-6 w-6 text-primary" /> Staff Management</CardTitle>
+          <CardDescription>Manage teacher, admin, and cashier accounts (Firestore records only).</CardDescription>
         </div>
         <div className="flex gap-2">
           <Button asChild size="sm" variant="outline" className="gap-1.5 text-sm">
@@ -313,38 +263,48 @@ export default function UserManagementPage() {
               Manage Groups
             </Link>
           </Button>
-          <Dialog open={isUserFormDialogOpen} onOpenChange={(isOpen) => {
-            setIsUserFormDialogOpen(isOpen);
+          <Dialog open={isStaffFormDialogOpen} onOpenChange={(isOpen) => {
+            setIsStaffFormDialogOpen(isOpen);
             if (!isOpen) {
-              setEditingUser(null); 
+              setEditingStaff(null); 
               form.reset({
-                  name: '', email: '', phoneNumber: '', role: 'student', photoUrl: '',
-                  level: undefined, notes: '', age: undefined, gender: undefined, preferredShift: undefined,
+                  name: '', email: '', role: 'teacher', photoUrl: '',
               });
             }
           }}>
             <DialogTrigger asChild>
               <Button size="sm" className="gap-1.5 text-sm" onClick={handleOpenAddDialog}>
                 <UserPlus className="size-3.5" />
-                Add User Record
+                Add Staff Record
               </Button>
             </DialogTrigger>
             <DialogContent className="sm:max-w-md">
               <DialogHeader>
-                <DialogTitle>{editingUser ? 'Edit User Record' : 'Add New User Record (Firestore Only)'}</DialogTitle>
+                <DialogTitle>{editingStaff ? 'Edit Staff Record' : 'Add New Staff Record'}</DialogTitle>
                 <DialogDescription>
-                  {editingUser ? 'Update user details in Firestore.' : 'Fill in user details to add to Firestore. No Auth account will be created.'}
+                  {editingStaff ? 'Update staff details in Firestore.' : 'Fill in staff details to add to Firestore.'}
                 </DialogDescription>
               </DialogHeader>
               <Form {...form}>
-                <form onSubmit={form.handleSubmit(handleUserFormSubmit)} className="space-y-4 py-4">
+                <form onSubmit={form.handleSubmit(handleStaffFormSubmit)} className="space-y-4 py-4">
                   <FormField
                     control={form.control}
                     name="name"
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Full Name</FormLabel>
-                        <FormControl><Input placeholder="John Doe" {...field} /></FormControl>
+                        <FormControl><Input placeholder="Jane Doe" {...field} /></FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="email"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Email</FormLabel>
+                        <FormControl><Input type="email" placeholder="jane.doe@example.com" {...field} /></FormControl>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -358,7 +318,6 @@ export default function UserManagementPage() {
                         <Select onValueChange={field.onChange} value={field.value} defaultValue={field.value}>
                           <FormControl><SelectTrigger><SelectValue placeholder="Select a role" /></SelectTrigger></FormControl>
                           <SelectContent>
-                            <SelectItem value="student">Student</SelectItem>
                             <SelectItem value="teacher">Teacher</SelectItem>
                             <SelectItem value="admin">Admin</SelectItem>
                             <SelectItem value="caja">Caja</SelectItem>
@@ -368,33 +327,6 @@ export default function UserManagementPage() {
                       </FormItem>
                     )}
                   />
-
-                  {watchedRole === 'student' ? (
-                    <FormField
-                      control={form.control}
-                      name="phoneNumber"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Phone Number (Optional)</FormLabel>
-                          <FormControl><Input type="tel" placeholder="e.g., 123-456-7890" {...field} /></FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                  ) : (
-                    <FormField
-                      control={form.control}
-                      name="email"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Email (Optional)</FormLabel>
-                          <FormControl><Input type="email" placeholder="john.doe@example.com" {...field} /></FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                  )}
-
                    <FormField
                     control={form.control}
                     name="photoUrl"
@@ -406,92 +338,11 @@ export default function UserManagementPage() {
                       </FormItem>
                     )}
                   />
-
-                  {watchedRole === 'student' && (
-                    <>
-                      <FormField
-                        control={form.control}
-                        name="level"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Level (Optional)</FormLabel>
-                            <Select onValueChange={field.onChange} value={field.value || undefined} defaultValue={field.value}>
-                              <FormControl><SelectTrigger><SelectValue placeholder="Select student's level" /></SelectTrigger></FormControl>
-                              <SelectContent>
-                                <SelectItem value="Beginner">Beginner</SelectItem>
-                                <SelectItem value="Intermediate">Intermediate</SelectItem>
-                                <SelectItem value="Advanced">Advanced</SelectItem>
-                                <SelectItem value="Other">Other</SelectItem>
-                              </SelectContent>
-                            </Select>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      <FormField
-                        control={form.control}
-                        name="age"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Age (Optional)</FormLabel>
-                            <FormControl><Input type="number" placeholder="18" {...field} value={field.value ?? ''} onChange={e => field.onChange(e.target.value === '' ? undefined : Number(e.target.value))} /></FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      <FormField
-                        control={form.control}
-                        name="gender"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Gender (Optional)</FormLabel>
-                             <Select onValueChange={field.onChange} value={field.value || undefined} defaultValue={field.value}>
-                              <FormControl><SelectTrigger><SelectValue placeholder="Select gender" /></SelectTrigger></FormControl>
-                              <SelectContent>
-                                <SelectItem value="male">Male</SelectItem>
-                                <SelectItem value="female">Female</SelectItem>
-                                <SelectItem value="other">Other</SelectItem>
-                              </SelectContent>
-                            </Select>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      <FormField
-                        control={form.control}
-                        name="preferredShift"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Preferred Shift (Optional)</FormLabel>
-                             <Select onValueChange={field.onChange} value={field.value || undefined} defaultValue={field.value}>
-                              <FormControl><SelectTrigger><SelectValue placeholder="Select preferred shift" /></SelectTrigger></FormControl>
-                              <SelectContent>
-                                <SelectItem value="Saturday">Saturday</SelectItem>
-                                <SelectItem value="Sunday">Sunday</SelectItem>
-                              </SelectContent>
-                            </Select>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      <FormField
-                        control={form.control}
-                        name="notes"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Notes (Optional)</FormLabel>
-                            <FormControl><Textarea placeholder="Any relevant notes about the student..." {...field} /></FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                    </>
-                  )}
                   <DialogFooter>
                     <DialogClose asChild><Button type="button" variant="outline">Cancel</Button></DialogClose>
                     <Button type="submit" disabled={isSubmitting}>
                       {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                      {editingUser ? 'Save Changes' : 'Add User Record'}
+                      {editingStaff ? 'Save Changes' : 'Add Staff Record'}
                     </Button>
                   </DialogFooter>
                 </form>
@@ -501,48 +352,42 @@ export default function UserManagementPage() {
         </div>
       </CardHeader>
       <CardContent>
-        {isLoading && users.length > 0 && (
+        {isLoading && staffUsers.length > 0 && (
              <div className="flex items-center justify-center py-4">
                 <Loader2 className="h-6 w-6 animate-spin text-primary" />
-                <p className="ml-2 text-sm text-muted-foreground">Refreshing users...</p>
+                <p className="ml-2 text-sm text-muted-foreground">Refreshing staff users...</p>
              </div>
         )}
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead>Name</TableHead>
-              <TableHead>Contact</TableHead>
+              <TableHead>Email</TableHead>
               <TableHead>Role</TableHead>
-              <TableHead>Age</TableHead>
-              <TableHead>Gender</TableHead>
-              <TableHead>Shift</TableHead>
               <TableHead>Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {users.length > 0 ? users.map((user) => (
-              <TableRow key={user.id}>
-                <TableCell>{user.name}</TableCell>
-                <TableCell>{user.role === 'student' ? (user.phoneNumber || 'N/A') : (user.email || 'N/A')}</TableCell>
+            {staffUsers.length > 0 ? staffUsers.map((staff) => (
+              <TableRow key={staff.id}>
+                <TableCell>{staff.name}</TableCell>
+                <TableCell>{staff.email || 'N/A'}</TableCell>
                 <TableCell>
                   <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
-                    user.role === 'admin' ? 'bg-purple-500/20 text-purple-700 dark:text-purple-400' :
-                    user.role === 'teacher' ? 'bg-blue-500/20 text-blue-700 dark:text-blue-400' :
-                    user.role === 'caja' ? 'bg-orange-500/20 text-orange-700 dark:text-orange-400' :
-                    'bg-green-500/20 text-green-700 dark:text-green-400'
+                    staff.role === 'admin' ? 'bg-purple-500/20 text-purple-700 dark:text-purple-400' :
+                    staff.role === 'teacher' ? 'bg-blue-500/20 text-blue-700 dark:text-blue-400' :
+                    staff.role === 'caja' ? 'bg-orange-500/20 text-orange-700 dark:text-orange-400' :
+                    'bg-gray-500/20 text-gray-700 dark:text-gray-400' // Fallback, though should not happen
                   }`}>
-                    {user.role.charAt(0).toUpperCase() + user.role.slice(1)}
+                    {staff.role.charAt(0).toUpperCase() + staff.role.slice(1)}
                   </span>
                 </TableCell>
-                <TableCell>{user.role === 'student' && user.age ? user.age : 'N/A'}</TableCell>
-                <TableCell>{user.role === 'student' && user.gender ? user.gender.charAt(0).toUpperCase() + user.gender.slice(1) : 'N/A'}</TableCell>
-                <TableCell>{user.role === 'student' && user.preferredShift ? user.preferredShift : 'N/A'}</TableCell>
                 <TableCell>
-                  <Button variant="ghost" size="icon" className="mr-2" onClick={() => handleOpenEditDialog(user)}>
+                  <Button variant="ghost" size="icon" className="mr-2" onClick={() => handleOpenEditDialog(staff)}>
                     <Pencil className="h-4 w-4" />
                     <span className="sr-only">Edit</span>
                   </Button>
-                  <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => handleOpenDeleteDialog(user)}>
+                  <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => handleOpenDeleteDialog(staff)}>
                     <Trash2 className="h-4 w-4" />
                     <span className="sr-only">Delete</span>
                   </Button>
@@ -551,33 +396,32 @@ export default function UserManagementPage() {
             )) : (
               !isLoading && (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center">No users found.</TableCell>
+                  <TableCell colSpan={4} className="text-center">No staff users found.</TableCell>
                 </TableRow>
               )
             )}
           </TableBody>
         </Table>
-         {isLoading && users.length === 0 && (
+         {isLoading && staffUsers.length === 0 && (
              <div className="text-center py-4 text-sm text-muted-foreground">
-                Loading initial user data...
+                Loading initial staff user data...
              </div>
          )}
       </CardContent>
     </Card>
 
-    {/* Delete User Confirmation Dialog */}
-    <Dialog open={isDeleteUserDialogOpen} onOpenChange={(isOpen) => {
-        setIsDeleteUserDialogOpen(isOpen);
+    <Dialog open={isDeleteStaffDialogOpen} onOpenChange={(isOpen) => {
+        setIsDeleteStaffDialogOpen(isOpen);
         if (!isOpen) {
-            setUserToDelete(null);
-            setDeletePassword('');
+            setStaffToDelete(null);
+            setDeleteAdminPassword('');
         }
     }}>
         <DialogContent className="sm:max-w-md">
             <DialogHeader>
-                <DialogTitle>Delete User Record</DialogTitle>
+                <DialogTitle>Delete Staff User Record</DialogTitle>
                 <DialogDescription>
-                    Are you sure you want to delete the Firestore record for {userToDelete?.name}?
+                    Are you sure you want to delete the Firestore record for {staffToDelete?.name}?
                     This action cannot be undone. Enter your admin password to confirm.
                     Auth account (if any) will NOT be deleted.
                 </DialogDescription>
@@ -589,8 +433,8 @@ export default function UserManagementPage() {
                         id="deleteAdminPassword"
                         type="password"
                         placeholder="Enter your admin password"
-                        value={deletePassword}
-                        onChange={(e) => setDeletePassword(e.target.value)}
+                        value={deleteAdminPassword}
+                        onChange={(e) => setDeleteAdminPassword(e.target.value)}
                     />
                  </div>
             </div>
@@ -601,11 +445,11 @@ export default function UserManagementPage() {
                 <Button 
                     type="button" 
                     variant="destructive" 
-                    onClick={confirmDeleteUser} 
-                    disabled={isSubmitting || !deletePassword.trim()}
+                    onClick={confirmDeleteStaffUser} 
+                    disabled={isSubmitting || !deleteAdminPassword.trim()}
                 >
                     {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    Delete User Record
+                    Delete Staff Record
                 </Button>
             </DialogFooter>
         </DialogContent>

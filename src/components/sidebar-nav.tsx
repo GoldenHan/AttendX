@@ -1,4 +1,3 @@
-
 'use client';
 
 import Link from 'next/link';
@@ -21,7 +20,9 @@ import {
   Users,
   Settings,
   FolderKanban,
-  ClipboardCheck, // Added icon for student grades
+  ClipboardCheck,
+  Briefcase, // For Staff Management
+  GraduationCap, // For Student Management
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import type { User } from '@/types';
@@ -30,21 +31,25 @@ interface NavItem {
   href: string;
   label: string;
   icon: React.ElementType;
-  roles?: User['role'][]; // Roles that can see this item. If undefined, all authenticated users can see.
+  roles?: User['role'][]; 
 }
 
-const allNavItems: NavItem[] = [
+const generalNavItems: NavItem[] = [ // Renamed from allNavItems
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['admin', 'teacher', 'caja', 'student'] },
   { href: '/attendance-log', label: 'Log Attendance', icon: ClipboardEdit, roles: ['admin', 'teacher', 'caja'] },
   { href: '/attendance-records', label: 'Records', icon: BookUser, roles: ['admin', 'teacher', 'caja', 'student'] },
   { href: '/reports', label: 'Reports', icon: BarChart3, roles: ['admin', 'teacher', 'caja', 'student'] },
-  { href: '/student-grades', label: 'Student Grades', icon: ClipboardCheck, roles: ['admin', 'teacher'] }, // New item
+  { href: '/student-grades', label: 'Student Grades', icon: ClipboardCheck, roles: ['admin', 'teacher'] }, 
   { href: '/ai-analysis', label: 'AI Analysis', icon: Brain, roles: ['admin', 'teacher'] },
 ];
 
-const adminNavItems: NavItem[] = [
-   { href: '/user-management', label: 'Users', icon: Users, roles: ['admin'] },
+const managementNavItems: NavItem[] = [ // New category for User/Student/Group Management
+   { href: '/student-management', label: 'Student Management', icon: GraduationCap, roles: ['admin', 'teacher'] },
    { href: '/group-management', label: 'Groups', icon: FolderKanban, roles: ['admin', 'teacher'] },
+];
+
+const adminNavItems: NavItem[] = [
+   { href: '/user-management', label: 'Staff Management', icon: Briefcase, roles: ['admin'] }, // Changed label and icon
    { href: '/app-settings', label: 'Settings', icon: Settings, roles: ['admin'] },
    { href: '/qr-login-setup', label: 'QR Session Login', icon: QrCode, roles: ['admin', 'teacher', 'caja'] },
 ];
@@ -56,33 +61,32 @@ export function SidebarNav() {
   const userRole = firestoreUser?.role;
 
   if (loading && !userRole) {
-    // Optionally show skeletons or a compact loader here
     return null; 
   }
 
   const filterNavItems = (items: NavItem[]): NavItem[] => {
-    if (!userRole) return []; // Or some default for non-logged-in/loading states
+    if (!userRole) return []; 
     return items.filter(item => {
-      if (!item.roles) return true; // No specific roles defined, show to all authenticated
+      if (!item.roles) return true; 
       return item.roles.includes(userRole);
     });
   };
 
-  const visibleNavItems = filterNavItems(allNavItems);
+  const visibleGeneralNavItems = filterNavItems(generalNavItems);
+  const visibleManagementNavItems = filterNavItems(managementNavItems);
   const visibleAdminNavItems = filterNavItems(adminNavItems);
 
   const renderNavItem = (item: NavItem) => (
     <SidebarMenuItem key={item.href}>
       <Link href={item.href}>
         <SidebarMenuButton
-          // variant prop is not directly used here for custom hover, styling is via cn
           className={cn(
             'w-full justify-start',
             pathname === item.href
-              ? 'bg-sidebar-accent text-sidebar-accent-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground' // Active item
-              : 'text-sidebar-foreground hover:bg-muted/30 hover:text-sidebar-foreground' // Non-active item with new hover
+              ? 'bg-sidebar-accent text-sidebar-accent-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground' 
+              : 'text-sidebar-foreground hover:bg-muted/30 hover:text-sidebar-foreground' 
           )}
-          isActive={pathname === item.href} // isActive is passed for data-active attribute
+          isActive={pathname === item.href} 
           tooltip={{ children: item.label }}
         >
           <item.icon className="mr-2 h-4 w-4" />
@@ -95,13 +99,20 @@ export function SidebarNav() {
   return (
     <div className="flex-1 overflow-auto">
       <SidebarMenu>
-        {visibleNavItems.length > 0 && (
+        {visibleGeneralNavItems.length > 0 && (
           <SidebarGroup>
             <SidebarGroupLabel>Menu</SidebarGroupLabel>
-            {visibleNavItems.map(renderNavItem)}
+            {visibleGeneralNavItems.map(renderNavItem)}
           </SidebarGroup>
         )}
         
+        {visibleManagementNavItems.length > 0 && (
+          <SidebarGroup>
+            <SidebarGroupLabel>Management</SidebarGroupLabel>
+            {visibleManagementNavItems.map(renderNavItem)}
+          </SidebarGroup>
+        )}
+
         {visibleAdminNavItems.length > 0 && (
           <SidebarGroup>
             <SidebarGroupLabel>Administration</SidebarGroupLabel>
