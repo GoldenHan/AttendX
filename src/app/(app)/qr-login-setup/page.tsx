@@ -11,16 +11,16 @@ import { QrCode, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { db } from '@/lib/firebase';
 import { collection, getDocs } from 'firebase/firestore';
-import type { ClassInfo, Session } from '@/types';
+import type { Group, Session } from '@/types'; // Changed ClassInfo to Group
 
 export default function QrLoginSetupPage() {
   const router = useRouter();
   const { toast } = useToast();
-  const [selectedClassId, setSelectedClassId] = useState<string>('');
+  const [selectedGroupId, setSelectedGroupId] = useState<string>(''); // Renamed selectedClassId to selectedGroupId
   const [selectedSessionId, setSelectedSessionId] = useState<string>('');
   const [generatedLink, setGeneratedLink] = useState<string>('');
 
-  const [classes, setClasses] = useState<ClassInfo[]>([]);
+  const [groups, setGroups] = useState<Group[]>([]); // Renamed classes to groups, ClassInfo to Group
   const [sessions, setSessions] = useState<Session[]>([]);
   const [isLoadingData, setIsLoadingData] = useState(true);
 
@@ -28,32 +28,34 @@ export default function QrLoginSetupPage() {
     const fetchData = async () => {
       setIsLoadingData(true);
       try {
-        const classesSnapshot = await getDocs(collection(db, 'classes'));
-        setClasses(classesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ClassInfo)));
+        const groupsSnapshot = await getDocs(collection(db, 'groups')); // Fetch from 'groups' collection
+        setGroups(groupsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Group))); // Use Group type
 
         const sessionsSnapshot = await getDocs(collection(db, 'sessions'));
         setSessions(sessionsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Session)));
       } catch (error) {
         console.error("Error fetching data for QR setup:", error);
-        toast({ title: 'Error fetching data', description: 'Could not load classes or sessions.', variant: 'destructive' });
+        toast({ title: 'Error fetching data', description: 'Could not load groups or sessions.', variant: 'destructive' });
       }
       setIsLoadingData(false);
     };
     fetchData();
   }, [toast]);
 
-  const availableSessions = selectedClassId ? sessions.filter(s => s.classId === selectedClassId) : [];
+  // Session.classId now refers to a Group.id
+  const availableSessions = selectedGroupId ? sessions.filter(s => s.classId === selectedGroupId) : [];
 
   const handleGenerateLink = () => {
     if (!selectedSessionId) {
       toast({
         title: 'Error',
-        description: 'Please select a class and a session.',
+        description: 'Please select a group and a session.', // Updated message
         variant: 'destructive',
       });
       return;
     }
     // Generate link relative to current origin
+    // The attendance-log page should be able to handle a session_id parameter
     const link = `/attendance-log?session_id=${selectedSessionId}`;
     setGeneratedLink(link);
     toast({
@@ -93,35 +95,35 @@ export default function QrLoginSetupPage() {
           QR Code Session Login Setup
         </CardTitle>
         <CardDescription>
-          Select a class and session to simulate generating a QR code link for attendance logging.
+          Select a group and session to simulate generating a QR code link for attendance logging.
           In a real application, a QR code image would be generated for this link.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
         <div className="space-y-2">
-          <Label htmlFor="classSelect">Select Class</Label>
+          <Label htmlFor="groupSelect">Select Group</Label> {/* Renamed classSelect to groupSelect */}
           <Select
-            value={selectedClassId}
+            value={selectedGroupId}
             onValueChange={(value) => {
-              setSelectedClassId(value);
+              setSelectedGroupId(value);
               setSelectedSessionId(''); 
               setGeneratedLink('');
             }}
           >
-            <SelectTrigger id="classSelect">
-              <SelectValue placeholder="Select a class" />
+            <SelectTrigger id="groupSelect">
+              <SelectValue placeholder="Select a group" />
             </SelectTrigger>
             <SelectContent>
-              {classes.map((c) => (
-                <SelectItem key={c.id} value={c.id}>
-                  {c.name}
+              {groups.map((g) => ( // Iterate over groups
+                <SelectItem key={g.id} value={g.id}>
+                  {g.name}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
         </div>
 
-        {selectedClassId && (
+        {selectedGroupId && (
           <div className="space-y-2">
             <Label htmlFor="sessionSelect">Select Session</Label>
             <Select
@@ -130,7 +132,7 @@ export default function QrLoginSetupPage() {
                 setSelectedSessionId(value);
                 setGeneratedLink('');
               }}
-              disabled={!selectedClassId || availableSessions.length === 0}
+              disabled={!selectedGroupId || availableSessions.length === 0}
             >
               <SelectTrigger id="sessionSelect">
                 <SelectValue placeholder="Select a session" />
@@ -143,7 +145,7 @@ export default function QrLoginSetupPage() {
                 ))}
               </SelectContent>
             </Select>
-            {availableSessions.length === 0 && <p className="text-sm text-muted-foreground">No sessions available for this class.</p>}
+            {availableSessions.length === 0 && <p className="text-sm text-muted-foreground">No sessions available for this group.</p>}
           </div>
         )}
 

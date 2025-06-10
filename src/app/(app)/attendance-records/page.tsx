@@ -13,7 +13,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Pencil, Trash2, Download, Loader2, MessageSquareText } from 'lucide-react';
-import type { AttendanceRecord as AttendanceRecordType, User, Session, ClassInfo } from '@/types';
+import type { AttendanceRecord as AttendanceRecordType, User, Session, Group } from '@/types'; // Changed ClassInfo to Group
 import { db } from '@/lib/firebase';
 import { collection, getDocs, deleteDoc, doc } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
@@ -28,24 +28,24 @@ export default function AttendanceRecordsPage() {
   const [records, setRecords] = useState<AttendanceRecordType[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
-  const [classes, setClasses] = useState<ClassInfo[]>([]);
+  const [groups, setGroups] = useState<Group[]>([]); // Changed classes to groups, ClassInfo to Group
   const [isLoading, setIsLoading] = useState(true);
   const { toast } = useToast();
 
   const fetchData = async () => {
     setIsLoading(true);
     try {
-      const [recordsSnapshot, usersSnapshot, sessionsSnapshot, classesSnapshot] = await Promise.all([
+      const [recordsSnapshot, usersSnapshot, sessionsSnapshot, groupsSnapshot] = await Promise.all([ // Changed classesSnapshot to groupsSnapshot
         getDocs(collection(db, 'attendanceRecords')),
         getDocs(collection(db, 'users')),
         getDocs(collection(db, 'sessions')),
-        getDocs(collection(db, 'classes')),
+        getDocs(collection(db, 'groups')), // Fetch from 'groups' collection
       ]);
 
       setRecords(recordsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AttendanceRecordType)));
       setUsers(usersSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as User)));
       setSessions(sessionsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Session)));
-      setClasses(classesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ClassInfo)));
+      setGroups(groupsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Group))); // Use Group type
 
     } catch (error) {
       console.error("Error fetching data:", error);
@@ -56,7 +56,7 @@ export default function AttendanceRecordsPage() {
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [toast]); // Added toast to dependency array as it's used in fetchData
 
   const handleDeleteRecord = async (recordId: string) => {
     if (!confirm('Are you sure you want to delete this record?')) return;
@@ -74,8 +74,9 @@ export default function AttendanceRecordsPage() {
   const getSessionInfo = (sessionId: string) => {
     const session = sessions.find(s => s.id === sessionId);
     if (!session) return 'Unknown Session';
-    const classInfo = classes.find(c => c.id === session.classId);
-    return `${classInfo?.name || 'Unknown Class'} (${session.date} ${session.time})`;
+    // Session.classId now refers to a Group.id
+    const groupInfo = groups.find(g => g.id === session.classId); 
+    return `${groupInfo?.name || 'Unknown Group'} (${session.date} ${session.time})`;
   };
   
   if (isLoading) {
@@ -111,7 +112,7 @@ export default function AttendanceRecordsPage() {
             <TableHeader>
               <TableRow>
                 <TableHead>Student</TableHead>
-                <TableHead>Session</TableHead>
+                <TableHead>Session (Group)</TableHead> {/* Updated header */}
                 <TableHead>Status</TableHead>
                 <TableHead>Timestamp</TableHead>
                 <TableHead>Observation</TableHead>
@@ -127,7 +128,7 @@ export default function AttendanceRecordsPage() {
                     <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
                       record.status === 'present' ? 'bg-green-500/20 text-green-700 dark:text-green-400' :
                       record.status === 'absent' ? 'bg-red-500/20 text-red-700 dark:text-red-400' :
-                      'bg-yellow-500/20 text-yellow-700 dark:text-yellow-400'
+                      'bg-yellow-500/20 text-yellow-700 dark:text-yellow-400' // Assuming 'late' might be a status
                     }`}>
                       {record.status.charAt(0).toUpperCase() + record.status.slice(1)}
                     </span>

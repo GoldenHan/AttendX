@@ -9,16 +9,17 @@ export interface User {
   notes?: string; // Optional: General notes about the student
 }
 
-export interface ClassInfo {
-  id: string;
-  name: string;
-  teacherId: string;
-  studentIds: string[];
-}
+// ClassInfo has been removed and consolidated into Group.
+// export interface ClassInfo {
+//   id: string;
+//   name: string;
+//   teacherId: string;
+//   studentIds: string[];
+// }
 
 export interface Session {
   id: string;
-  classId: string;
+  classId: string; // This ID now refers to an ID from the 'groups' collection
   date: string; // YYYY-MM-DD
   time: string; // HH:MM
   qrCodeValue?: string; // Could be sessionId or a unique token
