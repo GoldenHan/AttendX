@@ -20,15 +20,16 @@ if (!admin.apps.length) {
     admin.initializeApp();
     // console.log("Firebase Admin SDK initialized successfully in user-admin-flow.ts"); // Removed for cleaner error path
   } catch (e: any) {
-    // console.error("CRITICAL: Firebase Admin SDK admin.initializeApp() FAILED in user-admin-flow.ts:", e); // Removed for cleaner error path
-    // Re-throwing the error is important so the failure is obvious.
-    // The e.message here is "Cannot read properties of undefined (reading 'INTERNAL')"
+    // Log the detailed error server-side for more context
+    console.error("CRITICAL: Firebase Admin SDK admin.initializeApp() FAILED in user-admin-flow.ts. Original error object:", e);
+    // Re-throwing a new error that includes the original message.
+    // The e.message from firebase-admin is "Cannot read properties of undefined (reading 'INTERNAL')"
     throw new Error(
-      `Firebase Admin SDK admin.initializeApp() failed with internal error: "${e.message}". This often indicates an issue with the Admin SDK in the current server environment or missing/misconfigured credentials (e.g., GOOGLE_APPLICATION_CREDENTIALS). Check server logs for more details from firebase-admin.`
+      `Firebase Admin SDK's admin.initializeApp() threw an internal error. Original message: "${e.message}". This often indicates an issue with the Admin SDK in the current server environment (e.g., gRPC native modules handling by the bundler) or missing/misconfigured credentials (GOOGLE_APPLICATION_CREDENTIALS). Check server logs for the full error details from firebase-admin.`
     );
   }
 } else {
-  // console.log("Firebase Admin SDK: App already initialized in user-admin-flow.ts."); // Removed for cleaner error path
+  // console.log("Firebase Admin SDK: App already initialized in user-admin-flow.ts."); // Removed for cleaner logs
 }
 
 // Get Firestore and Auth instances.
@@ -112,7 +113,7 @@ const createUserAccountFlow = ai.defineFlow(
         message = 'The email address is already in use by another account.';
       } else if (error.code === 'auth/invalid-password') {
         message = 'The password must be a string with at least six characters.';
-      } else if (error.message && error.message.includes("Firebase Admin SDK admin.initializeApp() failed")) {
+      } else if (error.message && error.message.includes("Firebase Admin SDK admin.initializeApp() threw an internal error")) {
         // Propagate the initialization failure message
         message = error.message;
       } else if (error.message && error.message.includes("Must be invoked with service account credentials")) {
@@ -125,4 +126,3 @@ const createUserAccountFlow = ai.defineFlow(
     }
   }
 );
-
