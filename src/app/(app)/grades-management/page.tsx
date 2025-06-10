@@ -12,7 +12,7 @@ import { Loader2, Save, UserCircle, ClipboardCheck, Search, Users, PlusCircle, T
 import { useToast } from '@/hooks/use-toast';
 import { db } from '@/lib/firebase';
 import { collection, doc, getDocs, getDoc, updateDoc, query, where } from 'firebase/firestore';
-import type { User, PartialScores, ActivityScore, ExamScore, Group as GroupType } from '@/types'; // Renamed Group to GroupType
+import type { User, PartialScores as PartialScoresType, ActivityScore as ActivityScoreType, ExamScore as ExamScoreType, Group as GroupType } from '@/types';
 import { useForm, useFieldArray, Controller, UseFieldArrayReturn } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -27,11 +27,11 @@ import {
 import { Label } from '@/components/ui/label';
 
 const MAX_ACCUMULATED_ACTIVITIES = 5;
-const MAX_ACCUMULATED_TOTAL_SCORE = 50;
-const MAX_EXAM_SCORE = 50;
 const MAX_INDIVIDUAL_ACTIVITY_SCORE = 50; // Max score for a single accumulated activity
+const MAX_ACCUMULATED_TOTAL_SCORE = 50; // Max total for all accumulated activities combined
+const MAX_EXAM_SCORE = 50;
 const PASSING_GRADE = 70;
-const DEBOUNCE_DELAY = 2500; // 2.5 seconds for auto-save
+const DEBOUNCE_DELAY = 2500;
 
 // Helper debounce function
 function debounce<F extends (...args: any[]) => void>(func: F, waitFor: number) {
@@ -58,30 +58,30 @@ const parseOptionalFloat = (val: unknown): number | null | undefined => {
 };
 
 const activityScoreSchema = z.object({
-  id: z.string().optional(), // For useFieldArray key
-  name: z.string().max(50, "Name too long").optional().nullable(),
+  id: z.string().optional(),
+  name: z.string().max(50, "Nombre de actividad demasiado largo").optional().nullable(),
   score: z.preprocess(
     parseOptionalFloat,
-    z.number().min(0, "Min 0").max(MAX_INDIVIDUAL_ACTIVITY_SCORE, `Max ${MAX_INDIVIDUAL_ACTIVITY_SCORE}`).optional().nullable()
+    z.number({invalid_type_error: "La calificación debe ser un número."}).min(0, "Mínimo 0").max(MAX_INDIVIDUAL_ACTIVITY_SCORE, `Máximo ${MAX_INDIVIDUAL_ACTIVITY_SCORE}`).optional().nullable()
   ),
 });
 
 const examScoreSchema = z.object({
-  name: z.string().max(50, "Name too long").optional().nullable(),
+  name: z.string().max(50, "Nombre de examen demasiado largo").optional().nullable(),
   score: z.preprocess(
     parseOptionalFloat,
-    z.number().min(0, "Min 0").max(MAX_EXAM_SCORE, `Max ${MAX_EXAM_SCORE}`).optional().nullable()
+    z.number({invalid_type_error: "La calificación debe ser un número."}).min(0, "Mínimo 0").max(MAX_EXAM_SCORE, `Máximo ${MAX_EXAM_SCORE}`).optional().nullable()
   ),
 });
 
 const partialScoresObjectSchema = z.object({
   accumulatedActivities: z.array(activityScoreSchema)
-    .max(MAX_ACCUMULATED_ACTIVITIES, `Cannot exceed ${MAX_ACCUMULATED_ACTIVITIES} accumulated activities.`)
+    .max(MAX_ACCUMULATED_ACTIVITIES, `No se pueden exceder ${MAX_ACCUMULATED_ACTIVITIES} actividades de acumulación.`)
     .refine(activities => {
       const total = activities.reduce((sum, act) => sum + (act.score || 0), 0);
       return total <= MAX_ACCUMULATED_TOTAL_SCORE;
     }, {
-      message: `Total score for accumulated activities cannot exceed ${MAX_ACCUMULATED_TOTAL_SCORE}. Ensure individual scores are also within limits.`,
+      message: `La suma de las calificaciones de las actividades de acumulación no puede exceder ${MAX_ACCUMULATED_TOTAL_SCORE}pts.`,
       path: ['root'], 
     }),
   exam: examScoreSchema.nullable(),
@@ -95,10 +95,37 @@ const gradeEntryFormSchema = z.object({
 
 type GradeEntryFormValues = z.infer<typeof gradeEntryFormSchema>;
 
-const getDefaultPartialData = (): PartialScores => ({
+const getDefaultPartialData = (): z.infer<typeof partialScoresObjectSchema> => ({
   accumulatedActivities: [],
-  exam: { name: 'Examen', score: null },
+  exam: { name: null, score: null },
 });
+
+// Helper function to sanitize partial data before saving to Firestore
+const mapPartialToSave = (partialInput: GradeEntryFormValues['partial1'] | undefined): PartialScoresType => {
+    const activities = partialInput?.accumulatedActivities?.map(act => ({
+        id: act.id || Math.random().toString(36).substring(2,9), // RHF id
+        name: act.name ?? null,
+        score: act.score ?? null,
+    })) || [];
+
+    let examToSave: ExamScoreType | null = null;
+    if (partialInput?.exam === null) { // if exam object itself is null
+        examToSave = null;
+    } else if (partialInput?.exam) { // if exam object exists
+        examToSave = {
+            name: partialInput.exam.name ?? null,
+            score: partialInput.exam.score ?? null,
+        };
+    } else { // if partialInput.exam is undefined (e.g. not in form data initially)
+        examToSave = { name: null, score: null }; // Default to an object with nulls, or just null if preferred
+    }
+
+    return {
+        accumulatedActivities: activities,
+        exam: examToSave,
+    };
+};
+
 
 export default function GradesManagementPage() {
   const router = useRouter();
@@ -122,7 +149,7 @@ export default function GradesManagementPage() {
       partial2: getDefaultPartialData(),
       partial3: getDefaultPartialData(),
     },
-    mode: "onChange",
+    mode: "onChange", // Important for isDirty and watching values
   });
 
   const { control, watch, setValue, handleSubmit, formState, getValues, reset } = gradeForm;
@@ -130,6 +157,7 @@ export default function GradesManagementPage() {
   const p1FieldArray = useFieldArray({ control, name: "partial1.accumulatedActivities" });
   const p2FieldArray = useFieldArray({ control, name: "partial2.accumulatedActivities" });
   const p3FieldArray = useFieldArray({ control, name: "partial3.accumulatedActivities" });
+
 
   const fetchInitialData = useCallback(async () => {
     setIsLoadingData(true);
@@ -148,13 +176,13 @@ export default function GradesManagementPage() {
         if (preselectedStudent) {
           setSelectedStudent(preselectedStudent);
         } else {
-          toast({ title: 'Error', description: 'Student from URL not found.', variant: 'destructive' });
+          toast({ title: 'Error', description: 'Estudiante de URL no encontrado.', variant: 'destructive' });
           router.replace('/grades-management', { scroll: false });
         }
       }
     } catch (error) {
       console.error("Error fetching initial data:", error);
-      toast({ title: 'Error', description: 'Could not load students or groups.', variant: 'destructive' });
+      toast({ title: 'Error', description: 'No se pudieron cargar estudiantes o grupos.', variant: 'destructive' });
     }
     setIsLoadingData(false);
   }, [searchParams, toast, router]);
@@ -166,13 +194,16 @@ export default function GradesManagementPage() {
   useEffect(() => {
     if (selectedStudent) {
       const studentGrades = selectedStudent.grades;
-      reset({ // Use reset from useForm
-        partial1: { ...getDefaultPartialData(), ...studentGrades?.partial1, accumulatedActivities: studentGrades?.partial1?.accumulatedActivities?.map(a => ({...a, id: a.id || Math.random().toString(36).substr(2, 9)})) || [] },
-        partial2: { ...getDefaultPartialData(), ...studentGrades?.partial2, accumulatedActivities: studentGrades?.partial2?.accumulatedActivities?.map(a => ({...a, id: a.id || Math.random().toString(36).substr(2, 9)})) || [] },
-        partial3: { ...getDefaultPartialData(), ...studentGrades?.partial3, accumulatedActivities: studentGrades?.partial3?.accumulatedActivities?.map(a => ({...a, id: a.id || Math.random().toString(36).substr(2, 9)})) || [] },
+      const mapActivities = (activities: ActivityScoreType[] | undefined) => 
+        activities?.map(a => ({...a, id: a.id || Math.random().toString(36).substr(2, 9)})) || [];
+
+      reset({
+        partial1: { ...getDefaultPartialData(), ...studentGrades?.partial1, accumulatedActivities: mapActivities(studentGrades?.partial1?.accumulatedActivities) },
+        partial2: { ...getDefaultPartialData(), ...studentGrades?.partial2, accumulatedActivities: mapActivities(studentGrades?.partial2?.accumulatedActivities) },
+        partial3: { ...getDefaultPartialData(), ...studentGrades?.partial3, accumulatedActivities: mapActivities(studentGrades?.partial3?.accumulatedActivities) },
       });
     } else {
-      reset({ // Reset to defaults if no student is selected
+      reset({ 
         partial1: getDefaultPartialData(),
         partial2: getDefaultPartialData(),
         partial3: getDefaultPartialData(),
@@ -186,7 +217,7 @@ export default function GradesManagementPage() {
       const group = allGroups.find(g => g.id === selectedGroupIdForFilter);
       if (group && Array.isArray(group.studentIds)) {
         studentsToDisplay = studentsToDisplay.filter(student => group.studentIds.includes(student.id));
-      } else if (group) {
+      } else if (group) { // Group selected but might have no studentIds array or is empty
         studentsToDisplay = [];
       }
     }
@@ -200,20 +231,21 @@ export default function GradesManagementPage() {
 
   const handleSelectStudentForGrading = useCallback((student: User) => {
     setSelectedStudent(student);
+    // Update URL without causing a full page reload if just query param changes
     router.push(`/grades-management?studentId=${student.id}`, { scroll: false });
   }, [router]);
 
   // Debounced save function
   const debouncedSave = useCallback(
-    debounce(async (data: GradeEntryFormValues, studentId: string) => {
-      if (isSubmitting) return; // Don't autosave if manual submit is in progress
+    debounce(async (currentData: GradeEntryFormValues, studentId: string) => {
+      if (isSubmitting) return; 
       setAutoSaveStatus('saving');
       try {
         const studentRef = doc(db, "users", studentId);
         const gradesToSave = {
-          partial1: data.partial1 || getDefaultPartialData(),
-          partial2: data.partial2 || getDefaultPartialData(),
-          partial3: data.partial3 || getDefaultPartialData(),
+          partial1: mapPartialToSave(currentData.partial1),
+          partial2: mapPartialToSave(currentData.partial2),
+          partial3: mapPartialToSave(currentData.partial3),
         };
         await updateDoc(studentRef, { grades: gradesToSave });
         setAutoSaveStatus('saved');
@@ -221,13 +253,14 @@ export default function GradesManagementPage() {
       } catch (error) {
         console.error("Auto-save error:", error);
         setAutoSaveStatus('error_saving');
+        toast({ title: "Error de Autoguardado", description: "No se pudieron guardar los cambios automáticamente.", variant: "destructive" });
         setTimeout(() => setAutoSaveStatus('idle'), 5000);
       }
     }, DEBOUNCE_DELAY),
-    [isSubmitting] // Add isSubmitting to dependencies
+    [isSubmitting, toast] 
   );
 
-  const watchedFormValues = watch();
+  const watchedFormValues = watch(); 
 
   useEffect(() => {
     if (formState.isDirty && selectedStudent && !isSubmitting) {
@@ -242,22 +275,23 @@ export default function GradesManagementPage() {
 
   const onSubmitGrades = async (data: GradeEntryFormValues) => {
     if (!selectedStudent) { 
-      toast({ title: "Error", description: "No student selected.", variant: "destructive" });
+      toast({ title: "Error", description: "Ningún estudiante seleccionado.", variant: "destructive" });
       return;
     }
     setIsSubmitting(true);
-    debouncedSave.cancel(); // Cancel any pending auto-save
+    debouncedSave.cancel(); 
     setAutoSaveStatus('saving');
     try {
       const studentRef = doc(db, "users", selectedStudent.id);
       const gradesToSave = {
-        partial1: data.partial1 || getDefaultPartialData(),
-        partial2: data.partial2 || getDefaultPartialData(),
-        partial3: data.partial3 || getDefaultPartialData(),
+        partial1: mapPartialToSave(data.partial1),
+        partial2: mapPartialToSave(data.partial2),
+        partial3: mapPartialToSave(data.partial3),
       };
+      
       await updateDoc(studentRef, { grades: gradesToSave });
       
-      toast({ title: "Grades Updated", description: `Grades for ${selectedStudent.name} saved successfully.` });
+      toast({ title: "Calificaciones Actualizadas", description: `Calificaciones para ${selectedStudent.name} guardadas exitosamente.` });
       setAutoSaveStatus('saved');
       setTimeout(() => setAutoSaveStatus('idle'), 3000);
             
@@ -266,27 +300,31 @@ export default function GradesManagementPage() {
         const updatedStudentData = { id: updatedStudentDoc.id, ...updatedStudentDoc.data() } as User;
         setSelectedStudent(updatedStudentData); 
         setAllStudents(prev => prev.map(s => s.id === updatedStudentData.id ? updatedStudentData : s));
-        reset(data); // Reset form with submitted data to clear isDirty
+        reset(data); 
       }
 
     } catch (error: any) {
-      toast({ title: "Grade Update Failed", description: `An error occurred: ${error.message || 'Please try again.'}`, variant: "destructive" });
+      toast({ title: "Fallo al Actualizar Calificaciones", description: `Ocurrió un error: ${error.message || 'Por favor, inténtalo de nuevo.'}`, variant: "destructive" });
       setAutoSaveStatus('error_saving');
       setTimeout(() => setAutoSaveStatus('idle'), 5000);
     } finally {
       setIsSubmitting(false);
     }
   };
+  
 
   const renderGradeInputFieldsForPartial = (
     partialKey: "partial1" | "partial2" | "partial3",
-    fieldArrayResult: UseFieldArrayReturn<GradeEntryFormValues, `partial1.accumulatedActivities` | `partial2.accumulatedActivities` | `partial3.accumulatedActivities`, "id">
+    fieldArrayHelpers: UseFieldArrayReturn<GradeEntryFormValues, `partial1.accumulatedActivities` | `partial2.accumulatedActivities` | `partial3.accumulatedActivities`, "id">
   ) => {
-    const { fields, append, remove } = fieldArrayResult;
+    const { fields, append, remove } = fieldArrayHelpers;
     const accumulatedActivitiesValues = watch(`${partialKey}.accumulatedActivities`);
     const currentTotalAccumulated = accumulatedActivitiesValues?.reduce((sum, act) => sum + (act.score || 0), 0) || 0;
-    const examScoreValue = watch(`${partialKey}.exam.score`) || 0;
-    const currentPartialTotal = currentTotalAccumulated + examScoreValue;
+    
+    const examScoreValue = watch(`${partialKey}.exam.score`);
+    const currentExamScore = typeof examScoreValue === 'number' ? examScoreValue : 0;
+    const currentPartialTotal = currentTotalAccumulated + currentExamScore;
+
     const pointsRemainingForAccumulated = MAX_ACCUMULATED_TOTAL_SCORE - currentTotalAccumulated;
     const fieldsDisabled = isSubmitting || !selectedStudent;
 
@@ -375,22 +413,24 @@ export default function GradesManagementPage() {
               )}
             />
         </div>
-        <div className="mt-4 p-3 bg-secondary/30 rounded-md text-center">
-            <p className="text-lg font-semibold text-secondary-foreground">Nota Total del Parcial: {currentPartialTotal.toFixed(2)} / 100</p>
+        <div className={`mt-4 p-3 rounded-md text-center ${currentPartialTotal >= PASSING_GRADE ? 'bg-green-100 dark:bg-green-800/50' : 'bg-red-100 dark:bg-red-800/50'}`}>
+            <p className={`text-lg font-semibold ${currentPartialTotal >= PASSING_GRADE ? 'text-green-700 dark:text-green-300' : 'text-red-700 dark:text-red-300'}`}>
+                Nota Total del Parcial: {currentPartialTotal.toFixed(2)} / 100
+            </p>
         </div>
       </div>
     );
   };
 
   const renderAutoSaveStatus = () => {
-    if (isSubmitting) return null; 
+    if (isSubmitting && autoSaveStatus !== 'saving') return null; 
     switch (autoSaveStatus) {
       case 'saving':
         return <span className="text-xs text-muted-foreground ml-2 flex items-center"><Loader2 className="h-3 w-3 animate-spin mr-1" />Guardando automáticamente...</span>;
       case 'saved':
         return <span className="text-xs text-green-600 ml-2">Cambios guardados automáticamente.</span>;
       case 'error_saving':
-        return <span className="text-xs text-red-600 ml-2">Error al autoguardar.</span>;
+        return <span className="text-xs text-red-600 ml-2">Error al autoguardar. Intentar guardado manual.</span>;
       default:
         if (selectedStudent && formState.isDirty) {
              return <span className="text-xs text-muted-foreground ml-2">Cambios sin guardar...</span>;
@@ -412,7 +452,7 @@ export default function GradesManagementPage() {
             </CardHeader>
             <CardContent className="flex items-center justify-center py-10">
                 <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                <p className="ml-2">Loading initial data...</p>
+                <p className="ml-2">Cargando datos iniciales...</p>
             </CardContent>
         </Card>
     );
@@ -434,7 +474,7 @@ export default function GradesManagementPage() {
         <CardContent className="space-y-4">
          <div className="flex flex-col sm:flex-row gap-4">
             <div className="flex-1 min-w-[200px]">
-              <Label htmlFor="group-filter">Filter by Group</Label>
+              <Label htmlFor="group-filter">Filtrar por Grupo</Label>
               <Select
                 value={selectedGroupIdForFilter}
                 onValueChange={(value) => {
@@ -445,10 +485,10 @@ export default function GradesManagementPage() {
                 disabled={isLoadingData}
               >
                 <SelectTrigger id="group-filter">
-                  <SelectValue placeholder="All Groups" />
+                  <SelectValue placeholder="Todos los Grupos" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All Groups</SelectItem>
+                  <SelectItem value="all">Todos los Grupos</SelectItem>
                   {allGroups.map((group) => (
                     <SelectItem key={group.id} value={group.id}>
                       {group.name}
@@ -458,13 +498,13 @@ export default function GradesManagementPage() {
               </Select>
             </div>
             <div className="flex-1 min-w-[200px]">
-              <Label htmlFor="search-student">Search Student by Name</Label>
+              <Label htmlFor="search-student">Buscar Estudiante por Nombre</Label>
               <div className="relative">
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
                   id="search-student"
                   type="search"
-                  placeholder="Enter student name..."
+                  placeholder="Ingresar nombre del estudiante..."
                   value={searchTerm}
                   onChange={(e) => {
                     setSearchTerm(e.target.value);
@@ -479,14 +519,14 @@ export default function GradesManagementPage() {
           </div>
 
           {isLoadingData && (filteredStudentsList.length === 0 && (selectedGroupIdForFilter !== 'all' || searchTerm)) && (
-             <div className="text-center py-4"><Loader2 className="h-5 w-5 animate-spin mr-2 inline-block" />Loading students...</div>
+             <div className="text-center py-4"><Loader2 className="h-5 w-5 animate-spin mr-2 inline-block" />Cargando estudiantes...</div>
           )}
 
           {!isLoadingData && filteredStudentsList.length > 0 && (
             <Card className="mt-4">
               <CardHeader>
-                <CardTitle className="text-lg">Select a Student</CardTitle>
-                <CardDescription>Click on a student from the list below to manage their grades.</CardDescription>
+                <CardTitle className="text-lg">Seleccionar un Estudiante</CardTitle>
+                <CardDescription>Haz clic en un estudiante de la lista para gestionar sus calificaciones.</CardDescription>
               </CardHeader>
               <CardContent className="max-h-60 overflow-y-auto">
                 <ul className="space-y-1">
@@ -509,13 +549,18 @@ export default function GradesManagementPage() {
 
           {!isLoadingData && filteredStudentsList.length === 0 && (selectedGroupIdForFilter !== 'all' || searchTerm.trim() !== '') && (
             <p className="text-muted-foreground text-center py-6">
-              No students found matching your filter/search criteria.
+              No se encontraron estudiantes que coincidan con tus criterios de filtro/búsqueda.
             </p>
           )}
            {!isLoadingData && filteredStudentsList.length === 0 && selectedGroupIdForFilter === 'all' && searchTerm.trim() === '' && allStudents.length > 0 &&(
              <p className="text-muted-foreground text-center py-6">
-              All students are listed. Use filters to narrow down or select from above if list is too long.
+              Todos los estudiantes están listados. Usa los filtros para acotar o selecciona de arriba si la lista es muy larga.
             </p>
+           )}
+           {!isLoadingData && allStudents.length === 0 && (
+              <p className="text-muted-foreground text-center py-6">
+                No hay estudiantes registrados en el sistema.
+              </p>
            )}
         </CardContent>
       </Card>
@@ -524,7 +569,7 @@ export default function GradesManagementPage() {
         <Card>
           <CardHeader>
             <CardTitle>
-              {selectedStudent ? `Editing Grades for: ${selectedStudent.name}` : 'Select a Student to Edit Grades'}
+              {selectedStudent ? `Editando Calificaciones para: ${selectedStudent.name}` : 'Selecciona un Estudiante para Editar Calificaciones'}
             </CardTitle>
             <CardDescription>
               {selectedStudent 
@@ -555,14 +600,14 @@ export default function GradesManagementPage() {
                 <Button type="submit" disabled={isSubmitting || !selectedStudent || !formState.isDirty} className="sm:w-auto">
                     {isSubmitting && autoSaveStatus === 'saving' && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                     <Save className="mr-2 h-4 w-4" /> 
-                    {selectedStudent ? `Save Grades for ${selectedStudent.name}` : 'Save Grades'}
+                    {selectedStudent ? `Guardar Calificaciones para ${selectedStudent.name}` : 'Guardar Calificaciones'}
                 </Button>
                 {renderAutoSaveStatus()}
               </div>
 
               {!selectedStudent && !isLoadingData && (
                 <p className="text-muted-foreground text-center py-6">
-                  Please select a student using the filters above to manage their grades.
+                  Por favor, selecciona un estudiante usando los filtros de arriba para gestionar sus calificaciones.
                 </p>
               )}
             </form>
