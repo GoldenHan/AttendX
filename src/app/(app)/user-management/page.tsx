@@ -13,10 +13,10 @@ import {
 } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Loader2, Pencil, Trash2, PlusCircle, Users, UserPlus, FolderKanban } from 'lucide-react';
+import { Loader2, Pencil, Trash2, UserPlus, FolderKanban, Users as UsersIcon } from 'lucide-react'; // Renamed Users to UsersIcon
 import type { User } from '@/types';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, deleteDoc, doc, addDoc } from 'firebase/firestore';
+import { collection, getDocs, deleteDoc, doc } from 'firebase/firestore'; // Removed addDoc
 import { useToast } from '@/hooks/use-toast';
 import {
   Dialog,
@@ -29,7 +29,7 @@ import {
   DialogClose,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+// import { Label } from "@/components/ui/label"; // No longer directly used in this version of the form
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from '@/components/ui/textarea';
 import { useForm } from 'react-hook-form';
@@ -43,14 +43,18 @@ import {
   FormLabel,
   FormMessage,
 } from '@/components/ui/form';
+import { createUserAccount, type CreateUserAccountInput } from '@/ai/flows/user-admin-flow';
 
 const userFormSchema = z.object({
   name: z.string().min(2, { message: "Name must be at least 2 characters." }),
-  email: z.string().email({ message: "Invalid email address." }).optional().or(z.literal('')),
-  role: z.enum(['student', 'teacher', 'admin'], { required_error: "Role is required." }),
+  email: z.string().email({ message: "Invalid email address." }), // Email is now required
+  password: z.string().min(6, { message: "Password must be at least 6 characters."}),
+  role: z.enum(['student', 'teacher', 'admin', 'caja'], { required_error: "Role is required." }),
   photoUrl: z.string().url({ message: "Please enter a valid URL for photo." }).optional().or(z.literal('')),
   level: z.enum(['Beginner', 'Intermediate', 'Advanced', 'Other']).optional(),
   notes: z.string().optional(),
+  age: z.coerce.number().positive("Age must be a positive number.").int("Age must be an integer.").optional().or(z.literal('')), // Coerce to number
+  gender: z.enum(['male', 'female', 'other']).optional(),
 });
 
 type UserFormValues = z.infer<typeof userFormSchema>;
@@ -67,10 +71,13 @@ export default function UserManagementPage() {
     defaultValues: {
       name: '',
       email: '',
+      password: '',
       role: 'student',
       photoUrl: '',
       level: undefined,
       notes: '',
+      age: undefined,
+      gender: undefined,
     },
   });
 
@@ -80,7 +87,7 @@ export default function UserManagementPage() {
     setIsLoading(true);
     try {
       const usersSnapshot = await getDocs(collection(db, 'users'));
-      setUsers(usersSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as User)));
+      setUsers(usersSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as User)));
     } catch (error) {
       console.error("Error fetching users:", error);
       toast({ title: 'Error fetching users', description: 'Could not load users from Firestore.', variant: 'destructive' });
@@ -94,47 +101,52 @@ export default function UserManagementPage() {
   }, []);
 
   const handleDeleteUser = async (userId: string) => {
-    if (!confirm('Are you sure you want to delete this user? This action cannot be undone.')) return;
+    // Consider adding a Genkit flow for deleting Firebase Auth user as well
+    if (!confirm('Are you sure you want to delete this user? This action only removes the Firestore record, not the Auth account.')) return;
     try {
       await deleteDoc(doc(db, 'users', userId));
+      // Note: This does not delete the Firebase Auth user. That would require a backend function (e.g., Genkit flow with Admin SDK).
       setUsers(prevUsers => prevUsers.filter(u => u.id !== userId));
-      toast({ title: 'User Deleted', description: 'User removed successfully.' });
+      toast({ title: 'User Record Deleted', description: 'User Firestore record removed successfully. Auth account may still exist.' });
     } catch (error) {
-      console.error("Error deleting user:", error);
-      toast({ title: 'Delete Failed', description: 'Could not delete the user.', variant: 'destructive' });
+      console.error("Error deleting user record:", error);
+      toast({ title: 'Delete Failed', description: 'Could not delete the user record.', variant: 'destructive' });
     }
   };
 
   const handleAddUserSubmit = async (data: UserFormValues) => {
     setIsSubmitting(true);
     try {
-      const newUser: Omit<User, 'id'> = {
+      const flowInput: CreateUserAccountInput = {
         name: data.name,
-        email: data.email || undefined, // Store as undefined if empty for Firestore
+        email: data.email,
+        password: data.password,
         role: data.role,
       };
-
+      if (data.photoUrl) flowInput.photoUrl = data.photoUrl;
       if (data.role === 'student') {
-        if (data.photoUrl) newUser.photoUrl = data.photoUrl; else delete newUser.photoUrl;
-        if (data.level) newUser.level = data.level; else delete newUser.level;
-        if (data.notes) newUser.notes = data.notes; else delete newUser.notes;
+        if (data.level) flowInput.level = data.level;
+        if (data.notes) flowInput.notes = data.notes;
+        if (data.age) flowInput.age = Number(data.age); // Ensure age is a number
+        if (data.gender) flowInput.gender = data.gender;
       }
 
-      await addDoc(collection(db, 'users'), newUser);
-      toast({ title: 'User Added', description: `${data.name} added successfully.` });
-      form.reset({
-        name: '',
-        email: '',
-        role: 'student',
-        photoUrl: '',
-        level: undefined,
-        notes: '',
-      });
-      setIsAddUserDialogOpen(false);
-      await fetchUsers(); 
-    } catch (error) {
-      console.error("Error adding user:", error);
-      toast({ title: 'Add User Failed', description: 'Could not add the user.', variant: 'destructive' });
+      const result = await createUserAccount(flowInput);
+
+      if (result.success) {
+        toast({ title: 'User Added', description: result.message });
+        form.reset({
+          name: '', email: '', password: '', role: 'student', photoUrl: '',
+          level: undefined, notes: '', age: undefined, gender: undefined,
+        });
+        setIsAddUserDialogOpen(false);
+        await fetchUsers(); 
+      } else {
+        toast({ title: 'Add User Failed', description: result.message, variant: 'destructive' });
+      }
+    } catch (error: any) {
+      console.error("Error adding user via flow:", error);
+      toast({ title: 'Add User Failed', description: error.message || 'Could not add the user.', variant: 'destructive' });
     } finally {
       setIsSubmitting(false);
     }
@@ -148,7 +160,7 @@ export default function UserManagementPage() {
     return (
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2"><Users className="h-6 w-6 text-primary" /> User Management</CardTitle>
+          <CardTitle className="flex items-center gap-2"><UsersIcon className="h-6 w-6 text-primary" /> User Management</CardTitle>
           <CardDescription>Manage student, teacher, and administrator accounts.</CardDescription>
         </CardHeader>
         <CardContent className="flex items-center justify-center py-10">
@@ -163,7 +175,7 @@ export default function UserManagementPage() {
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
         <div>
-          <CardTitle className="flex items-center gap-2"><Users className="h-6 w-6 text-primary" /> User Management</CardTitle>
+          <CardTitle className="flex items-center gap-2"><UsersIcon className="h-6 w-6 text-primary" /> User Management</CardTitle>
           <CardDescription>Manage student, teacher, and administrator accounts.</CardDescription>
         </div>
         <div className="flex gap-2">
@@ -177,12 +189,8 @@ export default function UserManagementPage() {
             setIsAddUserDialogOpen(isOpen);
             if (!isOpen) {
               form.reset({
-                  name: '',
-                  email: '',
-                  role: 'student',
-                  photoUrl: '',
-                  level: undefined,
-                  notes: '',
+                  name: '', email: '', password: '', role: 'student', photoUrl: '',
+                  level: undefined, notes: '', age: undefined, gender: undefined,
               });
             }
           }}>
@@ -196,7 +204,7 @@ export default function UserManagementPage() {
               <DialogHeader>
                 <DialogTitle>Add New User</DialogTitle>
                 <DialogDescription>
-                  Fill in the details for the new user. Click save when you're done.
+                  Fill in the details for the new user. An authentication account will be created.
                 </DialogDescription>
               </DialogHeader>
               <Form {...form}>
@@ -207,9 +215,7 @@ export default function UserManagementPage() {
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Full Name</FormLabel>
-                        <FormControl>
-                          <Input placeholder="John Doe" {...field} />
-                        </FormControl>
+                        <FormControl><Input placeholder="John Doe" {...field} /></FormControl>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -219,10 +225,19 @@ export default function UserManagementPage() {
                     name="email"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Email (Optional)</FormLabel>
-                        <FormControl>
-                          <Input type="email" placeholder="john.doe@example.com" {...field} />
-                        </FormControl>
+                        <FormLabel>Email</FormLabel>
+                        <FormControl><Input type="email" placeholder="john.doe@example.com" {...field} /></FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="password"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Initial Password</FormLabel>
+                        <FormControl><Input type="password" placeholder="••••••••" {...field} /></FormControl>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -234,15 +249,12 @@ export default function UserManagementPage() {
                       <FormItem>
                         <FormLabel>Role</FormLabel>
                         <Select onValueChange={field.onChange} defaultValue={field.value}>
-                          <FormControl>
-                            <SelectTrigger>
-                              <SelectValue placeholder="Select a role" />
-                            </SelectTrigger>
-                          </FormControl>
+                          <FormControl><SelectTrigger><SelectValue placeholder="Select a role" /></SelectTrigger></FormControl>
                           <SelectContent>
                             <SelectItem value="student">Student</SelectItem>
                             <SelectItem value="teacher">Teacher</SelectItem>
                             <SelectItem value="admin">Admin</SelectItem>
+                            <SelectItem value="caja">Caja</SelectItem>
                           </SelectContent>
                         </Select>
                         <FormMessage />
@@ -254,13 +266,40 @@ export default function UserManagementPage() {
                     <>
                       <FormField
                         control={form.control}
+                        name="age"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Age (Optional)</FormLabel>
+                            <FormControl><Input type="number" placeholder="18" {...field} onChange={e => field.onChange(e.target.value === '' ? '' : Number(e.target.value))} /></FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={form.control}
+                        name="gender"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Gender (Optional)</FormLabel>
+                            <Select onValueChange={field.onChange} value={field.value} defaultValue={field.value}>
+                              <FormControl><SelectTrigger><SelectValue placeholder="Select student's gender" /></SelectTrigger></FormControl>
+                              <SelectContent>
+                                <SelectItem value="male">Male</SelectItem>
+                                <SelectItem value="female">Female</SelectItem>
+                                <SelectItem value="other">Other</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={form.control}
                         name="photoUrl"
                         render={({ field }) => (
                           <FormItem>
                             <FormLabel>Photo URL (Optional)</FormLabel>
-                            <FormControl>
-                              <Input type="url" placeholder="https://placehold.co/100x100.png" {...field} />
-                            </FormControl>
+                            <FormControl><Input type="url" placeholder="https://placehold.co/100x100.png" {...field} /></FormControl>
                             <FormMessage />
                           </FormItem>
                         )}
@@ -272,11 +311,7 @@ export default function UserManagementPage() {
                           <FormItem>
                             <FormLabel>Level (Optional)</FormLabel>
                             <Select onValueChange={field.onChange} value={field.value} defaultValue={field.value}>
-                              <FormControl>
-                                <SelectTrigger>
-                                  <SelectValue placeholder="Select student's level" />
-                                </SelectTrigger>
-                              </FormControl>
+                              <FormControl><SelectTrigger><SelectValue placeholder="Select student's level" /></SelectTrigger></FormControl>
                               <SelectContent>
                                 <SelectItem value="Beginner">Beginner</SelectItem>
                                 <SelectItem value="Intermediate">Intermediate</SelectItem>
@@ -294,9 +329,7 @@ export default function UserManagementPage() {
                         render={({ field }) => (
                           <FormItem>
                             <FormLabel>Notes (Optional)</FormLabel>
-                            <FormControl>
-                              <Textarea placeholder="Any relevant notes about the student..." {...field} />
-                            </FormControl>
+                            <FormControl><Textarea placeholder="Any relevant notes about the student..." {...field} /></FormControl>
                             <FormMessage />
                           </FormItem>
                         )}
@@ -305,11 +338,7 @@ export default function UserManagementPage() {
                   )}
 
                   <DialogFooter>
-                    <DialogClose asChild>
-                      <Button type="button" variant="outline">
-                        Cancel
-                      </Button>
-                    </DialogClose>
+                    <DialogClose asChild><Button type="button" variant="outline">Cancel</Button></DialogClose>
                     <Button type="submit" disabled={isSubmitting}>
                       {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                       Save User
@@ -346,6 +375,7 @@ export default function UserManagementPage() {
                   <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
                     user.role === 'admin' ? 'bg-purple-500/20 text-purple-700 dark:text-purple-400' :
                     user.role === 'teacher' ? 'bg-blue-500/20 text-blue-700 dark:text-blue-400' :
+                    user.role === 'caja' ? 'bg-orange-500/20 text-orange-700 dark:text-orange-400' : // Added 'caja' style
                     'bg-green-500/20 text-green-700 dark:text-green-400'
                   }`}>
                     {user.role.charAt(0).toUpperCase() + user.role.slice(1)}
