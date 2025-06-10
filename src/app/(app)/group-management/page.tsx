@@ -50,14 +50,16 @@ const groupFormSchema = z.object({
   type: z.enum(['Saturday', 'Sunday'], { required_error: "Group type is required." }),
   startDate: z.date({ required_error: "Start date is required." }),
   endDate: z.date().optional().nullable(),
-  teacherId: z.string().optional(),
+  teacherId: z.string().optional().or(z.literal('')), // Allow empty string to represent "No Teacher"
 });
 
 type GroupFormValues = z.infer<typeof groupFormSchema>;
 
+const NO_TEACHER_ASSIGNED_VALUE = "##NO_TEACHER##";
+
 export default function GroupManagementPage() {
   const [groups, setGroups] = useState<Group[]>([]);
-  const [allUsers, setAllUsers] = useState<User[]>([]); // Store all users
+  const [allUsers, setAllUsers] = useState<User[]>([]);
   const [isLoadingData, setIsLoadingData] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isGroupFormDialogOpen, setIsGroupFormDialogOpen] = useState(false);
@@ -66,8 +68,7 @@ export default function GroupManagementPage() {
   const [isManageStudentsDialogOpen, setIsManageStudentsDialogOpen] = useState(false);
   const [selectedGroupForStudentManagement, setSelectedGroupForStudentManagement] = useState<Group | null>(null);
   const [selectedStudentIdsForGroup, setSelectedStudentIdsForGroup] = useState<string[]>([]);
-  const [studentSearchTerm, setStudentSearchTerm] = useState(''); // For student search in dialog
-  const [isLoadingStudentsForDialog, setIsLoadingStudentsForDialog] = useState(false); // Separate loading for dialog students
+  const [studentSearchTerm, setStudentSearchTerm] = useState('');
 
 
   const { toast } = useToast();
@@ -77,7 +78,7 @@ export default function GroupManagementPage() {
     defaultValues: {
       name: '',
       type: 'Saturday',
-      startDate: undefined,
+      startDate: new Date(),
       endDate: undefined,
       teacherId: '',
     },
@@ -110,23 +111,23 @@ export default function GroupManagementPage() {
   const handleGroupFormSubmit = async (data: GroupFormValues) => {
     setIsSubmitting(true);
     try {
-      const groupDataToSave = {
+      const groupDataToSave: Partial<Omit<Group, 'id' | 'studentIds'>> & { studentIds?: string[] } = {
         name: data.name,
         type: data.type,
         startDate: data.startDate.toISOString(),
         endDate: data.endDate ? data.endDate.toISOString() : null,
-        teacherId: data.teacherId || null, // Store null if empty string
+        teacherId: data.teacherId && data.teacherId !== NO_TEACHER_ASSIGNED_VALUE ? data.teacherId : null,
       };
 
       if (editingGroup) {
         const groupRef = doc(db, 'groups', editingGroup.id);
         await updateDoc(groupRef, {
             ...groupDataToSave,
-            studentIds: editingGroup.studentIds || [] // Preserve existing studentIds
+            studentIds: editingGroup.studentIds || [] 
         });
         
         setGroups(prevGroups => prevGroups.map(g => 
-          g.id === editingGroup.id ? { ...g, ...groupDataToSave, studentIds: g.studentIds } : g
+          g.id === editingGroup.id ? { ...g, ...groupDataToSave, studentIds: g.studentIds } as Group : g
         ));
         toast({ title: 'Group Updated', description: `Group "${data.name}" updated successfully.` });
 
@@ -137,11 +138,11 @@ export default function GroupManagementPage() {
         };
         const docRef = await addDoc(collection(db, 'groups'), newGroupWithStudentIds);
         
-        setGroups(prevGroups => [...prevGroups, { ...newGroupWithStudentIds, id: docRef.id }]);
+        setGroups(prevGroups => [...prevGroups, { ...newGroupWithStudentIds, id: docRef.id } as Group]);
         toast({ title: 'Group Created', description: `${data.name} created successfully.` });
       }
       
-      form.reset({ name: '', type: 'Saturday', startDate: undefined, endDate: undefined, teacherId: '' });
+      form.reset({ name: '', type: 'Saturday', startDate: new Date(), endDate: undefined, teacherId: '' });
       setEditingGroup(null);
       setIsGroupFormDialogOpen(false);
     } catch (error) {
@@ -186,16 +187,15 @@ export default function GroupManagementPage() {
   const openManageStudentsDialog = async (group: Group) => {
     setSelectedGroupForStudentManagement(group);
     setSelectedStudentIdsForGroup(Array.isArray(group.studentIds) ? [...group.studentIds] : []);
-    setStudentSearchTerm(''); // Reset search term
+    setStudentSearchTerm('');
     setIsManageStudentsDialogOpen(true);
-    // Students are already fetched in allUsers, just need to filter them if a search term is present
-    // No separate loading state needed here if allStudents is populated
   };
 
   const filteredStudentsForDialog = useMemo(() => {
     if (!studentSearchTerm) return students;
     return students.filter(student => 
-      student.name.toLowerCase().includes(studentSearchTerm.toLowerCase())
+      student.name.toLowerCase().includes(studentSearchTerm.toLowerCase()) ||
+      (student.preferredShift && student.preferredShift.toLowerCase().includes(studentSearchTerm.toLowerCase()))
     );
   }, [students, studentSearchTerm]);
 
@@ -241,7 +241,7 @@ export default function GroupManagementPage() {
     return isValid(date) ? format(date, 'PPP') : 'Invalid Date';
   };
 
-  const getTeacherName = (teacherId?: string) => {
+  const getTeacherName = (teacherId?: string | null) => {
     if (!teacherId) return 'N/A';
     const teacher = teachers.find(t => t.id === teacherId);
     return teacher ? teacher.name : 'Unknown Teacher';
@@ -274,7 +274,7 @@ export default function GroupManagementPage() {
           <Dialog open={isGroupFormDialogOpen} onOpenChange={(isOpen) => {
             setIsGroupFormDialogOpen(isOpen);
             if (!isOpen) {
-              form.reset({ name: '', type: 'Saturday', startDate: undefined, endDate: undefined, teacherId: '' });
+              form.reset({ name: '', type: 'Saturday', startDate: new Date(), endDate: undefined, teacherId: '' });
               setEditingGroup(null);
             }
           }}>
@@ -404,12 +404,15 @@ export default function GroupManagementPage() {
                   render={({ field }) => (
                     <div>
                       <Label>Assign Teacher (Optional)</Label>
-                      <Select onValueChange={field.onChange} value={field.value || ''} defaultValue={field.value || ""}>
+                      <Select 
+                        onValueChange={(value) => field.onChange(value === NO_TEACHER_ASSIGNED_VALUE ? '' : value)} 
+                        value={field.value || ''}
+                      >
                         <SelectTrigger className="mt-1">
                           <SelectValue placeholder="Select a teacher" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="">No Teacher Assigned</SelectItem>
+                          <SelectItem value={NO_TEACHER_ASSIGNED_VALUE}>No Teacher Assigned</SelectItem>
                           {teachers.map(teacher => (
                             <SelectItem key={teacher.id} value={teacher.id}>
                               {teacher.name}
@@ -507,7 +510,7 @@ export default function GroupManagementPage() {
           <DialogHeader>
             <DialogTitle>Manage Students for {selectedGroupForStudentManagement?.name}</DialogTitle>
             <DialogDescription>
-              Select students to add or remove from this group. Search by name.
+              Select students to add or remove from this group. Search by name or preferred shift.
             </DialogDescription>
           </DialogHeader>
           <div className="py-2">
@@ -515,14 +518,14 @@ export default function GroupManagementPage() {
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
                     type="search"
-                    placeholder="Search student by name..."
+                    placeholder="Search student by name or shift..."
                     value={studentSearchTerm}
                     onChange={(e) => setStudentSearchTerm(e.target.value)}
                     className="pl-8 w-full"
                 />
             </div>
           </div>
-          {isLoadingData && students.length === 0 ? ( // Check general loading if students aren't available yet
+          {isLoadingData && students.length === 0 ? ( 
             <div className="flex items-center justify-center py-10">
               <Loader2 className="h-8 w-8 animate-spin text-primary" />
               <p className="ml-2">Loading students...</p>
@@ -542,7 +545,7 @@ export default function GroupManagementPage() {
                     onCheckedChange={(checked) => handleStudentSelectionChange(student.id, !!checked)}
                   />
                   <Label htmlFor={`student-${student.id}`} className="font-normal flex-1 cursor-pointer">
-                    {student.name}
+                    {student.name} ({student.preferredShift || 'No shift'})
                   </Label>
                 </div>
               ))}
@@ -564,3 +567,4 @@ export default function GroupManagementPage() {
     </>
   );
 }
+
