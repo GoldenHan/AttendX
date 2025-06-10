@@ -1,117 +1,150 @@
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-body {
-  font-family: 'Inter', Arial, Helvetica, sans-serif; /* Ensure Inter is primary */
-}
-
 @layer base {
   :root {
-    /* Light Mode Palette based on user image */
-    --background: 210 20% 96%; /* Main content area background - very light blue-white */
-    --foreground: 220 30% 22%; /* Default text color - dark blue */
+    /* Light Mode - Inspirado en la imagen del usuario */
+    --background: 220 20% 97%; /* Un gris azulado muy claro, casi blanco */
+    --foreground: 220 25% 25%; /* Texto principal - azul oscuro grisáceo */
 
-    --card: 0 0% 100%; /* Card background - white */
-    --card-foreground: 220 30% 22%; /* Text color on cards */
+    --card: 0 0% 100%; /* Fondo de tarjetas - blanco puro */
+    --card-foreground: 220 25% 25%; /* Texto en tarjetas */
 
-    --popover: 0 0% 100%; /* Popover background - white */
-    --popover-foreground: 220 30% 22%; /* Text color on popovers */
+    --popover: 0 0% 100%; /* Fondo de popovers - blanco */
+    --popover-foreground: 220 25% 25%; /* Texto en popovers */
 
-    --primary: 217 75% 55%; /* Primary actions, Header background - vibrant blue from image */
-    --primary-foreground: 0 0% 100%; /* Text color on primary elements - white */
+    /* Azul Principal (para header, botones primarios) */
+    --primary: 217 75% 55%; /* Azul vibrante de la imagen */
+    --primary-foreground: 0 0% 100%; /* Texto blanco para contraste */
 
-    --secondary: 210 40% 92%; /* Secondary elements background - light blue-gray */
-    --secondary-foreground: 220 30% 30%; /* Text color on secondary elements */
+    /* Amarillo para acentos (como item activo en sidebar) */
+    --secondary: 45 95% 55%; /* Amarillo brillante */
+    --secondary-foreground: 220 25% 25%; /* Texto oscuro sobre amarillo */
 
-    --muted: 210 30% 94%; /* Muted backgrounds or less important elements - very pale blue */
-    --muted-foreground: 215 20% 50%; /* Muted text color - medium grayish blue */
+    --muted: 220 15% 90%; /* Fondo atenuado - gris azulado claro */
+    --muted-foreground: 220 10% 45%; /* Texto atenuado */
 
-    /* Accent as per PRD (Amber), used for general highlights if needed, distinct from sidebar active state */
-    --accent: 45 100% 51%; 
-    --accent-foreground: 40 100% 10%; /* Dark text for amber accent */
+    /* Similar al amarillo de acento pero podría ser un tono diferente si es necesario */
+    --accent: 45 95% 55%;
+    --accent-foreground: 220 25% 25%;
 
-    --destructive: 0 84% 60%; /* Standard red for destructive actions */
-    --destructive-foreground: 0 0% 98%; /* Light text on destructive red */
+    --destructive: 0 84% 60%; /* Rojo para acciones destructivas */
+    --destructive-foreground: 0 0% 98%; /* Texto claro */
 
-    --border: 210 25% 88%; /* Border color */
-    --input: 0 0% 100%; /* Input field background - white */
-    --ring: 217 75% 60%; /* Focus ring color - slightly brighter primary */
+    --border: 220 15% 85%; /* Bordes - gris azulado */
+    --input: 0 0% 100%; /* Campos de entrada blancos */
+    --ring: 217 75% 55%; /* Anillo de enfoque azul primario */
 
-    --radius: 0.5rem;
+    --radius: 0.5rem; /* Radio de bordes */
 
-    /* Sidebar specific theme variables based on user image */
-    --sidebar-background: 214 70% 93%; /* Sidebar background - light blue */
-    --sidebar-foreground: 220 30% 40%; /* Sidebar text & icons color - dark grayish blue */
-    --sidebar-primary: 217 75% 55%;    /* Color for "SERVEX" in sidebar header, matches main header */
-    --sidebar-primary-foreground: 0 0% 100%; /* White text */
-    --sidebar-accent: 45 100% 51%;      /* Active sidebar item background - Amber #FFC107 */
-    --sidebar-accent-foreground: 40 100% 10%; /* Dark text for active amber sidebar item */
-    --sidebar-border: 210 30% 82%;      /* Sidebar border color */
-    --sidebar-ring: 45 100% 51%;        /* Focus ring color in sidebar */
+    /* Sidebar - Fondo blanco, texto oscuro, acento amarillo */
+    --sidebar-background: 0 0% 100%; /* Fondo blanco */
+    --sidebar-foreground: 220 25% 30%; /* Texto azul oscuro, ligeramente más oscuro que el general */
+    --sidebar-primary: 217 75% 55%;    /* Azul para logo o elementos destacados si es necesario */
+    --sidebar-primary-foreground: 0 0% 100%; /* Texto blanco */
+    --sidebar-accent: 45 95% 55%;      /* Amarillo para items activos */
+    --sidebar-accent-foreground: 220 25% 25%; /* Texto oscuro sobre amarillo */
+    --sidebar-border: 220 15% 90%;      /* Bordes de la sidebar, si los tuviera visibles */
+    --sidebar-ring: 45 95% 55%;        /* Anillo de enfoque amarillo */
 
-    /* Chart Colors (harmonized with the new palette) */
-    --chart-1: hsl(var(--primary)); /* Header Blue */
-    --chart-2: hsl(var(--sidebar-accent)); /* Amber */
-    --chart-3: 200 70% 65%; /* A complementary lighter blue */
-    --chart-4: 40 90% 70%;  /* A lighter orange/yellow */
-    --chart-5: 220 50% 75%; /* A medium desaturated blue */
+    /* Colores para gráficos - Usando la paleta principal */
+    --chart-1: 217 75% 55%; /* Azul principal */
+    --chart-2: 45 95% 55%;  /* Amarillo de acento */
+    --chart-3: 200 80% 65%;  /* Azul cielo (variación del primario) */
+    --chart-4: 35 90% 60%;   /* Naranja (variación del amarillo) */
+    --chart-5: 210 60% 75%;  /* Azul más suave */
   }
 
   .dark {
-    /* Dark mode remains as previously defined or can be adjusted later */
-    --background: 220 20% 12%; 
-    --foreground: 210 30% 92%; 
+    /* Dark Mode - Azul noche con toques dorados */
+    --background: 222 47% 11%; /* Azul muy oscuro */
+    --foreground: 210 40% 98%; /* Texto casi blanco */
 
-    --card: 220 20% 16%; 
-    --card-foreground: 210 30% 92%;
+    --card: 222 47% 15%; /* Tarjetas azul oscuro */
+    --card-foreground: 210 40% 98%;
 
-    --popover: 220 20% 16%;
-    --popover-foreground: 210 30% 92%;
+    --popover: 222 47% 15%;
+    --popover-foreground: 210 40% 98%;
 
-    --primary: 217 91% 70%; 
-    --primary-foreground: 210 20% 10%; 
+    /* Azul eléctrico para modo oscuro */
+    --primary: 217 100% 70%;
+    --primary-foreground: 222 47% 11%; /* Texto azul oscuro */
 
-    --secondary: 215 20% 30%; 
-    --secondary-foreground: 210 30% 85%; 
+    /* Amarillo dorado más suave */
+    --secondary: 38 92% 50%;
+    --secondary-foreground: 0 0% 100%;
 
-    --muted: 220 20% 20%; 
-    --muted-foreground: 215 15% 55%; 
+    --muted: 222 47% 20%;
+    --muted-foreground: 215 20% 65%;
 
-    --accent: 45 90% 55%; 
-    --accent-foreground: 45 15% 10%; 
+    --accent: 45 93% 47%;
+    --accent-foreground: 45 15% 10%;
 
-    --destructive: 0 72% 51%; 
+    --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 98%;
 
-    --border: 220 15% 25%; 
-    --input: 220 15% 22%; 
-    --ring: 217 91% 70%; 
-    
-    --sidebar-background: 220 20% 10%; 
+    --border: 222 47% 25%;
+    --input: 222 47% 20%;
+    --ring: 217 100% 70%;
+
+    /* Sidebar modo oscuro - Azul noche */
+    --sidebar-background: 222 47% 13%;
     --sidebar-foreground: 210 30% 90%;
-    --sidebar-primary: 217 91% 70%; 
-    --sidebar-primary-foreground: 210 20% 10%;
-    --sidebar-accent: 45 90% 55%; 
+    --sidebar-primary: 217 100% 70%;
+    --sidebar-primary-foreground: 222 47% 11%;
+    --sidebar-accent: 45 93% 47%;
     --sidebar-accent-foreground: 45 15% 10%;
-    --sidebar-border: 220 15% 20%;
-    --sidebar-ring: 45 90% 55%; 
+    --sidebar-border: 222 47% 20%;
+    --sidebar-ring: 45 93% 47%;
 
-    --chart-1: 217 91% 70%;
-    --chart-2: 45 90% 55%;
-    --chart-3: 180 70% 55%; 
-    --chart-4: 210 50% 60%; 
-    --chart-5: 50 80% 65%;  
+    /* Colores para gráficos en modo oscuro */
+    --chart-1: 217 100% 70%;
+    --chart-2: 45 93% 47%;
+    --chart-3: 190 90% 60%;
+    --chart-4: 201 96% 50%;
+    --chart-5: 38 92% 50%;
   }
-}
 
-@layer base {
+  /* Otros estilos base */
   * {
     @apply border-border;
   }
   body {
     @apply bg-background text-foreground;
-    font-family: 'Inter', sans-serif; /* Ensure Inter is applied */
+    font-feature-settings: "rlig" 1, "calt" 1;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  }
+
+  /* Mejoras de tipografía */
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-bold tracking-tight;
+  }
+
+  h1 {
+    @apply text-4xl;
+  }
+
+  h2 {
+    @apply text-3xl;
+  }
+
+  h3 {
+    @apply text-2xl;
+  }
+
+  /* Efectos sutiles para interactividad */
+  a, button {
+    @apply transition-colors duration-200;
+  }
+
+  /* Mejora para inputs */
+  input, textarea, select {
+    @apply focus:ring-2 focus:ring-primary focus:ring-opacity-50 focus:outline-none;
+  }
+
+  /* Clase para resaltar elementos con el amarillo */
+  .highlight {
+    @apply bg-accent/10 text-accent-foreground border border-accent/20;
   }
 }
