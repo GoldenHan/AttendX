@@ -1,3 +1,4 @@
+
 'use client';
 
 import Link from 'next/link';
@@ -21,8 +22,8 @@ import {
   Settings,
   FolderKanban,
   ClipboardCheck,
-  Briefcase, // For Staff Management
-  GraduationCap, // For Student Management
+  Briefcase, 
+  GraduationCap, 
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import type { User } from '@/types';
@@ -34,22 +35,23 @@ interface NavItem {
   roles?: User['role'][]; 
 }
 
-const generalNavItems: NavItem[] = [ // Renamed from allNavItems
+const generalNavItems: NavItem[] = [ 
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['admin', 'teacher', 'caja', 'student'] },
   { href: '/attendance-log', label: 'Log Attendance', icon: ClipboardEdit, roles: ['admin', 'teacher', 'caja'] },
   { href: '/attendance-records', label: 'Records', icon: BookUser, roles: ['admin', 'teacher', 'caja', 'student'] },
   { href: '/reports', label: 'Reports', icon: BarChart3, roles: ['admin', 'teacher', 'caja', 'student'] },
-  { href: '/student-grades', label: 'Student Grades', icon: ClipboardCheck, roles: ['admin', 'teacher'] }, 
+  { href: '/student-grades', label: 'Student Grades View', icon: ClipboardCheck, roles: ['admin', 'teacher'] }, 
   { href: '/ai-analysis', label: 'AI Analysis', icon: Brain, roles: ['admin', 'teacher'] },
 ];
 
-const managementNavItems: NavItem[] = [ // New category for User/Student/Group Management
+const managementNavItems: NavItem[] = [ 
    { href: '/student-management', label: 'Student Management', icon: GraduationCap, roles: ['admin', 'teacher'] },
    { href: '/group-management', label: 'Groups', icon: FolderKanban, roles: ['admin', 'teacher'] },
+   { href: '/grades-management', label: 'Grades Management', icon: ClipboardCheck, roles: ['admin', 'teacher'] },
 ];
 
 const adminNavItems: NavItem[] = [
-   { href: '/user-management', label: 'Staff Management', icon: Briefcase, roles: ['admin'] }, // Changed label and icon
+   { href: '/user-management', label: 'Staff Management', icon: Briefcase, roles: ['admin'] }, 
    { href: '/app-settings', label: 'Settings', icon: Settings, roles: ['admin'] },
    { href: '/qr-login-setup', label: 'QR Session Login', icon: QrCode, roles: ['admin', 'teacher', 'caja'] },
 ];
