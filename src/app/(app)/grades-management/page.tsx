@@ -8,12 +8,12 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Loader2, Save, UserCircle, ClipboardCheck, Search, Users } from 'lucide-react';
+import { Loader2, Save, UserCircle, ClipboardCheck, Search, Users, PlusCircle, Trash2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { db } from '@/lib/firebase';
 import { collection, doc, getDocs, getDoc, updateDoc, query, where } from 'firebase/firestore';
-import type { User, Group, PartialScores, ScoreDetail } from '@/types';
-import { useForm } from 'react-hook-form';
+import type { User, PartialScores, ActivityScore, ExamScore } from '@/types';
+import { useForm, useFieldArray, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import {
@@ -32,46 +32,52 @@ const parseOptionalFloat = (val: unknown): number | null | undefined => {
   return isNaN(num) ? undefined : num;
 };
 
-const DEFAULT_ACTIVITY_LABELS: { [K in keyof Omit<PartialScores, 'id'>]-?: string } = {
-  acc1: "Acumulado 1",
-  acc2: "Acumulado 2",
-  acc3: "Acumulado 3",
-  acc4: "Acumulado 4",
-  exam: "Examen",
-};
+const MAX_ACCUMULATED_ACTIVITIES = 5;
+const MAX_ACCUMULATED_TOTAL_SCORE = 50;
+const MAX_EXAM_SCORE = 50;
 
-const activityScoreSchema = (maxScore: number) => z.object({
+const activityScoreSchema = z.object({
+  id: z.string().optional(), // for useFieldArray key
   name: z.string().optional().nullable(),
   score: z.preprocess(
     parseOptionalFloat,
-    z.number().min(0, "Min 0").max(maxScore, `Max ${maxScore}`).optional().nullable()
+    z.number().min(0, "Min 0").max(MAX_ACCUMULATED_TOTAL_SCORE, `Max ${MAX_ACCUMULATED_TOTAL_SCORE}`).optional().nullable() // Max 50 for individual, sum validated separately
   ),
-}).deepPartial().optional();
+});
+
+const examScoreSchema = z.object({
+  name: z.string().optional().nullable(),
+  score: z.preprocess(
+    parseOptionalFloat,
+    z.number().min(0, "Min 0").max(MAX_EXAM_SCORE, `Max ${MAX_EXAM_SCORE}`).optional().nullable()
+  ),
+});
 
 const partialScoresObjectSchema = z.object({
-  acc1: activityScoreSchema(10),
-  acc2: activityScoreSchema(10),
-  acc3: activityScoreSchema(10),
-  acc4: activityScoreSchema(10),
-  exam: activityScoreSchema(60),
-}).deepPartial().optional();
+  accumulatedActivities: z.array(activityScoreSchema)
+    .max(MAX_ACCUMULATED_ACTIVITIES, `Cannot exceed ${MAX_ACCUMULATED_ACTIVITIES} accumulated activities.`)
+    .refine(activities => {
+      const total = activities.reduce((sum, act) => sum + (act.score || 0), 0);
+      return total <= MAX_ACCUMULATED_TOTAL_SCORE;
+    }, {
+      message: `Total score for accumulated activities cannot exceed ${MAX_ACCUMULATED_TOTAL_SCORE}.`,
+      path: ['accumulatedActivities'], // you might want to point to a specific field or general
+    }),
+  exam: examScoreSchema.nullable(),
+});
 
 const gradeEntryFormSchema = z.object({
   partial1: partialScoresObjectSchema,
   partial2: partialScoresObjectSchema,
   partial3: partialScoresObjectSchema,
-}).deepPartial().optional();
+});
 
 type GradeEntryFormValues = z.infer<typeof gradeEntryFormSchema>;
 
 const getDefaultPartialData = (): PartialScores => ({
-  acc1: { name: '', score: null },
-  acc2: { name: '', score: null },
-  acc3: { name: '', score: null },
-  acc4: { name: '', score: null },
-  exam: { name: '', score: null },
+  accumulatedActivities: [],
+  exam: { name: 'Examen', score: null },
 });
-
 
 export default function GradesManagementPage() {
   const router = useRouter();
@@ -95,6 +101,8 @@ export default function GradesManagementPage() {
       partial3: getDefaultPartialData(),
     }
   });
+
+  const { control, watch, setValue, getValues } = gradeForm;
 
   const fetchInitialData = useCallback(async () => {
     setIsLoadingData(true);
@@ -149,10 +157,11 @@ export default function GradesManagementPage() {
 
   const handleSelectStudentForGrading = (student: User, updateUrl: boolean = true) => {
     setSelectedStudent(student);
+    const studentGrades = student.grades;
     gradeForm.reset({
-      partial1: { ...getDefaultPartialData(), ...student.grades?.partial1 },
-      partial2: { ...getDefaultPartialData(), ...student.grades?.partial2 },
-      partial3: { ...getDefaultPartialData(), ...student.grades?.partial3 },
+      partial1: { ...getDefaultPartialData(), ...studentGrades?.partial1, accumulatedActivities: studentGrades?.partial1?.accumulatedActivities || [] },
+      partial2: { ...getDefaultPartialData(), ...studentGrades?.partial2, accumulatedActivities: studentGrades?.partial2?.accumulatedActivities || [] },
+      partial3: { ...getDefaultPartialData(), ...studentGrades?.partial3, accumulatedActivities: studentGrades?.partial3?.accumulatedActivities || [] },
     });
     if (updateUrl) {
       router.push(`/grades-management?studentId=${student.id}`, { scroll: false });
@@ -168,9 +177,9 @@ export default function GradesManagementPage() {
     try {
       const studentRef = doc(db, "users", selectedStudent.id);
       const gradesToSave = {
-        partial1: data.partial1 || {},
-        partial2: data.partial2 || {},
-        partial3: data.partial3 || {},
+        partial1: data.partial1 || getDefaultPartialData(),
+        partial2: data.partial2 || getDefaultPartialData(),
+        partial3: data.partial3 || getDefaultPartialData(),
       };
       await updateDoc(studentRef, { grades: gradesToSave });
       
@@ -179,8 +188,8 @@ export default function GradesManagementPage() {
       const updatedStudentDoc = await getDoc(studentRef);
       if(updatedStudentDoc.exists()){
         const updatedStudentData = { id: updatedStudentDoc.id, ...updatedStudentDoc.data() } as User;
-        setSelectedStudent(updatedStudentData);
-        setAllStudents(prev => prev.map(s => s.id === updatedStudentData.id ? updatedStudentData : s));
+        setSelectedStudent(updatedStudentData); // Update selected student with new grades
+        setAllStudents(prev => prev.map(s => s.id === updatedStudentData.id ? updatedStudentData : s)); // Update in main list
       }
 
     } catch (error: any) {
@@ -191,62 +200,111 @@ export default function GradesManagementPage() {
     }
   };
 
-  const renderGradeInputFields = (partialKey: "partial1" | "partial2" | "partial3") => {
-    const activities = Object.keys(DEFAULT_ACTIVITY_LABELS) as (keyof PartialScores)[];
-    
+  const renderGradeInputFieldsForPartial = (partialKey: "partial1" | "partial2" | "partial3") => {
+    const { fields, append, remove } = useFieldArray({
+      control,
+      name: `${partialKey}.accumulatedActivities`,
+      keyName: "activityId" // use 'activityId' instead of 'id' to avoid conflict with field.id
+    });
+
+    const accumulatedActivitiesValues = watch(`${partialKey}.accumulatedActivities`);
+    const currentTotalAccumulated = accumulatedActivitiesValues?.reduce((sum, act) => sum + (act.score || 0), 0) || 0;
+    const examScoreValue = watch(`${partialKey}.exam.score`) || 0;
+    const currentPartialTotal = currentTotalAccumulated + examScoreValue;
+    const pointsRemainingForAccumulated = MAX_ACCUMULATED_TOTAL_SCORE - currentTotalAccumulated;
+
+
     return (
-      <div className="space-y-4 p-1">
-        {activities.map((activityKey) => (
-          <div key={`${partialKey}-${activityKey}`} className="space-y-3 rounded-md border p-4 shadow-sm bg-card">
-            <p className="text-md font-semibold text-card-foreground">{DEFAULT_ACTIVITY_LABELS[activityKey]}</p>
-            <FormField
-              control={gradeForm.control}
-              name={`${partialKey}.${activityKey}.name`}
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel className="text-sm text-muted-foreground">Activity Name (Optional)</FormLabel>
-                  <FormControl>
-                    <Input
-                      type="text"
-                      placeholder={`Custom name for ${DEFAULT_ACTIVITY_LABELS[activityKey]}`}
-                      {...field}
-                      value={field.value ?? ''}
-                      className="text-sm"
-                      disabled={isSubmitting}
-                    />
-                  </FormControl>
-                  <FormMessage className="text-xs"/>
-                </FormItem>
-              )}
-            />
-            <FormField
-              control={gradeForm.control}
-              name={`${partialKey}.${activityKey}.score`}
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel className="text-sm text-muted-foreground">Score</FormLabel>
-                  <FormControl>
-                    <Input
-                      type="number"
-                      step="0.1"
-                      placeholder={activityKey.startsWith('acc') ? "0-10" : "0-60"}
-                      {...field}
-                      value={field.value === null ? '' : field.value ?? ''}
-                      onChange={e => field.onChange(parseOptionalFloat(e.target.value))}
-                      className="text-sm"
-                      disabled={isSubmitting}
-                    />
-                  </FormControl>
-                  <FormMessage className="text-xs"/>
-                </FormItem>
-              )}
-            />
+      <div className="space-y-6 p-1">
+        <div>
+          <h4 className="text-md font-semibold mb-2 text-card-foreground">Actividades de Acumulación (Máx. {MAX_ACCUMULATED_TOTAL_SCORE} pts total)</h4>
+          {fields.map((field, index) => (
+            <Card key={field.activityId} className="mb-3 p-3 shadow-sm">
+              <div className="flex justify-between items-center mb-2">
+                <FormLabel className="text-sm text-muted-foreground">Actividad {index + 1}</FormLabel>
+                <Button type="button" variant="ghost" size="sm" onClick={() => remove(index)} disabled={isSubmitting} className="text-destructive hover:text-destructive-foreground hover:bg-destructive">
+                  <Trash2 className="h-4 w-4 mr-1" /> Eliminar
+                </Button>
+              </div>
+              <FormField
+                control={control}
+                name={`${partialKey}.accumulatedActivities.${index}.name`}
+                render={({ field: nameField }) => (
+                  <FormItem className="mb-2">
+                    <FormLabel className="text-xs text-muted-foreground">Nombre de Actividad (Opcional)</FormLabel>
+                    <FormControl>
+                      <Input placeholder={`Ej: Tarea ${index + 1}`} {...nameField} value={nameField.value ?? ''} disabled={isSubmitting} />
+                    </FormControl>
+                    <FormMessage className="text-xs"/>
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={control}
+                name={`${partialKey}.accumulatedActivities.${index}.score`}
+                render={({ field: scoreField }) => (
+                  <FormItem>
+                    <FormLabel className="text-xs text-muted-foreground">Calificación</FormLabel>
+                    <FormControl>
+                      <Input type="number" placeholder="0-50" {...scoreField} value={scoreField.value === null ? '' : scoreField.value ?? ''} onChange={e => scoreField.onChange(parseOptionalFloat(e.target.value))} disabled={isSubmitting} />
+                    </FormControl>
+                    <FormMessage className="text-xs"/>
+                  </FormItem>
+                )}
+              />
+            </Card>
+          ))}
+          {fields.length < MAX_ACCUMULATED_ACTIVITIES && (
+            <Button type="button" variant="outline" size="sm" onClick={() => append({ name: '', score: null })} disabled={isSubmitting}>
+              <PlusCircle className="h-4 w-4 mr-1" /> Añadir Actividad de Acumulación
+            </Button>
+          )}
+           {gradeForm.formState.errors?.[partialKey]?.accumulatedActivities?.root && (
+             <p className="text-sm font-medium text-destructive mt-1">
+                {gradeForm.formState.errors[partialKey]?.accumulatedActivities?.root?.message}
+            </p>
+           )}
+          <div className="mt-3 text-sm text-muted-foreground">
+            Total Acumulado Actual: <span className="font-bold">{currentTotalAccumulated.toFixed(2)} / {MAX_ACCUMULATED_TOTAL_SCORE}</span><br/>
+            (Puntos restantes para acumulado: {pointsRemainingForAccumulated.toFixed(2)})
           </div>
-        ))}
+        </div>
+        
+        <div className="space-y-3 rounded-md border p-4 shadow-sm bg-card mt-4">
+           <h4 className="text-md font-semibold text-card-foreground">Examen (Máx. {MAX_EXAM_SCORE} pts)</h4>
+            <FormField
+              control={control}
+              name={`${partialKey}.exam.name`}
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="text-sm text-muted-foreground">Nombre del Examen (Opcional)</FormLabel>
+                  <FormControl>
+                    <Input placeholder="Examen Parcial" {...field} value={field.value ?? 'Examen Parcial'} disabled={isSubmitting} />
+                  </FormControl>
+                  <FormMessage className="text-xs"/>
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={control}
+              name={`${partialKey}.exam.score`}
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="text-sm text-muted-foreground">Calificación del Examen</FormLabel>
+                  <FormControl>
+                    <Input type="number" step="0.1" placeholder={`0-${MAX_EXAM_SCORE}`} {...field} value={field.value === null ? '' : field.value ?? ''} onChange={e => field.onChange(parseOptionalFloat(e.target.value))} disabled={isSubmitting} />
+                  </FormControl>
+                  <FormMessage className="text-xs"/>
+                </FormItem>
+              )}
+            />
+        </div>
+        <div className="mt-4 p-3 bg-secondary/30 rounded-md text-center">
+            <p className="text-lg font-semibold text-secondary-foreground">Nota Total del Parcial: {currentPartialTotal.toFixed(2)} / 100</p>
+        </div>
       </div>
     );
   };
-
 
   if (isLoadingData && !allStudents.length && !allGroups.length) {
     return (
@@ -272,11 +330,14 @@ export default function GradesManagementPage() {
             <ClipboardCheck className="h-6 w-6 text-primary" />
             Grades Management
           </CardTitle>
-          <CardDescription>Filter students by group or search by name, then select a student to edit their grades, including activity names and scores.</CardDescription>
+          <CardDescription>
+            Filtra estudiantes por grupo o busca por nombre. Selecciona un estudiante para editar sus calificaciones.
+            Cada parcial consta de hasta {MAX_ACCUMULATED_ACTIVITIES} actividades de acumulación (sumando un máx. de {MAX_ACCUMULATED_TOTAL_SCORE}pts) y un examen (máx. {MAX_EXAM_SCORE}pts).
+            La nota total del parcial es de 100pts. La aprobación es con 70pts.
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-         <Form {...gradeForm}> {/* Form provider now wraps filters and grade form area */}
-          <div className="flex flex-col sm:flex-row gap-4">
+         <div className="flex flex-col sm:flex-row gap-4">
             <div className="flex-1 min-w-[200px]">
               <Label htmlFor="group-filter">Filter by Group</Label>
               <Select
@@ -361,7 +422,6 @@ export default function GradesManagementPage() {
               All students are listed. Use filters to narrow down or select from above if list is too long.
             </p>
            )}
-          </Form>
         </CardContent>
       </Card>
 
@@ -369,7 +429,9 @@ export default function GradesManagementPage() {
         <Card>
           <CardHeader>
             <CardTitle>Editing Grades for: {selectedStudent.name}</CardTitle>
-            <CardDescription>Enter activity names (optional) and scores for each partial. Accumulated max 10, Exam max 60.</CardDescription>
+            <CardDescription>
+                Ingresa nombres de actividades (opcional) y calificaciones. El total de acumulados es máx. {MAX_ACCUMULATED_TOTAL_SCORE}pts, examen máx. {MAX_EXAM_SCORE}pts.
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <Form {...gradeForm}>
@@ -381,13 +443,13 @@ export default function GradesManagementPage() {
                     <TabsTrigger value="partial3">3er Parcial</TabsTrigger>
                   </TabsList>
                   <TabsContent value="partial1" className="border-x border-b p-4 rounded-b-md">
-                    {renderGradeInputFields("partial1")}
+                    {renderGradeInputFieldsForPartial("partial1")}
                   </TabsContent>
                   <TabsContent value="partial2" className="border-x border-b p-4 rounded-b-md">
-                    {renderGradeInputFields("partial2")}
+                    {renderGradeInputFieldsForPartial("partial2")}
                   </TabsContent>
                   <TabsContent value="partial3" className="border-x border-b p-4 rounded-b-md">
-                    {renderGradeInputFields("partial3")}
+                    {renderGradeInputFieldsForPartial("partial3")}
                   </TabsContent>
                 </Tabs>
                 <Button type="submit" disabled={isSubmitting} className="w-full sm:w-auto">
@@ -407,3 +469,5 @@ export default function GradesManagementPage() {
     </div>
   );
 }
+
+      
