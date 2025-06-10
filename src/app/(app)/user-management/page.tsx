@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Loader2, Pencil, Trash2, UserPlus, FolderKanban, Users as UsersIcon } from 'lucide-react'; 
+import { Loader2, Pencil, Trash2, UserPlus, FolderKanban, Users as UsersIcon } from 'lucide-react';
 import type { User } from '@/types';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, deleteDoc, doc, addDoc, updateDoc } from 'firebase/firestore';
@@ -44,12 +44,13 @@ import {
   FormMessage,
   FormDescription,
 } from '@/components/ui/form';
-import { Label } from "@/components/ui/label"; // Corrected import
+import { Label } from "@/components/ui/label";
 
-// Schema for add/edit (no adminPassword here)
+// Schema for add/edit
 const userFormSchema = z.object({
   name: z.string().min(2, { message: "Name must be at least 2 characters." }),
   email: z.string().email({ message: "Invalid email address." }).optional().or(z.literal('')),
+  phoneNumber: z.string().optional().or(z.literal('')), // Added phoneNumber
   role: z.enum(['student', 'teacher', 'admin', 'caja'], { required_error: "Role is required." }),
   photoUrl: z.string().url({ message: "Please enter a valid URL for photo." }).optional().or(z.literal('')),
   level: z.enum(['Beginner', 'Intermediate', 'Advanced', 'Other']).optional(),
@@ -84,6 +85,7 @@ export default function UserManagementPage() {
     defaultValues: {
       name: '',
       email: '',
+      phoneNumber: '',
       role: 'student',
       photoUrl: '',
       level: undefined,
@@ -120,24 +122,27 @@ export default function UserManagementPage() {
       form.setValue('age', undefined);
       form.setValue('gender', undefined);
       form.setValue('preferredShift', undefined);
+      form.setValue('phoneNumber', ''); // Clear phone number if not student
+    } else {
+      form.setValue('email', ''); // Clear email if student
     }
   }, [watchedRole, form]);
 
   const handleOpenAddDialog = () => {
     setEditingUser(null);
     form.reset({
-      name: '', email: '', role: 'student', photoUrl: '',
+      name: '', email: '', phoneNumber: '', role: 'student', photoUrl: '',
       level: undefined, notes: '', age: undefined, gender: undefined, preferredShift: undefined,
     });
     setIsUserFormDialogOpen(true);
   };
   
   const handleOpenEditDialog = (userToEdit: User) => {
-    console.log("Opening edit dialog for:", userToEdit);
     setEditingUser(userToEdit);
     form.reset({
       name: userToEdit.name,
-      email: userToEdit.email || '',
+      email: userToEdit.role !== 'student' ? (userToEdit.email || '') : '',
+      phoneNumber: userToEdit.role === 'student' ? (userToEdit.phoneNumber || '') : '',
       role: userToEdit.role,
       photoUrl: userToEdit.photoUrl || '',
       level: userToEdit.level || undefined,
@@ -150,15 +155,11 @@ export default function UserManagementPage() {
   };
 
   const handleUserFormSubmit = async (data: UserFormValues) => {
-    console.log("Form data submitted for add/edit:", data);
-    console.log("Currently editing user (null if adding):", editingUser);
     setIsSubmitting(true);
     
     const baseFirestoreData: Partial<User> = {
       name: data.name,
       role: data.role,
-      // Ensure optional text fields are empty strings if not provided, not undefined
-      email: data.email || '', 
       photoUrl: data.photoUrl || '', 
     };
     
@@ -167,22 +168,24 @@ export default function UserManagementPage() {
     }
 
     if (data.role === 'student') {
-      baseFirestoreData.level = data.level; // Keep as undefined if not selected
-      baseFirestoreData.notes = data.notes || ''; // Ensure empty string if not provided
-      baseFirestoreData.age = data.age; // Keep as undefined if not provided
-      baseFirestoreData.gender = data.gender; // Keep as undefined if not selected
-      baseFirestoreData.preferredShift = data.preferredShift; // Keep as undefined if not selected
+      baseFirestoreData.phoneNumber = data.phoneNumber || '';
+      baseFirestoreData.email = ''; // Ensure email is empty for students
+      baseFirestoreData.level = data.level;
+      baseFirestoreData.notes = data.notes || '';
+      baseFirestoreData.age = data.age;
+      baseFirestoreData.gender = data.gender;
+      baseFirestoreData.preferredShift = data.preferredShift;
     } else { 
-      // Explicitly set student fields to undefined if not a student
+      baseFirestoreData.email = data.email || '';
+      baseFirestoreData.phoneNumber = ''; // Ensure phone number is empty for non-students
       baseFirestoreData.level = undefined;
       baseFirestoreData.notes = undefined;
       baseFirestoreData.age = undefined;
       baseFirestoreData.gender = undefined;
       baseFirestoreData.preferredShift = undefined;
     }
-    
-    // Create a clean object for Firestore, removing any top-level undefined properties
-    const firestoreData = Object.entries(baseFirestoreData).reduce((acc, [key, value]) => {
+        
+    const firestoreDataForSave = Object.entries(baseFirestoreData).reduce((acc, [key, value]) => {
       if (value !== undefined) {
         // @ts-ignore
         acc[key] = value;
@@ -190,20 +193,16 @@ export default function UserManagementPage() {
       return acc;
     }, {} as Partial<User>);
 
-
-    console.log("Data being sent to Firestore:", firestoreData);
+    console.log("Data being sent to Firestore for add/edit:", firestoreDataForSave);
 
     try {
       if (editingUser) {
-        console.log("Attempting to update user with ID:", editingUser.id);
         const userRef = doc(db, 'users', editingUser.id);
-        console.log("User ref path for update:", userRef.path);
-        await updateDoc(userRef, firestoreData);
+        await updateDoc(userRef, firestoreDataForSave);
         toast({ title: 'User Updated', description: `${data.name}'s record updated successfully.` });
       } else {
-        console.log("Attempting to add new user.");
-        // @ts-ignore - Firestore will generate ID if 'id' is not in firestoreData
-        const docRef = await addDoc(collection(db, 'users'), firestoreData);
+        // @ts-ignore
+        const docRef = await addDoc(collection(db, 'users'), firestoreDataForSave);
         toast({ 
           title: 'User Record Added', 
           description: `${data.name} added to Firestore. No Auth account created.` 
@@ -211,20 +210,20 @@ export default function UserManagementPage() {
       }
       
       form.reset({
-        name: '', email: '', role: 'student', photoUrl: '',
+        name: '', email: '', phoneNumber: '', role: 'student', photoUrl: '',
         level: undefined, notes: '', age: undefined, gender: undefined, preferredShift: undefined,
       });
       setEditingUser(null);
       setIsUserFormDialogOpen(false);
       await fetchUsers();
     } catch (error: any) {
-      console.error("Firestore operation error:", error);
-      console.error("Full error object:", JSON.stringify(error, Object.getOwnPropertyNames(error)));
       toast({ 
         title: editingUser ? 'Update User Failed' : 'Add User Failed', 
         description: `An error occurred: ${error.message || 'Please try again.'}`, 
         variant: 'destructive' 
       });
+      console.error("Firestore operation error:", error);
+      console.error("Full error object:", JSON.stringify(error, Object.getOwnPropertyNames(error)));
     } finally {
       setIsSubmitting(false);
     }
@@ -237,7 +236,6 @@ export default function UserManagementPage() {
   };
 
   const confirmDeleteUser = async () => {
-    console.log("Attempting to delete Firestore record for:", userToDelete);
     if (!userToDelete || !deletePassword) {
       toast({ title: 'Input Required', description: 'Admin password is required to delete.', variant: 'destructive' });
       setIsSubmitting(false); 
@@ -251,11 +249,9 @@ export default function UserManagementPage() {
 
     setIsSubmitting(true);
     try {
-      console.log("Re-authenticating admin...");
       await reauthenticateCurrentUser(deletePassword);
       toast({ title: 'Admin Re-authenticated', description: 'Proceeding with deletion.' });
 
-      console.log("Deleting Firestore document for user ID:", userToDelete.id);
       await deleteDoc(doc(db, 'users', userToDelete.id));
       toast({ title: 'User Record Deleted', description: `${userToDelete.name}'s Firestore record removed successfully. Auth account (if any) not affected.` });
       
@@ -264,8 +260,6 @@ export default function UserManagementPage() {
       setIsDeleteUserDialogOpen(false);
       await fetchUsers();
     } catch (error: any) {
-      console.error("Error deleting user record:", error);
-      console.error("Full deletion error object:", JSON.stringify(error, Object.getOwnPropertyNames(error)));
       let errorMessage = 'Failed to delete user record.';
       const reAuthErrorCodes = ['auth/wrong-password', 'auth/invalid-credential', 'auth/user-mismatch'];
       
@@ -280,7 +274,6 @@ export default function UserManagementPage() {
       }
       toast({ title: 'Delete Failed', description: errorMessage, variant: 'destructive' });
       
-      // Keep dialog open if it was a re-auth error, otherwise close it
       if (!reAuthErrorCodes.includes(error.code) && error.code !== 'auth/too-many-requests' && error.code !== 'auth/requires-recent-login') {
          setIsDeleteUserDialogOpen(false); 
          setDeletePassword(''); 
@@ -325,7 +318,7 @@ export default function UserManagementPage() {
             if (!isOpen) {
               setEditingUser(null); 
               form.reset({
-                  name: '', email: '', role: 'student', photoUrl: '',
+                  name: '', email: '', phoneNumber: '', role: 'student', photoUrl: '',
                   level: undefined, notes: '', age: undefined, gender: undefined, preferredShift: undefined,
               });
             }
@@ -358,17 +351,6 @@ export default function UserManagementPage() {
                   />
                   <FormField
                     control={form.control}
-                    name="email"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Email (Optional)</FormLabel>
-                        <FormControl><Input type="email" placeholder="john.doe@example.com" {...field} /></FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                  <FormField
-                    control={form.control}
                     name="role"
                     render={({ field }) => (
                       <FormItem>
@@ -386,6 +368,33 @@ export default function UserManagementPage() {
                       </FormItem>
                     )}
                   />
+
+                  {watchedRole === 'student' ? (
+                    <FormField
+                      control={form.control}
+                      name="phoneNumber"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Phone Number (Optional)</FormLabel>
+                          <FormControl><Input type="tel" placeholder="e.g., 123-456-7890" {...field} /></FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  ) : (
+                    <FormField
+                      control={form.control}
+                      name="email"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Email (Optional)</FormLabel>
+                          <FormControl><Input type="email" placeholder="john.doe@example.com" {...field} /></FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  )}
+
                    <FormField
                     control={form.control}
                     name="photoUrl"
@@ -502,7 +511,7 @@ export default function UserManagementPage() {
           <TableHeader>
             <TableRow>
               <TableHead>Name</TableHead>
-              <TableHead>Email</TableHead>
+              <TableHead>Contact</TableHead>
               <TableHead>Role</TableHead>
               <TableHead>Age</TableHead>
               <TableHead>Gender</TableHead>
@@ -514,7 +523,7 @@ export default function UserManagementPage() {
             {users.length > 0 ? users.map((user) => (
               <TableRow key={user.id}>
                 <TableCell>{user.name}</TableCell>
-                <TableCell>{user.email || 'N/A'}</TableCell>
+                <TableCell>{user.role === 'student' ? (user.phoneNumber || 'N/A') : (user.email || 'N/A')}</TableCell>
                 <TableCell>
                   <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
                     user.role === 'admin' ? 'bg-purple-500/20 text-purple-700 dark:text-purple-400' :
@@ -604,5 +613,3 @@ export default function UserManagementPage() {
     </>
   );
 }
-
-    

@@ -4,7 +4,8 @@ export interface User {
   uid?: string; // Firebase Auth UID
   name: string;
   role: 'student' | 'teacher' | 'admin' | 'caja';
-  email?: string;
+  email?: string; // Now optional for all
+  phoneNumber?: string; // New optional field for phone number
   photoUrl?: string; // Optional: URL to the student's photo
   level?: 'Beginner' | 'Intermediate' | 'Advanced' | 'Other'; // Optional: Student's level
   notes?: string; // Optional: General notes about the student
