@@ -2,6 +2,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
+import { useRouter } from 'next/navigation'; // Import useRouter
 import {
   Table,
   TableBody,
@@ -13,9 +14,9 @@ import {
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Loader2, Pencil, Trash2, UserPlus, Search, GraduationCap, NotebookPen } from 'lucide-react';
-import type { User, Group, PartialScores } from '@/types';
+import type { User, Group } from '@/types'; // PartialScores removed as it's not used here directly
 import { db } from '@/lib/firebase';
-import { collection, getDocs, deleteDoc, doc, updateDoc, query, where, addDoc } from 'firebase/firestore'; // Added addDoc back
+import { collection, getDocs, deleteDoc, doc, updateDoc, query, where, addDoc, writeBatch } from 'firebase/firestore';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -43,12 +44,12 @@ import {
   FormMessage,
 } from '@/components/ui/form';
 import { Label } from "@/components/ui/label";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+// Tabs, TabsContent, TabsList, TabsTrigger removed as grade dialog is removed
 
 // Schema for student add/edit dialog (Firestore data only)
 const studentFormSchema = z.object({
   name: z.string().min(2, { message: "Name must be at least 2 characters." }),
-  email: z.string().email({ message: "Invalid email address." }).optional().or(z.literal('')), // Email is optional for Firestore record
+  email: z.string().email({ message: "Invalid email address." }).optional().or(z.literal('')), 
   phoneNumber: z.string().optional().or(z.literal('')),
   photoUrl: z.string().url({ message: "Please enter a valid URL for photo." }).optional().or(z.literal('')),
   level: z.enum(['Beginner', 'Intermediate', 'Advanced', 'Other']).optional(),
@@ -63,33 +64,10 @@ const studentFormSchema = z.object({
 
 type StudentFormValues = z.infer<typeof studentFormSchema>;
 
-const parseOptionalFloat = (val: unknown): number | null | undefined => {
-  if (val === "" || val === undefined || val === null) return null;
-  const num = Number(val);
-  return isNaN(num) ? undefined : num; 
-};
-
-const partialScoresSchema = z.object({
-  acc1: z.preprocess(parseOptionalFloat, z.number().min(0, "Min 0").max(10, "Max 10").optional().nullable()),
-  acc2: z.preprocess(parseOptionalFloat, z.number().min(0, "Min 0").max(10, "Max 10").optional().nullable()),
-  acc3: z.preprocess(parseOptionalFloat, z.number().min(0, "Min 0").max(10, "Max 10").optional().nullable()),
-  acc4: z.preprocess(parseOptionalFloat, z.number().min(0, "Min 0").max(10, "Max 10").optional().nullable()),
-  exam: z.preprocess(parseOptionalFloat, z.number().min(0, "Min 0").max(60, "Max 60").optional().nullable()),
-}).deepPartial().optional(); 
-
-
-const studentGradeFormSchema = z.object({
-  grades: z.object({
-    partial1: partialScoresSchema,
-    partial2: partialScoresSchema,
-    partial3: partialScoresSchema,
-  }).deepPartial().optional(),
-});
-
-type StudentGradeFormValues = z.infer<typeof studentGradeFormSchema>;
-
+// studentGradeFormSchema and StudentGradeFormValues removed
 
 export default function StudentManagementPage() {
+  const router = useRouter(); // Initialize router
   const [allStudents, setAllStudents] = useState<User[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -105,10 +83,10 @@ export default function StudentManagementPage() {
   const [selectedGroupIdForFilter, setSelectedGroupIdForFilter] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState<string>('');
 
-  const [isGradeDialogOpen, setIsGradeDialogOpen] = useState(false);
-  const [studentForGrading, setStudentForGrading] = useState<User | null>(null);
-  const [isSubmittingGrades, setIsSubmittingGrades] = useState(false);
-
+  // Grade dialog states and functions removed
+  // const [isGradeDialogOpen, setIsGradeDialogOpen] = useState(false);
+  // const [studentForGrading, setStudentForGrading] = useState<User | null>(null);
+  // const [isSubmittingGrades, setIsSubmittingGrades] = useState(false);
 
   const { toast } = useToast();
   const { reauthenticateCurrentUser, authUser } = useAuth();
@@ -128,23 +106,15 @@ export default function StudentManagementPage() {
     },
   });
 
-  const gradeForm = useForm<StudentGradeFormValues>({
-    resolver: zodResolver(studentGradeFormSchema),
-    defaultValues: {
-      grades: {
-        partial1: { acc1: null, acc2: null, acc3: null, acc4: null, exam: null },
-        partial2: { acc1: null, acc2: null, acc3: null, acc4: null, exam: null },
-        partial3: { acc1: null, acc2: null, acc3: null, acc4: null, exam: null },
-      }
-    },
-  });
+  // gradeForm removed
 
   const fetchData = async () => {
     setIsLoading(true);
     try {
-      const studentsQuery = query(collection(db, 'users'), where('role', '==', 'student'));
+      // Fetch from 'students' collection
+      const studentsQuery = query(collection(db, 'students')); 
       const studentsSnapshot = await getDocs(studentsQuery);
-      setAllStudents(studentsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as User)));
+      setAllStudents(studentsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data(), role: 'student' } as User)));
 
       const groupsSnapshot = await getDocs(collection(db, 'groups'));
       setGroups(groupsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as Group)));
@@ -166,9 +136,9 @@ export default function StudentManagementPage() {
 
     if (selectedGroupIdForFilter !== 'all') {
       const group = groups.find(g => g.id === selectedGroupIdForFilter);
-      if (group && group.studentIds) {
+      if (group && Array.isArray(group.studentIds)) {
         studentsToDisplay = studentsToDisplay.filter(student => group.studentIds.includes(student.id));
-      } else {
+      } else if (group) { // Group selected but might have no studentIds array or is empty
         studentsToDisplay = []; 
       }
     }
@@ -200,7 +170,7 @@ export default function StudentManagementPage() {
       photoUrl: studentToEdit.photoUrl || '',
       level: studentToEdit.level || undefined,
       notes: studentToEdit.notes || '',
-      age: studentToEdit.age ?? undefined,
+      age: studentToEdit.age ?? undefined, // Use ?? to handle 0 or null correctly if age can be 0
       gender: studentToEdit.gender || undefined,
       preferredShift: studentToEdit.preferredShift || undefined,
     });
@@ -210,10 +180,9 @@ export default function StudentManagementPage() {
   const handleStudentFormSubmit = async (data: StudentFormValues) => {
     setIsSubmitting(true);
         
-    const firestoreData: Omit<User, 'id' | 'uid' | 'grades'> & { role: 'student' } = {
+    const studentDetails: Omit<User, 'id' | 'uid' | 'grades' | 'role'> = {
         name: data.name,
-        email: data.email || undefined, // Store email if provided
-        role: 'student', // Role is always student here
+        email: data.email || undefined,
         phoneNumber: data.phoneNumber || undefined,
         photoUrl: data.photoUrl || undefined,
         level: data.level,
@@ -224,14 +193,14 @@ export default function StudentManagementPage() {
     };
 
     // Remove undefined fields before saving to Firestore
-    const finalFirestoreData = Object.fromEntries(
-        Object.entries(firestoreData).filter(([_, v]) => v !== undefined)
+    const finalStudentDetails = Object.fromEntries(
+        Object.entries(studentDetails).filter(([_, v]) => v !== undefined)
     );
 
-    if (editingStudent) { // --- EDITING EXISTING STUDENT ---
+    if (editingStudent) { 
       try {
-        const studentRef = doc(db, 'users', editingStudent.id);
-        await updateDoc(studentRef, finalFirestoreData);
+        const studentRef = doc(db, "students", editingStudent.id);
+        await updateDoc(studentRef, finalStudentDetails);
         toast({ title: 'Student Updated', description: `${data.name}'s record updated successfully.` });
         studentForm.reset();
         setEditingStudent(null);
@@ -245,12 +214,22 @@ export default function StudentManagementPage() {
         });
         console.error("Firestore update error:", error);
       }
-    } else { // --- ADDING NEW STUDENT (Firestore only) ---
+    } else { 
       try {
-        await addDoc(collection(db, 'users'), finalFirestoreData);
+        // Ensure new students have an initialized grades field
+        const newStudentDocData = {
+          ...finalStudentDetails,
+          role: 'student' as 'student', // Explicitly set role
+          grades: { 
+            partial1: { accumulatedActivities: [], exam: { name: null, score: null } },
+            partial2: { accumulatedActivities: [], exam: { name: null, score: null } },
+            partial3: { accumulatedActivities: [], exam: { name: null, score: null } },
+          },
+        };
+        await addDoc(collection(db, 'students'), newStudentDocData);
         toast({
           title: 'Student Record Added',
-          description: `${data.name}'s record added to Firestore. An Auth account needs to be created separately if login is required.`,
+          description: `${data.name}'s record added to Firestore.`,
         });
         studentForm.reset();
         setIsStudentFormDialogOpen(false);
@@ -293,9 +272,22 @@ export default function StudentManagementPage() {
     setIsSubmitting(true);
     try {
       await reauthenticateCurrentUser(deleteAdminPassword);
+      
+      const batch = writeBatch(db);
+      const studentRef = doc(db, 'students', studentToDelete.id);
+      batch.delete(studentRef);
 
-      await deleteDoc(doc(db, 'users', studentToDelete.id));
-      toast({ title: 'Student Record Deleted', description: `${studentToDelete.name}'s Firestore record removed. Auth account (if any) is not affected by this action.` });
+      // Remove student from any groups they were in
+      const groupsToUpdate = groups.filter(g => g.studentIds?.includes(studentToDelete.id));
+      groupsToUpdate.forEach(group => {
+        const groupRef = doc(db, 'groups', group.id);
+        const updatedStudentIds = group.studentIds.filter(id => id !== studentToDelete.id);
+        batch.update(groupRef, { studentIds: updatedStudentIds });
+      });
+
+      await batch.commit();
+
+      toast({ title: 'Student Record Deleted', description: `${studentToDelete.name}'s Firestore record and group memberships removed.` });
       
       setStudentToDelete(null);
       setDeleteAdminPassword('');
@@ -327,99 +319,13 @@ export default function StudentManagementPage() {
     }
   };
 
-  const handleOpenGradeDialog = (student: User) => {
-    setStudentForGrading(student);
-    gradeForm.reset({
-      grades: {
-        partial1: student.grades?.partial1 || { acc1: null, acc2: null, acc3: null, acc4: null, exam: null },
-        partial2: student.grades?.partial2 || { acc1: null, acc2: null, acc3: null, acc4: null, exam: null },
-        partial3: student.grades?.partial3 || { acc1: null, acc2: null, acc3: null, acc4: null, exam: null },
-      }
-    });
-    setIsGradeDialogOpen(true);
+  // handleOpenGradeDialog and handleGradeFormSubmit removed
+
+  const handleGoToManageGrades = (studentId: string) => {
+    router.push(`/grades-management?studentId=${studentId}`);
   };
 
-  const handleGradeFormSubmit = async (data: StudentGradeFormValues) => {
-    if (!studentForGrading) {
-        toast({ title: "Error", description: "No student selected for grading.", variant: "destructive" });
-        return;
-    }
-    setIsSubmittingGrades(true);
-    try {
-        const studentRef = doc(db, "users", studentForGrading.id);
-        
-        const gradesToSave = {
-          partial1: data.grades?.partial1 || studentForGrading.grades?.partial1 || {},
-          partial2: data.grades?.partial2 || studentForGrading.grades?.partial2 || {},
-          partial3: data.grades?.partial3 || studentForGrading.grades?.partial3 || {},
-        };
-
-        await updateDoc(studentRef, {
-            grades: gradesToSave
-        });
-        toast({ title: "Grades Updated", description: `Grades for ${studentForGrading.name} saved successfully.` });
-        setIsGradeDialogOpen(false);
-        setStudentForGrading(null);
-        await fetchData(); 
-    } catch (error: any) {
-        toast({ title: "Grade Update Failed", description: `An error occurred: ${error.message || 'Please try again.'}`, variant: "destructive" });
-        console.error("Grade update error:", error);
-    } finally {
-        setIsSubmittingGrades(false);
-    }
-  };
-  
-  const renderGradeInputFields = (partialKey: "partial1" | "partial2" | "partial3") => {
-    const accumulatedFields: (keyof PartialScores)[] = ['acc1', 'acc2', 'acc3', 'acc4'];
-    return (
-      <div className="space-y-3 p-1">
-        {accumulatedFields.map((accKey, index) => (
-          <FormField
-            key={`${partialKey}-${accKey}`}
-            control={gradeForm.control}
-            name={`grades.${partialKey}.${accKey}`}
-            render={({ field }) => (
-              <FormItem className="flex items-center gap-2">
-                <FormLabel className="w-28 whitespace-nowrap">Acumulado {index + 1}</FormLabel>
-                <FormControl>
-                  <Input
-                    type="number"
-                    placeholder="0-10"
-                    {...field}
-                    value={field.value === null ? '' : field.value ?? ''}
-                    onChange={e => field.onChange(parseOptionalFloat(e.target.value))}
-                    className="w-full"
-                  />
-                </FormControl>
-                <FormMessage className="text-xs"/>
-              </FormItem>
-            )}
-          />
-        ))}
-        <FormField
-          control={gradeForm.control}
-          name={`grades.${partialKey}.exam`}
-          render={({ field }) => (
-            <FormItem className="flex items-center gap-2">
-              <FormLabel className="w-28">Examen</FormLabel>
-              <FormControl>
-                <Input
-                  type="number"
-                  placeholder="0-60"
-                  {...field}
-                  value={field.value === null ? '' : field.value ?? ''}
-                  onChange={e => field.onChange(parseOptionalFloat(e.target.value))}
-                  className="w-full"
-                />
-              </FormControl>
-              <FormMessage className="text-xs"/>
-            </FormItem>
-          )}
-        />
-      </div>
-    );
-  };
-
+  // renderGradeInputFields removed
 
   if (isLoading && allStudents.length === 0 && groups.length === 0) {
     return (
@@ -667,9 +573,9 @@ export default function StudentManagementPage() {
                 <TableCell>{student.gender ? student.gender.charAt(0).toUpperCase() + student.gender.slice(1) : 'N/A'}</TableCell>
                 <TableCell>{student.preferredShift || 'N/A'}</TableCell>
                 <TableCell className="space-x-1">
-                  <Button variant="ghost" size="icon" onClick={() => handleOpenGradeDialog(student)}>
+                  <Button variant="ghost" size="icon" onClick={() => handleGoToManageGrades(student.id)}>
                     <NotebookPen className="h-4 w-4" />
-                    <span className="sr-only">Edit Grades</span>
+                    <span className="sr-only">Manage Grades</span>
                   </Button>
                   <Button variant="ghost" size="icon" onClick={() => handleOpenEditDialog(student)}>
                     <Pencil className="h-4 w-4" />
@@ -741,58 +647,7 @@ export default function StudentManagementPage() {
         </DialogContent>
     </Dialog>
 
-    {/* Grade Entry Dialog */}
-    <Dialog open={isGradeDialogOpen} onOpenChange={(isOpen) => {
-        setIsGradeDialogOpen(isOpen);
-        if (!isOpen) {
-            setStudentForGrading(null);
-            gradeForm.reset({
-              grades: {
-                partial1: { acc1: null, acc2: null, acc3: null, acc4: null, exam: null },
-                partial2: { acc1: null, acc2: null, acc3: null, acc4: null, exam: null },
-                partial3: { acc1: null, acc2: null, acc3: null, acc4: null, exam: null },
-              }
-            });
-        }
-    }}>
-        <DialogContent className="sm:max-w-lg"> 
-            <DialogHeader>
-                <DialogTitle>Registro de Notas: {studentForGrading?.name}</DialogTitle>
-                <DialogDescription>
-                    Enter or update the detailed grades for this student. Max 10 for accumulated, max 60 for exam per partial.
-                </DialogDescription>
-            </DialogHeader>
-            <Form {...gradeForm}>
-                <form onSubmit={gradeForm.handleSubmit(handleGradeFormSubmit)} className="space-y-4 py-4 max-h-[70vh] overflow-y-auto">
-                  <Tabs defaultValue="partial1" className="w-full">
-                    <TabsList className="grid w-full grid-cols-3">
-                      <TabsTrigger value="partial1">1er Parcial</TabsTrigger>
-                      <TabsTrigger value="partial2">2do Parcial</TabsTrigger>
-                      <TabsTrigger value="partial3">3er Parcial</TabsTrigger>
-                    </TabsList>
-                    <TabsContent value="partial1">
-                      {renderGradeInputFields("partial1")}
-                    </TabsContent>
-                    <TabsContent value="partial2">
-                      {renderGradeInputFields("partial2")}
-                    </TabsContent>
-                    <TabsContent value="partial3">
-                      {renderGradeInputFields("partial3")}
-                    </TabsContent>
-                  </Tabs>
-                  <DialogFooter className="pt-6">
-                      <DialogClose asChild>
-                          <Button type="button" variant="outline">Cancel</Button>
-                      </DialogClose>
-                      <Button type="submit" disabled={isSubmittingGrades}>
-                          {isSubmittingGrades && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                          Save Grades
-                      </Button>
-                  </DialogFooter>
-                </form>
-            </Form>
-        </DialogContent>
-    </Dialog>
+    {/* Grade Entry Dialog and related logic completely removed */}
     </>
   );
 }
