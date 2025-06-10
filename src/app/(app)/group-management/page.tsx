@@ -98,18 +98,26 @@ export default function GroupManagementPage() {
   const handleAddGroupSubmit = async (data: GroupFormValues) => {
     setIsSubmitting(true);
     try {
-      const newGroupData: Omit<Group, 'id'> = {
+      const newGroupDataToSave: Omit<Group, 'id' | 'studentIds'> & { studentIds: string[] } = {
         name: data.name,
         type: data.type,
         startDate: data.startDate.toISOString(),
         endDate: data.endDate ? data.endDate.toISOString() : undefined,
-        studentIds: [],
+        studentIds: [], // New groups start with no students
       };
-      await addDoc(collection(db, 'groups'), newGroupData);
+      const docRef = await addDoc(collection(db, 'groups'), newGroupDataToSave);
+      
+      // Optimistic update of local state
+      const newGroupWithId: Group = {
+        ...newGroupDataToSave,
+        id: docRef.id,
+      };
+      setGroups(prevGroups => [...prevGroups, newGroupWithId]);
+
       toast({ title: 'Group Created', description: `${data.name} created successfully.` });
-      form.reset();
+      form.reset({ name: '', type: 'Saturday', startDate: undefined, endDate: undefined });
       setIsAddGroupDialogOpen(false);
-      await fetchGroups();
+      // No need to call fetchGroups() here anymore
     } catch (error) {
       console.error("Error adding group:", error);
       toast({ title: 'Create Group Failed', description: 'Could not create the group.', variant: 'destructive' });
@@ -122,8 +130,9 @@ export default function GroupManagementPage() {
     if (!confirm(`Are you sure you want to delete the group "${groupName}"? This action cannot be undone.`)) return;
     try {
       await deleteDoc(doc(db, 'groups', groupId));
+      setGroups(prevGroups => prevGroups.filter(g => g.id !== groupId)); // Optimistic update
       toast({ title: 'Group Deleted', description: `Group "${groupName}" removed successfully.` });
-      await fetchGroups();
+      // No need to call fetchGroups() here if we optimistically update
     } catch (error)      {
       console.error("Error deleting group:", error);
       toast({ title: 'Delete Failed', description: 'Could not delete the group.', variant: 'destructive' });
@@ -140,7 +149,7 @@ export default function GroupManagementPage() {
     setIsManageStudentsDialogOpen(true);
     
     setIsLoadingStudentsForDialog(true);
-    setStudentsForDialog([]); // Clear previous students
+    setStudentsForDialog([]); 
     try {
       const studentQuery = query(collection(db, 'users'), where('role', '==', 'student'));
       const studentsSnapshot = await getDocs(studentQuery);
@@ -165,10 +174,18 @@ export default function GroupManagementPage() {
     try {
       const groupRef = doc(db, 'groups', selectedGroupForStudentManagement.id);
       await updateDoc(groupRef, { studentIds: selectedStudentIdsForGroup });
+      
+      // Optimistic update for the student count in the table
+      setGroups(prevGroups => prevGroups.map(g => 
+        g.id === selectedGroupForStudentManagement.id 
+        ? { ...g, studentIds: selectedStudentIdsForGroup } 
+        : g
+      ));
+
       toast({ title: 'Students Updated', description: `Student assignments for group "${selectedGroupForStudentManagement.name}" updated.` });
       setIsManageStudentsDialogOpen(false);
       setSelectedGroupForStudentManagement(null);
-      await fetchGroups(); 
+      // No need to call fetchGroups()
     } catch (error) {
       console.error("Error updating students in group:", error);
       toast({ title: 'Update Failed', description: 'Could not update student assignments.', variant: 'destructive' });
@@ -179,9 +196,18 @@ export default function GroupManagementPage() {
 
   const formatDate = (dateString?: string) => {
     if (!dateString) return 'N/A';
-    const date = new Date(dateString);
-    return isValid(date) ? format(date, 'PPP') : 'Invalid Date';
+    try {
+        // Attempt to parse as ISO string first (which is how it's stored)
+        const date = new Date(dateString);
+        if (isValid(date)) {
+            return format(date, 'PPP');
+        }
+    } catch (e) {
+        // Fallback for other potential formats, though less likely with current setup
+    }
+    return 'Invalid Date';
   };
+
 
   if (isLoadingGroups && groups.length === 0) {
     return (
@@ -208,7 +234,7 @@ export default function GroupManagementPage() {
           </div>
           <Dialog open={isAddGroupDialogOpen} onOpenChange={(isOpen) => {
             setIsAddGroupDialogOpen(isOpen);
-            if (!isOpen) form.reset();
+            if (!isOpen) form.reset({ name: '', type: 'Saturday', startDate: undefined, endDate: undefined });
           }}>
             <DialogTrigger asChild>
               <Button size="sm" className="gap-1.5 text-sm">
@@ -401,7 +427,7 @@ export default function GroupManagementPage() {
         if (!isOpen) {
           setSelectedGroupForStudentManagement(null);
           setSelectedStudentIdsForGroup([]);
-          setStudentsForDialog([]); // Clear students when dialog closes
+          setStudentsForDialog([]); 
         }
       }}>
         <DialogContent className="sm:max-w-md">
