@@ -1,7 +1,7 @@
 
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Table,
   TableBody,
@@ -12,8 +12,10 @@ import {
 } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Label } from '@/components/ui/label';
 import { Pencil, Trash2, Download, Loader2, MessageSquareText } from 'lucide-react';
-import type { AttendanceRecord as AttendanceRecordType, User, Session, Group } from '@/types'; // Changed ClassInfo to Group
+import type { AttendanceRecord as AttendanceRecordType, User, Session, Group } from '@/types';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, deleteDoc, doc } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
@@ -25,27 +27,28 @@ import {
 } from "@/components/ui/tooltip";
 
 export default function AttendanceRecordsPage() {
-  const [records, setRecords] = useState<AttendanceRecordType[]>([]);
+  const [allRecords, setAllRecords] = useState<AttendanceRecordType[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
-  const [groups, setGroups] = useState<Group[]>([]); // Changed classes to groups, ClassInfo to Group
+  const [groups, setGroups] = useState<Group[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [selectedGroupId, setSelectedGroupId] = useState<string | 'all'>('all');
   const { toast } = useToast();
 
   const fetchData = async () => {
     setIsLoading(true);
     try {
-      const [recordsSnapshot, usersSnapshot, sessionsSnapshot, groupsSnapshot] = await Promise.all([ // Changed classesSnapshot to groupsSnapshot
+      const [recordsSnapshot, usersSnapshot, sessionsSnapshot, groupsSnapshot] = await Promise.all([
         getDocs(collection(db, 'attendanceRecords')),
         getDocs(collection(db, 'users')),
         getDocs(collection(db, 'sessions')),
-        getDocs(collection(db, 'groups')), // Fetch from 'groups' collection
+        getDocs(collection(db, 'groups')),
       ]);
 
-      setRecords(recordsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AttendanceRecordType)));
+      setAllRecords(recordsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AttendanceRecordType)));
       setUsers(usersSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as User)));
       setSessions(sessionsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Session)));
-      setGroups(groupsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Group))); // Use Group type
+      setGroups(groupsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Group)));
 
     } catch (error) {
       console.error("Error fetching data:", error);
@@ -56,13 +59,13 @@ export default function AttendanceRecordsPage() {
 
   useEffect(() => {
     fetchData();
-  }, [toast]); // Added toast to dependency array as it's used in fetchData
+  }, [toast]);
 
   const handleDeleteRecord = async (recordId: string) => {
     if (!confirm('Are you sure you want to delete this record?')) return;
     try {
       await deleteDoc(doc(db, 'attendanceRecords', recordId));
-      setRecords(prevRecords => prevRecords.filter(r => r.id !== recordId));
+      setAllRecords(prevRecords => prevRecords.filter(r => r.id !== recordId));
       toast({ title: 'Record Deleted', description: 'Attendance record removed successfully.' });
     } catch (error) {
       console.error("Error deleting record:", error);
@@ -71,13 +74,24 @@ export default function AttendanceRecordsPage() {
   };
 
   const getStudentName = (userId: string) => users.find(u => u.id === userId)?.name || 'Unknown Student';
+  
   const getSessionInfo = (sessionId: string) => {
     const session = sessions.find(s => s.id === sessionId);
     if (!session) return 'Unknown Session';
-    // Session.classId now refers to a Group.id
     const groupInfo = groups.find(g => g.id === session.classId); 
     return `${groupInfo?.name || 'Unknown Group'} (${session.date} ${session.time})`;
   };
+
+  const filteredRecords = useMemo(() => {
+    if (selectedGroupId === 'all') {
+      return allRecords;
+    }
+    const groupSessionIds = sessions
+      .filter(session => session.classId === selectedGroupId)
+      .map(session => session.id);
+    
+    return allRecords.filter(record => groupSessionIds.includes(record.sessionId));
+  }, [allRecords, sessions, selectedGroupId]);
   
   if (isLoading) {
     return (
@@ -98,8 +112,28 @@ export default function AttendanceRecordsPage() {
     <TooltipProvider>
       <Card>
         <CardHeader>
-          <CardTitle>Attendance Records</CardTitle>
-          <CardDescription>View and manage all logged attendance records.</CardDescription>
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+            <div>
+              <CardTitle>Attendance Records</CardTitle>
+              <CardDescription>View and manage logged attendance records. Filter by group.</CardDescription>
+            </div>
+            <div className="w-full sm:w-auto min-w-[200px]">
+              <Label htmlFor="group-filter" className="sr-only">Filter by Group</Label>
+              <Select value={selectedGroupId} onValueChange={setSelectedGroupId} disabled={isLoading}>
+                <SelectTrigger id="group-filter">
+                  <SelectValue placeholder="Select a group" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Groups</SelectItem>
+                  {groups.map((group) => (
+                    <SelectItem key={group.id} value={group.id}>
+                      {group.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
           {/* TODO: Implement Export CSV
           <Button variant="outline" size="sm" className="ml-auto gap-1.5 text-sm">
             <Download className="size-3.5" />
@@ -112,7 +146,7 @@ export default function AttendanceRecordsPage() {
             <TableHeader>
               <TableRow>
                 <TableHead>Student</TableHead>
-                <TableHead>Session (Group)</TableHead> {/* Updated header */}
+                <TableHead>Session (Group)</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Timestamp</TableHead>
                 <TableHead>Observation</TableHead>
@@ -120,7 +154,7 @@ export default function AttendanceRecordsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {records.length > 0 ? records.map((record) => (
+              {filteredRecords.length > 0 ? filteredRecords.map((record) => (
                 <TableRow key={record.id}>
                   <TableCell>{getStudentName(record.userId)}</TableCell>
                   <TableCell>{getSessionInfo(record.sessionId)}</TableCell>
@@ -165,7 +199,9 @@ export default function AttendanceRecordsPage() {
                 </TableRow>
               )) : (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center">No attendance records found.</TableCell>
+                  <TableCell colSpan={6} className="text-center">
+                    {selectedGroupId === 'all' ? 'No attendance records found.' : 'No attendance records found for the selected group.'}
+                  </TableCell>
                 </TableRow>
               )}
             </TableBody>
