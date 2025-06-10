@@ -162,7 +162,7 @@ export default function GradesManagementPage() {
   const fetchInitialData = useCallback(async () => {
     setIsLoadingData(true);
     try {
-      const studentQuery = query(collection(db, 'users'), where('role', '==', 'student'));
+      const studentQuery = query(collection(db, 'students')); // Corrected: Query 'students' collection
       const studentsSnapshot = await getDocs(studentQuery);
       const studentList = studentsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as User));
       setAllStudents(studentList);
@@ -241,7 +241,7 @@ export default function GradesManagementPage() {
       if (isSubmitting) return; 
       setAutoSaveStatus('saving');
       try {
-        const studentRef = doc(db, "users", studentId);
+        const studentRef = doc(db, "students", studentId); // Corrected: Use 'students' collection for studentRef
         const gradesToSave = {
           partial1: mapPartialToSave(currentData.partial1),
           partial2: mapPartialToSave(currentData.partial2),
@@ -282,7 +282,7 @@ export default function GradesManagementPage() {
     debouncedSave.cancel(); 
     setAutoSaveStatus('saving');
     try {
-      const studentRef = doc(db, "users", selectedStudent.id);
+      const studentRef = doc(db, "students", selectedStudent.id); // Corrected: Use 'students' collection
       const gradesToSave = {
         partial1: mapPartialToSave(data.partial1),
         partial2: mapPartialToSave(data.partial2),
