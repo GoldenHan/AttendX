@@ -15,7 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Loader2, Pencil, Trash2, UserPlus, Search, GraduationCap, NotebookPen } from 'lucide-react';
 import type { User, Group, PartialScores } from '@/types';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, deleteDoc, doc, updateDoc, query, where } from 'firebase/firestore'; // Removed addDoc
+import { collection, getDocs, deleteDoc, doc, updateDoc, query, where, addDoc } from 'firebase/firestore'; // Added addDoc back
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -44,11 +44,11 @@ import {
 } from '@/components/ui/form';
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { createUserAccount, type CreateUserAccountInput } from '@/ai/flows/user-admin-flow';
 
 // Schema for student add/edit dialog (Firestore data only)
 const studentFormSchema = z.object({
   name: z.string().min(2, { message: "Name must be at least 2 characters." }),
+  email: z.string().email({ message: "Invalid email address." }).optional().or(z.literal('')), // Email is optional for Firestore record
   phoneNumber: z.string().optional().or(z.literal('')),
   photoUrl: z.string().url({ message: "Please enter a valid URL for photo." }).optional().or(z.literal('')),
   level: z.enum(['Beginner', 'Intermediate', 'Advanced', 'Other']).optional(),
@@ -117,6 +117,7 @@ export default function StudentManagementPage() {
     resolver: zodResolver(studentFormSchema),
     defaultValues: {
       name: '',
+      email: '',
       phoneNumber: '',
       photoUrl: '',
       level: undefined,
@@ -184,7 +185,7 @@ export default function StudentManagementPage() {
   const handleOpenAddDialog = () => {
     setEditingStudent(null);
     studentForm.reset({
-      name: '', phoneNumber: '', photoUrl: '',
+      name: '', email: '', phoneNumber: '', photoUrl: '',
       level: undefined, notes: '', age: undefined, gender: undefined, preferredShift: undefined,
     });
     setIsStudentFormDialogOpen(true);
@@ -194,6 +195,7 @@ export default function StudentManagementPage() {
     setEditingStudent(studentToEdit);
     studentForm.reset({
       name: studentToEdit.name,
+      email: studentToEdit.email || '',
       phoneNumber: studentToEdit.phoneNumber || '',
       photoUrl: studentToEdit.photoUrl || '',
       level: studentToEdit.level || undefined,
@@ -208,10 +210,10 @@ export default function StudentManagementPage() {
   const handleStudentFormSubmit = async (data: StudentFormValues) => {
     setIsSubmitting(true);
         
-    if (editingStudent) { // --- EDITING EXISTING STUDENT ---
-      // This part only updates Firestore, does not touch Auth
-      const firestoreUpdateData: Partial<Omit<User, 'id' | 'uid' | 'email' | 'role' | 'grades'>> = {
+    const firestoreData: Omit<User, 'id' | 'uid' | 'grades'> & { role: 'student' } = {
         name: data.name,
+        email: data.email || undefined, // Store email if provided
+        role: 'student', // Role is always student here
         phoneNumber: data.phoneNumber || undefined,
         photoUrl: data.photoUrl || undefined,
         level: data.level,
@@ -219,14 +221,17 @@ export default function StudentManagementPage() {
         age: data.age,
         gender: data.gender,
         preferredShift: data.preferredShift,
-      };
-      const finalUpdateData = Object.fromEntries(
-        Object.entries(firestoreUpdateData).filter(([_, v]) => v !== undefined)
-      );
+    };
 
+    // Remove undefined fields before saving to Firestore
+    const finalFirestoreData = Object.fromEntries(
+        Object.entries(firestoreData).filter(([_, v]) => v !== undefined)
+    );
+
+    if (editingStudent) { // --- EDITING EXISTING STUDENT ---
       try {
         const studentRef = doc(db, 'users', editingStudent.id);
-        await updateDoc(studentRef, finalUpdateData);
+        await updateDoc(studentRef, finalFirestoreData);
         toast({ title: 'Student Updated', description: `${data.name}'s record updated successfully.` });
         studentForm.reset();
         setEditingStudent(null);
@@ -239,67 +244,27 @@ export default function StudentManagementPage() {
           variant: 'destructive' 
         });
         console.error("Firestore update error:", error);
-      } finally {
-        setIsSubmitting(false);
       }
-
-    } else { // --- ADDING NEW STUDENT ---
-      // Auto-generate email and password
-      const sanitizedName = data.name.toLowerCase().replace(/[^a-z0-9]/g, '');
-      const generatedEmail = `${sanitizedName}${Date.now().toString().slice(-5)}@student.servex.com`;
-      const firstPartName = data.name.split(' ')[0];
-      const generatedPassword = `${firstPartName}Сервекс7!`;
-
-      const flowInput: CreateUserAccountInput = {
-        name: data.name,
-        email: generatedEmail,
-        password: generatedPassword,
-        role: 'student',
-        photoUrl: data.photoUrl || '',
-        level: data.level,
-        notes: data.notes,
-        age: data.age,
-        gender: data.gender,
-        preferredShift: data.preferredShift,
-      };
-
+    } else { // --- ADDING NEW STUDENT (Firestore only) ---
       try {
-        const result = await createUserAccount(flowInput);
-        if (result.success && result.userId) {
-          toast({
-            title: 'Student Account Created',
-            description: (
-              <div>
-                <p>{result.message}</p>
-                <p className="mt-2 font-semibold">Please share these credentials with the student:</p>
-                <p>Email: <code className="font-mono bg-muted p-1 rounded text-xs">{generatedEmail}</code></p>
-                <p>Password: <code className="font-mono bg-muted p-1 rounded text-xs">{generatedPassword}</code></p>
-                <p className="mt-1 text-xs text-muted-foreground">The student should change this password upon first login.</p>
-              </div>
-            ),
-            duration: 20000, // Extended duration
-          });
-          studentForm.reset();
-          setIsStudentFormDialogOpen(false);
-          await fetchData();
-        } else {
-          toast({
-            title: 'Failed to Create Student Account',
-            description: result.message || 'An unknown error occurred via the creation flow.',
-            variant: 'destructive',
-          });
-        }
-      } catch (error: any) {
-        console.error("Error calling createUserAccount flow:", error);
+        await addDoc(collection(db, 'users'), finalFirestoreData);
         toast({
-          title: 'Error Creating Student',
-          description: error.message || 'An unexpected error occurred while calling the creation flow.',
+          title: 'Student Record Added',
+          description: `${data.name}'s record added to Firestore. An Auth account needs to be created separately if login is required.`,
+        });
+        studentForm.reset();
+        setIsStudentFormDialogOpen(false);
+        await fetchData();
+      } catch (error: any) {
+        console.error("Error adding student to Firestore:", error);
+        toast({
+          title: 'Error Adding Student Record',
+          description: error.message || 'An unexpected error occurred.',
           variant: 'destructive',
         });
-      } finally {
-        setIsSubmitting(false);
       }
     }
+    setIsSubmitting(false);
   };
 
   const handleOpenDeleteDialog = (student: User) => {
@@ -329,8 +294,6 @@ export default function StudentManagementPage() {
     try {
       await reauthenticateCurrentUser(deleteAdminPassword);
 
-      // Note: This only deletes the Firestore record. The Firebase Auth user is NOT deleted here.
-      // Deleting Auth users is a more sensitive operation and typically done via Firebase console or a separate, dedicated admin flow.
       await deleteDoc(doc(db, 'users', studentToDelete.id));
       toast({ title: 'Student Record Deleted', description: `${studentToDelete.name}'s Firestore record removed. Auth account (if any) is not affected by this action.` });
       
@@ -480,14 +443,14 @@ export default function StudentManagementPage() {
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div>
                 <CardTitle className="flex items-center gap-2"><GraduationCap className="h-6 w-6 text-primary" /> Student Management</CardTitle>
-                <CardDescription>Manage student records. Filter by group or search by name/shift. New students get an auto-generated login.</CardDescription>
+                <CardDescription>Manage student records. Filter by group or search by name/shift. Student login accounts must be created separately via Firebase Console if needed.</CardDescription>
             </div>
             <Dialog open={isStudentFormDialogOpen} onOpenChange={(isOpen) => {
                 setIsStudentFormDialogOpen(isOpen);
                 if (!isOpen) {
                 setEditingStudent(null); 
                 studentForm.reset({
-                    name: '', phoneNumber: '', photoUrl: '',
+                    name: '', email: '', phoneNumber: '', photoUrl: '',
                     level: undefined, notes: '', age: undefined, gender: undefined, preferredShift: undefined,
                 });
                 }
@@ -502,7 +465,7 @@ export default function StudentManagementPage() {
                 <DialogHeader>
                     <DialogTitle>{editingStudent ? 'Edit Student Record' : 'Add New Student Record'}</DialogTitle>
                     <DialogDescription>
-                    {editingStudent ? 'Update student details.' : 'Fill in student details. A login account will be auto-generated.'}
+                    {editingStudent ? 'Update student details in Firestore.' : 'Fill in student details to add to Firestore. Auth accounts are managed separately.'}
                     </DialogDescription>
                 </DialogHeader>
                 <Form {...studentForm}>
@@ -518,6 +481,18 @@ export default function StudentManagementPage() {
                         </FormItem>
                         )}
                     />
+                    <FormField
+                        control={studentForm.control}
+                        name="email"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Email (Optional)</FormLabel>
+                            <FormControl><Input type="email" placeholder="student@example.com (for reference)" {...field} /></FormControl>
+                            <FormDescription>Used for contact or to link with a manually created Auth account.</FormDescription>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
                     <FormField
                         control={studentForm.control}
                         name="phoneNumber"
@@ -620,7 +595,7 @@ export default function StudentManagementPage() {
                         <DialogClose asChild><Button type="button" variant="outline">Cancel</Button></DialogClose>
                         <Button type="submit" disabled={isSubmitting}>
                         {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                        {editingStudent ? 'Save Changes' : 'Add Student & Create Login'}
+                        {editingStudent ? 'Save Changes' : 'Add Student Record'}
                         </Button>
                     </DialogFooter>
                     </form>
@@ -672,7 +647,7 @@ export default function StudentManagementPage() {
           <TableHeader>
             <TableRow>
               <TableHead>Name</TableHead>
-              <TableHead>Email (Login)</TableHead>
+              <TableHead>Email</TableHead>
               <TableHead>Phone</TableHead>
               <TableHead>Level</TableHead>
               <TableHead>Age</TableHead>
@@ -685,7 +660,7 @@ export default function StudentManagementPage() {
             {filteredStudents.length > 0 ? filteredStudents.map((student) => (
               <TableRow key={student.id}>
                 <TableCell>{student.name}</TableCell>
-                <TableCell>{student.email || 'N/A (No Auth)'}</TableCell>
+                <TableCell>{student.email || 'N/A'}</TableCell>
                 <TableCell>{student.phoneNumber || 'N/A'}</TableCell>
                 <TableCell>{student.level || 'N/A'}</TableCell>
                 <TableCell>{student.age ?? 'N/A'}</TableCell>
@@ -821,4 +796,3 @@ export default function StudentManagementPage() {
     </>
   );
 }
-
