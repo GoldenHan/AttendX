@@ -4,104 +4,105 @@
 @tailwind utilities;
 
 body {
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: 'Inter', Arial, Helvetica, sans-serif; /* Ensure Inter is primary */
 }
 
 @layer base {
   :root {
-    --background: 210 100% 98%; /* Very Light Sky Blue */
-    --foreground: 215 50% 25%; /* Dark Slate Blue */
+    /* Light Mode Palette based on user image */
+    --background: 210 20% 96%; /* Main content area background - very light blue-white */
+    --foreground: 220 30% 22%; /* Default text color - dark blue */
 
-    --card: 0 0% 100%; /* White */
-    --card-foreground: 215 50% 25%; /* Dark Slate Blue */
+    --card: 0 0% 100%; /* Card background - white */
+    --card-foreground: 220 30% 22%; /* Text color on cards */
 
-    --popover: 0 0% 100%; /* White */
-    --popover-foreground: 215 50% 25%;
+    --popover: 0 0% 100%; /* Popover background - white */
+    --popover-foreground: 220 30% 22%; /* Text color on popovers */
 
-    --primary: 217 91% 60%; /* Vibrant Blue (Tailwind Blue-500) */
-    --primary-foreground: 0 0% 100%; /* White */
+    --primary: 217 75% 55%; /* Primary actions, Header background - vibrant blue from image */
+    --primary-foreground: 0 0% 100%; /* Text color on primary elements - white */
 
-    --secondary: 210 80% 75%; /* Lighter Soft Blue */
-    --secondary-foreground: 215 50% 25%; /* Dark Slate Blue for text on secondary */
+    --secondary: 210 40% 92%; /* Secondary elements background - light blue-gray */
+    --secondary-foreground: 220 30% 30%; /* Text color on secondary elements */
 
-    --muted: 210 60% 94%; /* Very Pale Blue */
-    --muted-foreground: 215 30% 55%; /* Medium Grayish Blue */
+    --muted: 210 30% 94%; /* Muted backgrounds or less important elements - very pale blue */
+    --muted-foreground: 215 20% 50%; /* Muted text color - medium grayish blue */
 
-    --accent: 45 100% 50%; /* Bright Yellow (Gold) */
-    --accent-foreground: 45 70% 15%; /* Dark Brown/Almost Black for text on yellow */
+    /* Accent as per PRD (Amber), used for general highlights if needed, distinct from sidebar active state */
+    --accent: 45 100% 51%; 
+    --accent-foreground: 40 100% 10%; /* Dark text for amber accent */
 
-    --destructive: 0 84% 60%; /* Standard red */
-    --destructive-foreground: 0 0% 98%; /* Very light, almost white */
+    --destructive: 0 84% 60%; /* Standard red for destructive actions */
+    --destructive-foreground: 0 0% 98%; /* Light text on destructive red */
 
-    --border: 210 40% 88%; /* Light Grayish Blue Border */
-    --input: 210 50% 96%; /* Very Light Blue for input background */
-    --ring: 217 91% 60%; /* Primary blue for focus rings */
+    --border: 210 25% 88%; /* Border color */
+    --input: 0 0% 100%; /* Input field background - white */
+    --ring: 217 75% 60%; /* Focus ring color - slightly brighter primary */
 
     --radius: 0.5rem;
 
-    /* Sidebar specific theme variables */
-    --sidebar-background: 210 70% 95%; /* Light Sky Blue, slightly darker than main background */
-    --sidebar-foreground: 215 50% 25%;
-    --sidebar-primary: 217 91% 60%; /* Same as main primary */
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 45 100% 50%; /* Accent Yellow */
-    --sidebar-accent-foreground: 45 70% 15%;
-    --sidebar-border: 210 30% 80%;
-    --sidebar-ring: 45 100% 50%; /* Accent Yellow for sidebar focus rings */
+    /* Sidebar specific theme variables based on user image */
+    --sidebar-background: 214 70% 93%; /* Sidebar background - light blue */
+    --sidebar-foreground: 220 30% 40%; /* Sidebar text & icons color - dark grayish blue */
+    --sidebar-primary: 217 75% 55%;    /* Color for "SERVEX" in sidebar header, matches main header */
+    --sidebar-primary-foreground: 0 0% 100%; /* White text */
+    --sidebar-accent: 45 100% 51%;      /* Active sidebar item background - Amber #FFC107 */
+    --sidebar-accent-foreground: 40 100% 10%; /* Dark text for active amber sidebar item */
+    --sidebar-border: 210 30% 82%;      /* Sidebar border color */
+    --sidebar-ring: 45 100% 51%;        /* Focus ring color in sidebar */
 
-    /* Chart Colors (Blue/Yellow dominant) */
-    --chart-1: 217 91% 60%; /* Primary Blue */
-    --chart-2: 45 100% 55%;  /* Accent Yellow (slightly lighter for charts) */
-    --chart-3: 190 70% 45%; /* Cyan/Teal (complementary) */
-    --chart-4: 210 80% 75%; /* Lighter Soft Blue */
-    --chart-5: 50 100% 70%; /* Lighter Yellow/Orange */
+    /* Chart Colors (harmonized with the new palette) */
+    --chart-1: hsl(var(--primary)); /* Header Blue */
+    --chart-2: hsl(var(--sidebar-accent)); /* Amber */
+    --chart-3: 200 70% 65%; /* A complementary lighter blue */
+    --chart-4: 40 90% 70%;  /* A lighter orange/yellow */
+    --chart-5: 220 50% 75%; /* A medium desaturated blue */
   }
 
   .dark {
-    --background: 220 20% 12%; /* Very dark cool gray */
-    --foreground: 210 30% 92%; /* Light cool gray */
+    /* Dark mode remains as previously defined or can be adjusted later */
+    --background: 220 20% 12%; 
+    --foreground: 210 30% 92%; 
 
-    --card: 220 20% 16%; /* Slightly lighter than dark background */
+    --card: 220 20% 16%; 
     --card-foreground: 210 30% 92%;
 
     --popover: 220 20% 16%;
     --popover-foreground: 210 30% 92%;
 
-    --primary: 217 91% 70%; /* Brighter blue for dark mode */
-    --primary-foreground: 210 20% 10%; /* Very dark for text on bright primary */
+    --primary: 217 91% 70%; 
+    --primary-foreground: 210 20% 10%; 
 
-    --secondary: 215 20% 30%; /* Dark muted blue-gray */
-    --secondary-foreground: 210 30% 85%; /* Light gray text on dark secondary */
+    --secondary: 215 20% 30%; 
+    --secondary-foreground: 210 30% 85%; 
 
-    --muted: 220 20% 20%; /* Darker cool gray for muted elements */
-    --muted-foreground: 215 15% 55%; /* Medium-dark cool gray for text */
+    --muted: 220 20% 20%; 
+    --muted-foreground: 215 15% 55%; 
 
-    --accent: 45 90% 55%; /* Slightly less intense orange/yellow for dark mode */
-    --accent-foreground: 45 15% 10%; /* Dark text on accent */
+    --accent: 45 90% 55%; 
+    --accent-foreground: 45 15% 10%; 
 
-    --destructive: 0 72% 51%; /* Slightly desaturated red for dark mode */
+    --destructive: 0 72% 51%; 
     --destructive-foreground: 0 0% 98%;
 
-    --border: 220 15% 25%; /* Darker border */
-    --input: 220 15% 22%; /* Dark input background */
-    --ring: 217 91% 70%; /* Primary blue for focus rings in dark mode */
+    --border: 220 15% 25%; 
+    --input: 220 15% 22%; 
+    --ring: 217 91% 70%; 
     
-    /* Dark Sidebar specific theme variables */
-    --sidebar-background: 220 20% 10%; /* Even darker than main dark background */
+    --sidebar-background: 220 20% 10%; 
     --sidebar-foreground: 210 30% 90%;
-    --sidebar-primary: 217 91% 70%; /* Same as main primary dark */
+    --sidebar-primary: 217 91% 70%; 
     --sidebar-primary-foreground: 210 20% 10%;
-    --sidebar-accent: 45 90% 55%; /* Same as main accent dark */
+    --sidebar-accent: 45 90% 55%; 
     --sidebar-accent-foreground: 45 15% 10%;
     --sidebar-border: 220 15% 20%;
-    --sidebar-ring: 45 90% 55%; /* Accent for sidebar focus rings in dark */
+    --sidebar-ring: 45 90% 55%; 
 
-    /* Chart Colors Dark */
     --chart-1: 217 91% 70%;
     --chart-2: 45 90% 55%;
-    --chart-3: 180 70% 55%; /* Adjusted Teal for dark */
-    --chart-4: 210 50% 60%; /* Adjusted Light Blue for dark */
-    --chart-5: 50 80% 65%;  /* Adjusted Lighter Yellow/Orange for dark */
+    --chart-3: 180 70% 55%; 
+    --chart-4: 210 50% 60%; 
+    --chart-5: 50 80% 65%;  
   }
 }
 
@@ -111,5 +112,6 @@ body {
   }
   body {
     @apply bg-background text-foreground;
+    font-family: 'Inter', sans-serif; /* Ensure Inter is applied */
   }
 }

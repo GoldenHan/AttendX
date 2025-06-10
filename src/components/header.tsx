@@ -1,7 +1,7 @@
 
 'use client';
 import Link from 'next/link';
-import { Sheet, UserCircle, LogOut, Settings } from 'lucide-react';
+import { Sheet as SheetIcon, UserCircle, LogOut, Settings } from 'lucide-react'; // Renamed Sheet to SheetIcon to avoid conflict
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -22,11 +22,12 @@ export function Header() {
   };
 
   return (
-    <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b bg-background px-4 sm:static sm:h-auto sm:border-0 sm:bg-transparent sm:px-6 py-2">
-      <SidebarTrigger className="md:hidden" />
+    <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b border-primary/60 bg-primary px-4 text-primary-foreground sm:static sm:h-auto sm:px-6 py-2">
+      <SidebarTrigger className="text-primary-foreground md:hidden" />
       <div className="flex items-center gap-2">
-        <Sheet className="h-6 w-6 text-primary" />
-        <Link href="/" className="text-xl font-semibold font-headline text-foreground">
+        {/* SheetIcon refers to lucide-react Sheet icon */}
+        <SheetIcon className="h-6 w-6 text-primary-foreground" /> 
+        <Link href="/" className="text-xl font-semibold font-headline text-primary-foreground">
           SERVEX
         </Link>
       </div>
@@ -34,8 +35,11 @@ export function Header() {
         {authUser && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="icon" className="overflow-hidden rounded-full">
-                {/* TODO: Add Avatar with firestoreUser?.photoUrl if available */}
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="overflow-hidden rounded-full text-primary-foreground hover:bg-white/20 focus-visible:ring-primary-foreground"
+              >
                 <UserCircle className="h-5 w-5" />
                 <span className="sr-only">Toggle user menu</span>
               </Button>
