@@ -38,6 +38,7 @@ import * as z from 'zod';
 import {
   Form,
   FormControl,
+  FormDescription, // Added FormDescription here
   FormField,
   FormItem,
   FormLabel,
@@ -56,7 +57,7 @@ const userFormSchema = z.object({
     z.number({ invalid_type_error: "Age must be a number." }).positive("Age must be positive.").int("Age must be an integer.").optional()
   ),
   gender: z.enum(['male', 'female', 'other']).optional(),
-  adminPassword: z.string().min(1, { message: "Admin password is required to authorize this action." }), // Changed min to 1 as it might be empty initially then filled
+  adminPassword: z.string().min(1, { message: "Admin password is required to authorize this action." }),
 });
 
 type UserFormValues = z.infer<typeof userFormSchema>;
@@ -132,17 +133,25 @@ export default function UserManagementPage() {
       notes: userToEdit.notes || '',
       age: userToEdit.age ?? undefined,
       gender: userToEdit.gender || undefined,
-      adminPassword: '', // Always require password for edit
+      adminPassword: '', 
     });
     setIsUserFormDialogOpen(true);
   };
 
   const handleUserFormSubmit = async (data: UserFormValues) => {
     console.log(editingUser ? "Intentando editar usuario..." : "Intentando añadir usuario...", data);
-    if (!authUser || authUser.email !== 'admin@servex.com') {
-        toast({ title: 'Authorization Failed', description: 'Only the main admin can perform this action.', variant: 'destructive' });
+    
+    if (!authUser) {
+        toast({ title: 'Authorization Failed', description: 'Admin user not found. Please log in.', variant: 'destructive' });
+        setIsSubmitting(false);
         return;
     }
+    if (!data.adminPassword) {
+        toast({ title: 'Admin Password Required', description: 'Please enter your admin password to authorize this action.', variant: 'destructive' });
+        setIsSubmitting(false); // Ensure isSubmitting is reset
+        return;
+    }
+
     setIsSubmitting(true);
     try {
       await reauthenticateCurrentUser(data.adminPassword);
@@ -151,6 +160,7 @@ export default function UserManagementPage() {
       const userDataToSave: Partial<User> = {
         name: data.name,
         role: data.role,
+        uid: editingUser?.uid // Preserve existing UID if editing, or it will be undefined for new users
       };
       if (data.email) userDataToSave.email = data.email;
       if (data.photoUrl) userDataToSave.photoUrl = data.photoUrl;
@@ -160,15 +170,19 @@ export default function UserManagementPage() {
         if (data.notes) userDataToSave.notes = data.notes;
         if (data.age !== undefined) userDataToSave.age = data.age;
         if (data.gender) userDataToSave.gender = data.gender;
+      } else { // Clear student-specific fields if role is not student
+        userDataToSave.level = undefined;
+        userDataToSave.notes = undefined;
+        userDataToSave.age = undefined;
+        userDataToSave.gender = undefined;
       }
 
+
       if (editingUser) {
-        // Update existing user
         const userRef = doc(db, 'users', editingUser.id);
         await updateDoc(userRef, userDataToSave);
         toast({ title: 'User Updated', description: `${data.name}'s record updated in Firestore.` });
       } else {
-        // Add new user
         const docRef = await addDoc(collection(db, 'users'), userDataToSave);
         toast({ 
           title: 'User Record Added', 
@@ -194,9 +208,10 @@ export default function UserManagementPage() {
         errorMessage = error.message;
       }
       toast({ title: editingUser ? 'Update User Failed' : 'Add User Failed', description: errorMessage, variant: 'destructive' });
-      // Keep dialog open on re-auth failure
-      if (!(error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential')) {
-        setIsUserFormDialogOpen(false); // Close dialog only if error is not re-auth
+      // Keep dialog open on re-auth failure so user can retry password
+      // But close if it was a different type of error
+      if (!(error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential' || error.code === 'auth/too-many-requests')) {
+        setIsUserFormDialogOpen(false); 
       }
     } finally {
       setIsSubmitting(false);
@@ -214,10 +229,12 @@ export default function UserManagementPage() {
     console.log("Intentando eliminar usuario...", userToDelete);
     if (!userToDelete || !deletePassword) {
       toast({ title: 'Input Required', description: 'Admin password is required to delete.', variant: 'destructive' });
+      setIsSubmitting(false); // Ensure isSubmitting is reset
       return;
     }
-    if (!authUser || authUser.email !== 'admin@servex.com') {
-        toast({ title: 'Authorization Failed', description: 'Only the main admin can perform this action.', variant: 'destructive' });
+     if (!authUser) {
+        toast({ title: 'Authorization Failed', description: 'Admin user not found. Please log in.', variant: 'destructive' });
+        setIsSubmitting(false);
         return;
     }
     setIsSubmitting(true);
@@ -243,9 +260,10 @@ export default function UserManagementPage() {
         errorMessage = error.message;
       }
       toast({ title: 'Delete Failed', description: errorMessage, variant: 'destructive' });
-       // Keep dialog open on re-auth failure
-      if (!(error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential')) {
-         setIsDeleteUserDialogOpen(false); // Close dialog only if error is not re-auth
+       // Keep dialog open on re-auth failure so user can retry password
+       // But close if it was a different type of error
+      if (!(error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential' || error.code === 'auth/too-many-requests')) {
+         setIsDeleteUserDialogOpen(false);
       }
     } finally {
       setIsSubmitting(false);
@@ -285,7 +303,7 @@ export default function UserManagementPage() {
           <Dialog open={isUserFormDialogOpen} onOpenChange={(isOpen) => {
             setIsUserFormDialogOpen(isOpen);
             if (!isOpen) {
-              setEditingUser(null); // Clear editing state when dialog closes
+              setEditingUser(null); 
               form.reset({
                   name: '', email: '', role: 'student', photoUrl: '',
                   level: undefined, notes: '', age: undefined, gender: undefined, adminPassword: ''
@@ -558,3 +576,4 @@ export default function UserManagementPage() {
     </>
   );
 }
+
