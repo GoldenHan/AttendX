@@ -9,52 +9,52 @@ body {
 
 @layer base {
   :root {
-    --background: 220 30% 96%; /* Very light cool gray */
-    --foreground: 220 25% 10%; /* Very dark cool gray, almost black */
+    --background: 210 100% 98%; /* Very Light Sky Blue */
+    --foreground: 215 50% 25%; /* Dark Slate Blue */
 
     --card: 0 0% 100%; /* White */
-    --card-foreground: 220 25% 10%; /* Same as main foreground */
+    --card-foreground: 215 50% 25%; /* Dark Slate Blue */
 
     --popover: 0 0% 100%; /* White */
-    --popover-foreground: 220 25% 10%;
+    --popover-foreground: 215 50% 25%;
 
-    --primary: 217 91% 60%; /* Vibrant blue (e.g., Tailwind blue-500) */
-    --primary-foreground: 210 40% 98%; /* Very light, almost white */
+    --primary: 217 91% 60%; /* Vibrant Blue (Tailwind Blue-500) */
+    --primary-foreground: 0 0% 100%; /* White */
 
-    --secondary: 215 20% 65%; /* Muted blue-gray */
-    --secondary-foreground: 217 91% 30%; /* Darker blue for text on secondary */
+    --secondary: 210 80% 75%; /* Lighter Soft Blue */
+    --secondary-foreground: 215 50% 25%; /* Dark Slate Blue for text on secondary */
 
-    --muted: 220 20% 90%; /* Light cool gray */
-    --muted-foreground: 215 18% 45%; /* Medium cool gray */
+    --muted: 210 60% 94%; /* Very Pale Blue */
+    --muted-foreground: 215 30% 55%; /* Medium Grayish Blue */
 
-    --accent: 24 94% 50%; /* Bright orange (e.g., Tailwind orange-500) */
-    --accent-foreground: 24 15% 10%; /* Dark gray/brown for text on accent */
+    --accent: 45 100% 50%; /* Bright Yellow (Gold) */
+    --accent-foreground: 45 70% 15%; /* Dark Brown/Almost Black for text on yellow */
 
-    --destructive: 0 84% 60%; /* Standard red (e.g., Tailwind red-500) */
+    --destructive: 0 84% 60%; /* Standard red */
     --destructive-foreground: 0 0% 98%; /* Very light, almost white */
 
-    --border: 220 15% 88%; /* Light gray border */
-    --input: 220 15% 92%; /* Slightly off-white for input background */
+    --border: 210 40% 88%; /* Light Grayish Blue Border */
+    --input: 210 50% 96%; /* Very Light Blue for input background */
     --ring: 217 91% 60%; /* Primary blue for focus rings */
 
     --radius: 0.5rem;
 
     /* Sidebar specific theme variables */
-    --sidebar-background: 220 25% 92%; /* Slightly darker than main background */
-    --sidebar-foreground: 220 25% 10%;
+    --sidebar-background: 210 70% 95%; /* Light Sky Blue, slightly darker than main background */
+    --sidebar-foreground: 215 50% 25%;
     --sidebar-primary: 217 91% 60%; /* Same as main primary */
-    --sidebar-primary-foreground: 210 40% 98%;
-    --sidebar-accent: 24 94% 50%; /* Same as main accent */
-    --sidebar-accent-foreground: 24 15% 10%;
-    --sidebar-border: 220 15% 80%;
-    --sidebar-ring: 24 94% 50%; /* Accent for sidebar focus rings */
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 45 100% 50%; /* Accent Yellow */
+    --sidebar-accent-foreground: 45 70% 15%;
+    --sidebar-border: 210 30% 80%;
+    --sidebar-ring: 45 100% 50%; /* Accent Yellow for sidebar focus rings */
 
-    /* Chart Colors */
+    /* Chart Colors (Blue/Yellow dominant) */
     --chart-1: 217 91% 60%; /* Primary Blue */
-    --chart-2: 24 94% 50%;  /* Accent Orange */
-    --chart-3: 160 70% 45%; /* Teal/Green */
-    --chart-4: 290 60% 60%; /* Purple */
-    --chart-5: 340 80% 65%; /* Pink/Magenta */
+    --chart-2: 45 100% 55%;  /* Accent Yellow (slightly lighter for charts) */
+    --chart-3: 190 70% 45%; /* Cyan/Teal (complementary) */
+    --chart-4: 210 80% 75%; /* Lighter Soft Blue */
+    --chart-5: 50 100% 70%; /* Lighter Yellow/Orange */
   }
 
   .dark {
@@ -76,8 +76,8 @@ body {
     --muted: 220 20% 20%; /* Darker cool gray for muted elements */
     --muted-foreground: 215 15% 55%; /* Medium-dark cool gray for text */
 
-    --accent: 24 90% 55%; /* Slightly less intense orange for dark mode */
-    --accent-foreground: 24 15% 10%; /* Dark text on accent */
+    --accent: 45 90% 55%; /* Slightly less intense orange/yellow for dark mode */
+    --accent-foreground: 45 15% 10%; /* Dark text on accent */
 
     --destructive: 0 72% 51%; /* Slightly desaturated red for dark mode */
     --destructive-foreground: 0 0% 98%;
@@ -91,17 +91,17 @@ body {
     --sidebar-foreground: 210 30% 90%;
     --sidebar-primary: 217 91% 70%; /* Same as main primary dark */
     --sidebar-primary-foreground: 210 20% 10%;
-    --sidebar-accent: 24 90% 55%; /* Same as main accent dark */
-    --sidebar-accent-foreground: 24 15% 10%;
+    --sidebar-accent: 45 90% 55%; /* Same as main accent dark */
+    --sidebar-accent-foreground: 45 15% 10%;
     --sidebar-border: 220 15% 20%;
-    --sidebar-ring: 24 90% 55%; /* Accent for sidebar focus rings in dark */
+    --sidebar-ring: 45 90% 55%; /* Accent for sidebar focus rings in dark */
 
     /* Chart Colors Dark */
     --chart-1: 217 91% 70%;
-    --chart-2: 24 90% 55%;
-    --chart-3: 160 70% 55%;
-    --chart-4: 290 60% 70%;
-    --chart-5: 340 80% 75%;
+    --chart-2: 45 90% 55%;
+    --chart-3: 180 70% 55%; /* Adjusted Teal for dark */
+    --chart-4: 210 50% 60%; /* Adjusted Light Blue for dark */
+    --chart-5: 50 80% 65%;  /* Adjusted Lighter Yellow/Orange for dark */
   }
 }
 
