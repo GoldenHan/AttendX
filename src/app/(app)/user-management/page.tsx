@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Loader2, Pencil, Trash2, UserPlus, FolderKanban, Users as UsersIcon, Search } from 'lucide-react'; 
+import { Loader2, Pencil, Trash2, UserPlus, FolderKanban, Users as UsersIcon } from 'lucide-react'; 
 import type { User } from '@/types';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, deleteDoc, doc, addDoc, updateDoc } from 'firebase/firestore';
@@ -42,9 +42,11 @@ import {
   FormItem,
   FormLabel,
   FormMessage,
+  FormDescription,
 } from '@/components/ui/form';
+import { Label } from "@/components/ui/label"; // Corrected import
 
-// Schema without adminPassword for add/edit
+// Schema for add/edit (no adminPassword here)
 const userFormSchema = z.object({
   name: z.string().min(2, { message: "Name must be at least 2 characters." }),
   email: z.string().email({ message: "Invalid email address." }).optional().or(z.literal('')),
@@ -131,6 +133,7 @@ export default function UserManagementPage() {
   };
   
   const handleOpenEditDialog = (userToEdit: User) => {
+    console.log("Opening edit dialog for:", userToEdit);
     setEditingUser(userToEdit);
     form.reset({
       name: userToEdit.name,
@@ -147,43 +150,47 @@ export default function UserManagementPage() {
   };
 
   const handleUserFormSubmit = async (data: UserFormValues) => {
-    console.log("Form data submitted:", data);
-    console.log("Currently editing user:", editingUser);
+    console.log("Form data submitted for add/edit:", data);
+    console.log("Currently editing user (null if adding):", editingUser);
     setIsSubmitting(true);
     
-    const firestoreData: Partial<User> = { // Use Partial<User> for flexibility
+    const baseFirestoreData: Partial<User> = {
       name: data.name,
       role: data.role,
+      // Ensure optional text fields are empty strings if not provided, not undefined
       email: data.email || '', 
       photoUrl: data.photoUrl || '', 
     };
-
+    
     if (editingUser?.uid) {
-      firestoreData.uid = editingUser.uid;
+      (baseFirestoreData as User).uid = editingUser.uid;
     }
 
     if (data.role === 'student') {
-      firestoreData.level = data.level || undefined;
-      firestoreData.notes = data.notes || '';
-      firestoreData.age = data.age ?? undefined; // handles 0 correctly
-      firestoreData.gender = data.gender || undefined;
-      firestoreData.preferredShift = data.preferredShift || undefined;
+      baseFirestoreData.level = data.level; // Keep as undefined if not selected
+      baseFirestoreData.notes = data.notes || ''; // Ensure empty string if not provided
+      baseFirestoreData.age = data.age; // Keep as undefined if not provided
+      baseFirestoreData.gender = data.gender; // Keep as undefined if not selected
+      baseFirestoreData.preferredShift = data.preferredShift; // Keep as undefined if not selected
     } else { 
-      firestoreData.level = undefined;
-      firestoreData.notes = undefined;
-      firestoreData.age = undefined;
-      firestoreData.gender = undefined;
-      firestoreData.preferredShift = undefined;
+      // Explicitly set student fields to undefined if not a student
+      baseFirestoreData.level = undefined;
+      baseFirestoreData.notes = undefined;
+      baseFirestoreData.age = undefined;
+      baseFirestoreData.gender = undefined;
+      baseFirestoreData.preferredShift = undefined;
     }
-
-    // Remove undefined keys from firestoreData to avoid issues with Firestore update
-    Object.keys(firestoreData).forEach(keyStr => {
-        const key = keyStr as keyof typeof firestoreData;
-        if (firestoreData[key] === undefined) {
-            delete firestoreData[key];
-        }
-    });
     
+    // Create a clean object for Firestore, removing any top-level undefined properties
+    const firestoreData = Object.entries(baseFirestoreData).reduce((acc, [key, value]) => {
+      if (value !== undefined) {
+        // @ts-ignore
+        acc[key] = value;
+      }
+      return acc;
+    }, {} as Partial<User>);
+
+
     console.log("Data being sent to Firestore:", firestoreData);
 
     try {
@@ -195,22 +202,11 @@ export default function UserManagementPage() {
         toast({ title: 'User Updated', description: `${data.name}'s record updated successfully.` });
       } else {
         console.log("Attempting to add new user.");
-        // For new users, ensure all necessary fields are present or explicitly set if optional
-        const newUserData = {
-            ...firestoreData,
-            // Set default for optional fields if not provided, or ensure they are correctly 'undefined' if that's intended
-            email: firestoreData.email || '', // Ensure email is at least an empty string
-            photoUrl: firestoreData.photoUrl || '', // Ensure photoUrl is at least an empty string
-            notes: firestoreData.notes || '', // Ensure notes is at least an empty string
-        };
-        // Ensure uid isn't accidentally part of newUserData for addDoc
-        delete (newUserData as any).uid; 
-
-
-        const docRef = await addDoc(collection(db, 'users'), newUserData);
+        // @ts-ignore - Firestore will generate ID if 'id' is not in firestoreData
+        const docRef = await addDoc(collection(db, 'users'), firestoreData);
         toast({ 
           title: 'User Record Added', 
-          description: `${data.name} (ID: ${docRef.id}) added to Firestore. No Auth account created.` 
+          description: `${data.name} added to Firestore. No Auth account created.` 
         });
       }
       
@@ -236,7 +232,7 @@ export default function UserManagementPage() {
 
   const handleOpenDeleteDialog = (user: User) => {
     setUserToDelete(user);
-    setDeletePassword(''); // Clear password from previous attempts
+    setDeletePassword(''); 
     setIsDeleteUserDialogOpen(true);
   };
 
@@ -255,6 +251,7 @@ export default function UserManagementPage() {
 
     setIsSubmitting(true);
     try {
+      console.log("Re-authenticating admin...");
       await reauthenticateCurrentUser(deletePassword);
       toast({ title: 'Admin Re-authenticated', description: 'Proceeding with deletion.' });
 
@@ -270,20 +267,23 @@ export default function UserManagementPage() {
       console.error("Error deleting user record:", error);
       console.error("Full deletion error object:", JSON.stringify(error, Object.getOwnPropertyNames(error)));
       let errorMessage = 'Failed to delete user record.';
-      if (error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
-        errorMessage = 'Admin re-authentication failed: Incorrect password.';
+      const reAuthErrorCodes = ['auth/wrong-password', 'auth/invalid-credential', 'auth/user-mismatch'];
+      
+      if (reAuthErrorCodes.includes(error.code)) {
+        errorMessage = 'Admin re-authentication failed: Incorrect password or credential mismatch.';
       } else if (error.code === 'auth/too-many-requests') {
         errorMessage = 'Admin re-authentication failed: Too many attempts. Try again later.';
+      } else if (error.code === 'auth/requires-recent-login'){
+        errorMessage = 'Admin re-authentication required: This operation is sensitive and requires recent authentication. Please log out and log back in.';
       } else if (error.message) {
-        errorMessage = error.message; // Use the error message if available
+        errorMessage = error.message; 
       }
       toast({ title: 'Delete Failed', description: errorMessage, variant: 'destructive' });
       
-      // Only keep dialog open for re-auth errors for retry
-      const reAuthErrorCodes = ['auth/wrong-password', 'auth/invalid-credential', 'auth/too-many-requests'];
-      if (!reAuthErrorCodes.includes(error.code)) {
-         setIsDeleteUserDialogOpen(false); // Close dialog for other errors
-         setDeletePassword(''); // Clear password
+      // Keep dialog open if it was a re-auth error, otherwise close it
+      if (!reAuthErrorCodes.includes(error.code) && error.code !== 'auth/too-many-requests' && error.code !== 'auth/requires-recent-login') {
+         setIsDeleteUserDialogOpen(false); 
+         setDeletePassword(''); 
       }
     } finally {
       setIsSubmitting(false);
@@ -574,24 +574,16 @@ export default function UserManagementPage() {
                 </DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-4">
-                 <FormField
-                    control={form} // This seems incorrect, should be a direct state for password
-                    name="adminPassword" // This field is not in the main form for this dialog
-                    render={({ field }) => ( // This won't work as expected here
-                      <FormItem>
-                        <FormLabel>Admin's Current Password</FormLabel>
-                        <FormControl>
-                            <Input 
-                                type="password"
-                                placeholder="Admin's Current Password"
-                                value={deletePassword}
-                                onChange={(e) => setDeletePassword(e.target.value)}
-                            />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
+                 <div className="space-y-1.5">
+                    <Label htmlFor="deleteAdminPassword">Admin's Current Password</Label>
+                    <Input 
+                        id="deleteAdminPassword"
+                        type="password"
+                        placeholder="Enter your admin password"
+                        value={deletePassword}
+                        onChange={(e) => setDeletePassword(e.target.value)}
+                    />
+                 </div>
             </div>
             <DialogFooter>
                 <DialogClose asChild>
@@ -601,7 +593,7 @@ export default function UserManagementPage() {
                     type="button" 
                     variant="destructive" 
                     onClick={confirmDeleteUser} 
-                    disabled={isSubmitting || !deletePassword}
+                    disabled={isSubmitting || !deletePassword.trim()}
                 >
                     {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                     Delete User Record
@@ -612,3 +604,5 @@ export default function UserManagementPage() {
     </>
   );
 }
+
+    
