@@ -83,7 +83,7 @@ const calculatePartialTotal = (partialScores?: PartialScores): number | null => 
 export default function StudentGradesPage() {
   const [allStudents, setAllStudents] = useState<StudentWithDetailedGrades[]>([]);
   const [allGroups, setAllGroups] = useState<Group[]>([]);
-  const [selectedGroupId, setSelectedGroupId] = useState<string>(''); // Default to empty, meaning "Select a group"
+  const [selectedGroupId, setSelectedGroupId] = useState<string>(''); 
   const [searchTerm, setSearchTerm] = useState<string>('');
   
   const [isLoadingStudents, setIsLoadingStudents] = useState(true);
@@ -98,7 +98,7 @@ export default function StudentGradesPage() {
     setIsLoadingStudents(true);
     setIsLoadingGroups(true);
     try {
-      const studentQuery = query(collection(db, 'students')); // Fetch all students
+      const studentQuery = query(collection(db, 'students')); 
       const studentsSnapshot = await getDocs(studentQuery);
       const studentData = studentsSnapshot.docs.map(doc => {
         const student = { id: doc.id, ...doc.data() } as User;
@@ -158,11 +158,11 @@ export default function StudentGradesPage() {
       if (group?.studentIds) {
         filtered = filtered.filter(s => group.studentIds.includes(s.id));
       } else {
-        // If a specific group is selected but not found or has no studentIds, show no students for that group
+        
         filtered = [];
       }
     }
-    // If selectedGroupId is 'all' or not set yet, 'filtered' remains all students (or students from previous step).
+    
 
     if (searchTerm.trim()) {
       filtered = filtered.filter(s =>
@@ -267,7 +267,6 @@ export default function StudentGradesPage() {
                   <SelectValue placeholder="Select a group or 'All'" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">Select a group</SelectItem>
                   <SelectItem value="all">All Groups</SelectItem>
                   {allGroups.map((group) => (
                     <SelectItem key={group.id} value={group.id}>
@@ -300,28 +299,28 @@ export default function StudentGradesPage() {
                 <TableHead rowSpan={2} className="align-bottom min-w-[150px] sticky left-0 bg-card z-30">Student Name</TableHead>
                 <TableHead rowSpan={2} className="align-bottom min-w-[80px] sticky left-[150px] bg-card z-30">Actions</TableHead>
                 
-                <TableHead colSpan={MAX_ACCUMULATED_ACTIVITIES + 2} className="text-center bg-yellow-100 dark:bg-yellow-800/50 text-yellow-800 dark:text-yellow-200 py-2">1st Partial</TableHead>
-                <TableHead colSpan={MAX_ACCUMULATED_ACTIVITIES + 2} className="text-center bg-green-100 dark:bg-green-800/50 text-green-800 dark:text-green-200 py-2">2nd Partial</TableHead>
-                <TableHead colSpan={MAX_ACCUMULATED_ACTIVITIES + 2} className="text-center bg-orange-100 dark:bg-orange-800/50 text-orange-800 dark:text-orange-200 py-2">3rd Partial</TableHead>
+                <TableHead colSpan={MAX_ACCUMULATED_ACTIVITIES + 2} className="text-center bg-yellow-100 dark:bg-yellow-800/50 text-yellow-800 dark:text-yellow-200 py-2 sticky top-0 z-20">1st Partial</TableHead>
+                <TableHead colSpan={MAX_ACCUMULATED_ACTIVITIES + 2} className="text-center bg-green-100 dark:bg-green-800/50 text-green-800 dark:text-green-200 py-2 sticky top-0 z-20">2nd Partial</TableHead>
+                <TableHead colSpan={MAX_ACCUMULATED_ACTIVITIES + 2} className="text-center bg-orange-100 dark:bg-orange-800/50 text-orange-800 dark:text-orange-200 py-2 sticky top-0 z-20">3rd Partial</TableHead>
                 
-                <TableHead rowSpan={2} className="text-center align-bottom min-w-[100px] bg-blue-100 dark:bg-blue-800/50 text-blue-800 dark:text-blue-200">Final Grade</TableHead>
+                <TableHead rowSpan={2} className="text-center align-bottom min-w-[100px] bg-blue-100 dark:bg-blue-800/50 text-blue-800 dark:text-blue-200 sticky top-0 z-20">Final Grade</TableHead>
               </TableRow>
               <TableRow>
                 {[1, 2, 3].map(pNum => (
                   <React.Fragment key={`partial-headers-${pNum}`}>
                     {Array.from({ length: MAX_ACCUMULATED_ACTIVITIES }).map((_, i) => (
-                      <TableHead key={`p${pNum}-acc${i+1}`} className={`text-center text-xs whitespace-nowrap py-1 ${
+                      <TableHead key={`p${pNum}-acc${i+1}`} className={`text-center text-xs whitespace-nowrap py-1 sticky top-0 z-20 ${
                         pNum === 1 ? 'bg-yellow-100 dark:bg-yellow-800/50 text-yellow-700 dark:text-yellow-300' :
                         pNum === 2 ? 'bg-green-100 dark:bg-green-800/50 text-green-700 dark:text-green-300' :
                         'bg-orange-100 dark:bg-orange-800/50 text-orange-700 dark:text-orange-300'
                       }`}>Ac. {i + 1}</TableHead>
                     ))}
-                    <TableHead className={`text-center text-xs whitespace-nowrap py-1 ${
+                    <TableHead className={`text-center text-xs whitespace-nowrap py-1 sticky top-0 z-20 ${
                         pNum === 1 ? 'bg-yellow-100 dark:bg-yellow-800/50 text-yellow-700 dark:text-yellow-300' :
                         pNum === 2 ? 'bg-green-100 dark:bg-green-800/50 text-green-700 dark:text-green-300' :
                         'bg-orange-100 dark:bg-orange-800/50 text-orange-700 dark:text-orange-300'
                       }`}>Exam</TableHead>
-                    <TableHead className={`text-center font-bold text-xs whitespace-nowrap py-1 ${
+                    <TableHead className={`text-center font-bold text-xs whitespace-nowrap py-1 sticky top-0 z-20 ${
                         pNum === 1 ? 'bg-yellow-100 dark:bg-yellow-800/50 text-yellow-700 dark:text-yellow-300' :
                         pNum === 2 ? 'bg-green-100 dark:bg-green-800/50 text-green-700 dark:text-green-300' :
                         'bg-orange-100 dark:bg-orange-800/50 text-orange-700 dark:text-orange-300'
