@@ -36,36 +36,26 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setLoading(true);
-      if (user) {
+      if (user) { // Firebase Auth user session exists/restored
         setAuthUser(user);
-        const usersRef = collection(db, 'users');
-        let userDocSnapshot;
-        // Prioritize UID match
         const userDocRef = doc(db, 'users', user.uid);
-        const directUserDoc = await getDoc(userDocRef);
-
-        if (directUserDoc.exists()) {
-          userDocSnapshot = directUserDoc;
-        } else if (user.email) { // Fallback to email match if UID doc not found (e.g., legacy data)
-          const qEmail = query(usersRef, where('email', '==', user.email), limit(1));
-          const emailSnapshot = await getDocs(qEmail);
-          if (!emailSnapshot.empty) {
-            userDocSnapshot = emailSnapshot.docs[0];
-             // If found by email but UID is different or missing, consider updating UID in Firestore
-             if (userDocSnapshot.data().uid !== user.uid) {
-                console.warn(`Firestore user document ${userDocSnapshot.id} found by email but UID mismatch or missing. Auth UID: ${user.uid}. Firestore UID: ${userDocSnapshot.data().uid}`);
-                // Optionally update the Firestore doc with the correct auth UID here if desired
-             }
+        try {
+          const userDocSnapshot = await getDoc(userDocRef);
+          if (userDocSnapshot.exists()) {
+            setFirestoreUser({ id: userDocSnapshot.id, ...userDocSnapshot.data() } as FirestoreUserType);
+          } else {
+            console.warn(`Firestore document not found for authenticated user UID: ${user.uid}. This user might need to complete profile setup or their Firestore document was not created/deleted.`);
+            setFirestoreUser(null); // Important to set to null if doc not found
           }
+        } catch (error) {
+          console.error("AuthContext: Error fetching user document from Firestore:", error);
+          // This could be a permission error too, or network.
+          // If it's a permission error, it will be caught here.
+          setFirestoreUser(null); // Ensure firestoreUser is null on error
+          // Potentially sign out the user if their core data can't be fetched, or handle gracefully in UI.
+          // For now, setting to null allows the app to proceed to login/signup if rules prevent reads.
         }
-        
-        if (userDocSnapshot && userDocSnapshot.exists()) {
-          setFirestoreUser({ id: userDocSnapshot.id, ...userDocSnapshot.data() } as FirestoreUserType);
-        } else {
-          console.warn('No Firestore document found for user UID:', user.uid, 'or email:', user.email);
-          setFirestoreUser(null); 
-        }
-      } else {
+      } else { // No Firebase Auth user
         setAuthUser(null);
         setFirestoreUser(null);
       }
@@ -79,26 +69,25 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setLoading(true);
     try {
       await signInWithEmailAndPassword(auth, email, pass);
+      // onAuthStateChanged will handle fetching Firestore user and routing
     } catch (error) {
-      setLoading(false);
+      setLoading(false); // Ensure loading is false on sign-in error
       throw error;
     }
+    // setLoading(false) is handled by onAuthStateChanged's final setLoading(false)
   };
 
   const signUp = async (name: string, email: string, pass: string) => {
     setLoading(true);
     try {
-      // Check if any user already exists to determine if this is the first admin setup
       const usersQuery = query(collection(db, 'users'), limit(1));
       const existingUsersSnapshot = await getDocs(usersQuery);
 
-      let role: FirestoreUserType['role'] = 'student'; // Default role
+      let role: FirestoreUserType['role'] = 'student'; 
 
       if (existingUsersSnapshot.empty) {
-        // No users exist, this is the first user, make them admin
         role = 'admin';
       } else {
-        // Users already exist, block further public sign-ups
         setLoading(false);
         const error = new Error("Public registration is disabled. Admin already exists.");
         (error as any).code = "auth/public-registration-disabled";
@@ -108,32 +97,34 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       const userCredential = await createUserWithEmailAndPassword(auth, email, pass);
       const firebaseUser = userCredential.user;
       
-      const newUserDoc: FirestoreUserType = {
-        id: firebaseUser.uid, 
+      const newUserDocData: Omit<FirestoreUserType, 'id'> = { // FirestoreUserType expects id, but we use UID as doc ID
         uid: firebaseUser.uid,
         name: name,
         email: firebaseUser.email || undefined,
         role: role, 
       };
-      await setDoc(doc(db, 'users', firebaseUser.uid), newUserDoc);
-      // onAuthStateChanged will handle setting authUser and firestoreUser, and redirection
+      // Set the document ID to be the Firebase Auth UID
+      await setDoc(doc(db, 'users', firebaseUser.uid), newUserDocData);
+      // onAuthStateChanged will handle setting authUser, firestoreUser, and redirection
     } catch (error) {
-      setLoading(false);
+      setLoading(false); // Ensure loading is false on sign-up error
       throw error;
     }
+     // setLoading(false) is handled by onAuthStateChanged's final setLoading(false)
   };
 
   const signOut = async () => {
     setLoading(true);
     try {
       await firebaseSignOut(auth);
-      setAuthUser(null);
-      setFirestoreUser(null);
-      router.push('/login');
+      // onAuthStateChanged will set authUser and firestoreUser to null
+      router.push('/login'); // Explicitly redirect after sign out
     } catch (error) {
       console.error('Sign out error', error);
     } finally {
-      setLoading(false);
+      // onAuthStateChanged will call setLoading(false)
+      // but to be safe, especially if onAuthStateChanged doesn't fire quickly or an error occurs before it
+      setLoading(false); 
     }
   };
   
@@ -143,6 +134,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       if (!authUser && !isAuthPage) {
         router.push('/login');
       } else if (authUser && isAuthPage) {
+        // If firestoreUser is still null here after authUser is set, it means fetching failed (e.g. permissions)
+        // or the user doc doesn't exist. The console warning in onAuthStateChanged would have fired.
+        // We proceed with redirecting to dashboard, the dashboard/layout should handle cases where firestoreUser is null.
         router.push('/dashboard'); 
       }
     }
