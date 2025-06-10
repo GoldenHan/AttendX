@@ -41,5 +41,6 @@ export interface Group {
   startDate: string; // ISO Date string
   endDate?: string; // ISO Date string, optional
   studentIds: string[];
+  teacherId?: string; // ID of the assigned teacher
 }
 
