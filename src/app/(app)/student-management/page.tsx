@@ -15,7 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Loader2, Pencil, Trash2, UserPlus, Search, GraduationCap, NotebookPen } from 'lucide-react';
 import type { User, Group, PartialScores } from '@/types';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, deleteDoc, doc, addDoc, updateDoc, query, where } from 'firebase/firestore';
+import { collection, getDocs, deleteDoc, doc, updateDoc, query, where } from 'firebase/firestore'; // Removed addDoc
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -44,8 +44,9 @@ import {
 } from '@/components/ui/form';
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { createUserAccount, type CreateUserAccountInput } from '@/ai/flows/user-admin-flow';
 
-// Schema for student add/edit
+// Schema for student add/edit dialog (Firestore data only)
 const studentFormSchema = z.object({
   name: z.string().min(2, { message: "Name must be at least 2 characters." }),
   phoneNumber: z.string().optional().or(z.literal('')),
@@ -65,7 +66,7 @@ type StudentFormValues = z.infer<typeof studentFormSchema>;
 const parseOptionalFloat = (val: unknown): number | null | undefined => {
   if (val === "" || val === undefined || val === null) return null;
   const num = Number(val);
-  return isNaN(num) ? undefined : num; // Return undefined if NaN to trigger Zod's invalid_type_error
+  return isNaN(num) ? undefined : num; 
 };
 
 const partialScoresSchema = z.object({
@@ -74,7 +75,7 @@ const partialScoresSchema = z.object({
   acc3: z.preprocess(parseOptionalFloat, z.number().min(0, "Min 0").max(10, "Max 10").optional().nullable()),
   acc4: z.preprocess(parseOptionalFloat, z.number().min(0, "Min 0").max(10, "Max 10").optional().nullable()),
   exam: z.preprocess(parseOptionalFloat, z.number().min(0, "Min 0").max(60, "Max 60").optional().nullable()),
-}).deepPartial().optional(); // .deepPartial() makes all fields within optional, .optional() makes the object itself optional
+}).deepPartial().optional(); 
 
 
 const studentGradeFormSchema = z.object({
@@ -206,57 +207,98 @@ export default function StudentManagementPage() {
 
   const handleStudentFormSubmit = async (data: StudentFormValues) => {
     setIsSubmitting(true);
-    
-    const firestoreData: Partial<User> = {
-      name: data.name,
-      role: 'student', 
-      phoneNumber: data.phoneNumber || '',
-      photoUrl: data.photoUrl || '',
-      level: data.level,
-      notes: data.notes || '',
-      age: data.age,
-      gender: data.gender,
-      preferredShift: data.preferredShift,
-      email: '', 
-    };
-    
-    if (editingStudent?.uid) { 
-      firestoreData.uid = editingStudent.uid;
-    }
         
-    const firestoreDataForSave = Object.fromEntries(
-      Object.entries(firestoreData).filter(([_, v]) => v !== undefined)
-    ) as Partial<User>;
+    if (editingStudent) { // --- EDITING EXISTING STUDENT ---
+      // This part only updates Firestore, does not touch Auth
+      const firestoreUpdateData: Partial<Omit<User, 'id' | 'uid' | 'email' | 'role' | 'grades'>> = {
+        name: data.name,
+        phoneNumber: data.phoneNumber || undefined,
+        photoUrl: data.photoUrl || undefined,
+        level: data.level,
+        notes: data.notes || undefined,
+        age: data.age,
+        gender: data.gender,
+        preferredShift: data.preferredShift,
+      };
+      const finalUpdateData = Object.fromEntries(
+        Object.entries(firestoreUpdateData).filter(([_, v]) => v !== undefined)
+      );
 
-    try {
-      if (editingStudent) {
+      try {
         const studentRef = doc(db, 'users', editingStudent.id);
-        await updateDoc(studentRef, firestoreDataForSave);
+        await updateDoc(studentRef, finalUpdateData);
         toast({ title: 'Student Updated', description: `${data.name}'s record updated successfully.` });
-      } else {
-        const docRef = await addDoc(collection(db, 'users'), firestoreDataForSave);
+        studentForm.reset();
+        setEditingStudent(null);
+        setIsStudentFormDialogOpen(false);
+        await fetchData();
+      } catch (error: any) {
         toast({ 
-          title: 'Student Record Added', 
-          description: `${data.name} added to Firestore.` 
+          title: 'Update Student Failed', 
+          description: `An error occurred: ${error.message || 'Please try again.'}`, 
+          variant: 'destructive' 
         });
+        console.error("Firestore update error:", error);
+      } finally {
+        setIsSubmitting(false);
       }
-      
-      studentForm.reset({
-        name: '', phoneNumber: '', photoUrl: '',
-        level: undefined, notes: '', age: undefined, gender: undefined, preferredShift: undefined,
-      });
-      setEditingStudent(null);
-      setIsStudentFormDialogOpen(false);
-      await fetchData(); 
-    } catch (error: any) {
-      toast({ 
-        title: editingStudent ? 'Update Student Failed' : 'Add Student Failed', 
-        description: `An error occurred: ${error.message || 'Please try again.'}`, 
-        variant: 'destructive' 
-      });
-      console.error("Firestore operation error:", error);
-    } finally {
-      setIsSubmitting(false);
+
+    } else { // --- ADDING NEW STUDENT ---
+      // Auto-generate email and password
+      const sanitizedName = data.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const generatedEmail = `${sanitizedName}${Date.now().toString().slice(-5)}@student.servex.com`;
+      const firstPartName = data.name.split(' ')[0];
+      const generatedPassword = `${firstPartName}Сервекс7!`;
+
+      const flowInput: CreateUserAccountInput = {
+        name: data.name,
+        email: generatedEmail,
+        password: generatedPassword,
+        role: 'student',
+        photoUrl: data.photoUrl || '',
+        level: data.level,
+        notes: data.notes,
+        age: data.age,
+        gender: data.gender,
+        preferredShift: data.preferredShift,
+      };
+
+      try {
+        const result = await createUserAccount(flowInput);
+        if (result.success && result.userId) {
+          toast({
+            title: 'Student Account Created',
+            description: (
+              <div>
+                <p>{result.message}</p>
+                <p className="mt-2 font-semibold">Please share these credentials with the student:</p>
+                <p>Email: <code className="font-mono bg-muted p-1 rounded text-xs">{generatedEmail}</code></p>
+                <p>Password: <code className="font-mono bg-muted p-1 rounded text-xs">{generatedPassword}</code></p>
+                <p className="mt-1 text-xs text-muted-foreground">The student should change this password upon first login.</p>
+              </div>
+            ),
+            duration: 20000, // Extended duration
+          });
+          studentForm.reset();
+          setIsStudentFormDialogOpen(false);
+          await fetchData();
+        } else {
+          toast({
+            title: 'Failed to Create Student Account',
+            description: result.message || 'An unknown error occurred via the creation flow.',
+            variant: 'destructive',
+          });
+        }
+      } catch (error: any) {
+        console.error("Error calling createUserAccount flow:", error);
+        toast({
+          title: 'Error Creating Student',
+          description: error.message || 'An unexpected error occurred while calling the creation flow.',
+          variant: 'destructive',
+        });
+      } finally {
+        setIsSubmitting(false);
+      }
     }
   };
 
@@ -287,8 +329,10 @@ export default function StudentManagementPage() {
     try {
       await reauthenticateCurrentUser(deleteAdminPassword);
 
+      // Note: This only deletes the Firestore record. The Firebase Auth user is NOT deleted here.
+      // Deleting Auth users is a more sensitive operation and typically done via Firebase console or a separate, dedicated admin flow.
       await deleteDoc(doc(db, 'users', studentToDelete.id));
-      toast({ title: 'Student Record Deleted', description: `${studentToDelete.name}'s Firestore record removed successfully.` });
+      toast({ title: 'Student Record Deleted', description: `${studentToDelete.name}'s Firestore record removed. Auth account (if any) is not affected by this action.` });
       
       setStudentToDelete(null);
       setDeleteAdminPassword('');
@@ -341,8 +385,6 @@ export default function StudentManagementPage() {
     try {
         const studentRef = doc(db, "users", studentForGrading.id);
         
-        // Ensure that even if a partial is not touched, its existing data isn't wiped out
-        // Zod schema with .deepPartial().optional() should handle this, but let's be safe
         const gradesToSave = {
           partial1: data.grades?.partial1 || studentForGrading.grades?.partial1 || {},
           partial2: data.grades?.partial2 || studentForGrading.grades?.partial2 || {},
@@ -438,7 +480,7 @@ export default function StudentManagementPage() {
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div>
                 <CardTitle className="flex items-center gap-2"><GraduationCap className="h-6 w-6 text-primary" /> Student Management</CardTitle>
-                <CardDescription>Manage student records. Filter by group or search by name/shift.</CardDescription>
+                <CardDescription>Manage student records. Filter by group or search by name/shift. New students get an auto-generated login.</CardDescription>
             </div>
             <Dialog open={isStudentFormDialogOpen} onOpenChange={(isOpen) => {
                 setIsStudentFormDialogOpen(isOpen);
@@ -460,7 +502,7 @@ export default function StudentManagementPage() {
                 <DialogHeader>
                     <DialogTitle>{editingStudent ? 'Edit Student Record' : 'Add New Student Record'}</DialogTitle>
                     <DialogDescription>
-                    {editingStudent ? 'Update student details.' : 'Fill in student details.'}
+                    {editingStudent ? 'Update student details.' : 'Fill in student details. A login account will be auto-generated.'}
                     </DialogDescription>
                 </DialogHeader>
                 <Form {...studentForm}>
@@ -578,7 +620,7 @@ export default function StudentManagementPage() {
                         <DialogClose asChild><Button type="button" variant="outline">Cancel</Button></DialogClose>
                         <Button type="submit" disabled={isSubmitting}>
                         {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                        {editingStudent ? 'Save Changes' : 'Add Student'}
+                        {editingStudent ? 'Save Changes' : 'Add Student & Create Login'}
                         </Button>
                     </DialogFooter>
                     </form>
@@ -630,6 +672,7 @@ export default function StudentManagementPage() {
           <TableHeader>
             <TableRow>
               <TableHead>Name</TableHead>
+              <TableHead>Email (Login)</TableHead>
               <TableHead>Phone</TableHead>
               <TableHead>Level</TableHead>
               <TableHead>Age</TableHead>
@@ -642,6 +685,7 @@ export default function StudentManagementPage() {
             {filteredStudents.length > 0 ? filteredStudents.map((student) => (
               <TableRow key={student.id}>
                 <TableCell>{student.name}</TableCell>
+                <TableCell>{student.email || 'N/A (No Auth)'}</TableCell>
                 <TableCell>{student.phoneNumber || 'N/A'}</TableCell>
                 <TableCell>{student.level || 'N/A'}</TableCell>
                 <TableCell>{student.age ?? 'N/A'}</TableCell>
@@ -665,7 +709,7 @@ export default function StudentManagementPage() {
             )) : (
               !isLoading && (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center">
+                  <TableCell colSpan={8} className="text-center">
                     No students found matching your criteria.
                   </TableCell>
                 </TableRow>
@@ -690,6 +734,7 @@ export default function StudentManagementPage() {
                 <DialogDescription>
                     Are you sure you want to delete the Firestore record for {studentToDelete?.name}?
                     This action cannot be undone. Enter your admin password to confirm.
+                    Note: This action does NOT delete the Firebase Authentication account if one exists.
                 </DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-4">
@@ -735,7 +780,7 @@ export default function StudentManagementPage() {
             });
         }
     }}>
-        <DialogContent className="sm:max-w-lg"> {/* Increased max-width for more space */}
+        <DialogContent className="sm:max-w-lg"> 
             <DialogHeader>
                 <DialogTitle>Registro de Notas: {studentForGrading?.name}</DialogTitle>
                 <DialogDescription>
@@ -776,3 +821,4 @@ export default function StudentManagementPage() {
     </>
   );
 }
+

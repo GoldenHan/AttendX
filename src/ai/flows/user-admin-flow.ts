@@ -48,6 +48,7 @@ export const CreateUserAccountInputSchema = z.object({
   notes: z.string().optional(),
   age: z.number().positive().int().optional(),
   gender: z.enum(['male', 'female', 'other']).optional(),
+  preferredShift: z.enum(['Saturday', 'Sunday']).optional(),
 });
 export type CreateUserAccountInput = z.infer<typeof CreateUserAccountInputSchema>;
 
@@ -95,6 +96,7 @@ const createUserAccountFlow = ai.defineFlow(
         if (input.notes) firestoreUserData.notes = input.notes;
         if (input.age) firestoreUserData.age = input.age;
         if (input.gender) firestoreUserData.gender = input.gender;
+        if (input.preferredShift) firestoreUserData.preferredShift = input.preferredShift;
       }
       
       // Create Firestore user document with the Auth UID as document ID
@@ -102,7 +104,7 @@ const createUserAccountFlow = ai.defineFlow(
 
       return {
         userId: userId,
-        message: `User ${input.name} created successfully with ID: ${userId}.`,
+        message: `User ${input.name} created successfully with ID: ${userId}. Email: ${input.email}. Password has been set as provided.`,
         success: true,
       };
     } catch (error: any) {
@@ -126,3 +128,4 @@ const createUserAccountFlow = ai.defineFlow(
     }
   }
 );
+
