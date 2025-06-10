@@ -38,7 +38,7 @@ import * as z from 'zod';
 import {
   Form,
   FormControl,
-  FormDescription, // Added FormDescription here
+  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -57,7 +57,7 @@ const userFormSchema = z.object({
     z.number({ invalid_type_error: "Age must be a number." }).positive("Age must be positive.").int("Age must be an integer.").optional()
   ),
   gender: z.enum(['male', 'female', 'other']).optional(),
-  adminPassword: z.string().min(1, { message: "Admin password is required to authorize this action." }),
+  // adminPassword removed from here
 });
 
 type UserFormValues = z.infer<typeof userFormSchema>;
@@ -89,7 +89,7 @@ export default function UserManagementPage() {
       notes: '',
       age: undefined,
       gender: undefined,
-      adminPassword: '',
+      // adminPassword default removed
     },
   });
 
@@ -116,7 +116,8 @@ export default function UserManagementPage() {
     setEditingUser(null);
     form.reset({
       name: '', email: '', role: 'student', photoUrl: '',
-      level: undefined, notes: '', age: undefined, gender: undefined, adminPassword: ''
+      level: undefined, notes: '', age: undefined, gender: undefined, 
+      // adminPassword reset removed
     });
     setIsUserFormDialogOpen(true);
   };
@@ -133,7 +134,7 @@ export default function UserManagementPage() {
       notes: userToEdit.notes || '',
       age: userToEdit.age ?? undefined,
       gender: userToEdit.gender || undefined,
-      adminPassword: '', 
+      // adminPassword reset removed
     });
     setIsUserFormDialogOpen(true);
   };
@@ -146,16 +147,12 @@ export default function UserManagementPage() {
         setIsSubmitting(false);
         return;
     }
-    if (!data.adminPassword) {
-        toast({ title: 'Admin Password Required', description: 'Please enter your admin password to authorize this action.', variant: 'destructive' });
-        setIsSubmitting(false); // Ensure isSubmitting is reset
-        return;
-    }
-
+    
     setIsSubmitting(true);
     try {
-      await reauthenticateCurrentUser(data.adminPassword);
-      toast({ title: 'Admin Re-authenticated', description: 'Proceeding with operation.' });
+      // Re-authentication for add/edit is removed
+      // await reauthenticateCurrentUser(data.adminPassword);
+      // toast({ title: 'Admin Re-authenticated', description: 'Proceeding with operation.' });
 
       const userDataToSave: Partial<User> = {
         name: data.name,
@@ -192,7 +189,8 @@ export default function UserManagementPage() {
       
       form.reset({
         name: '', email: '', role: 'student', photoUrl: '',
-        level: undefined, notes: '', age: undefined, gender: undefined, adminPassword: ''
+        level: undefined, notes: '', age: undefined, gender: undefined, 
+        // adminPassword reset removed
       });
       setEditingUser(null);
       setIsUserFormDialogOpen(false);
@@ -200,19 +198,30 @@ export default function UserManagementPage() {
     } catch (error: any) {
       console.error("Error in user form submission:", error);
       let errorMessage = editingUser ? 'Failed to update user.' : 'Failed to add user.';
-      if (error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
-        errorMessage = 'Admin re-authentication failed: Incorrect password.';
-      } else if (error.code === 'auth/too-many-requests') {
-        errorMessage = 'Admin re-authentication failed: Too many attempts. Try again later.';
-      } else if (error.message) {
+      // Removed re-auth specific error messages as it's no longer part of this flow
+      // if (error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
+      //   errorMessage = 'Admin re-authentication failed: Incorrect password.';
+      // } else if (error.code === 'auth/too-many-requests') {
+      //   errorMessage = 'Admin re-authentication failed: Too many attempts. Try again later.';
+      // } else 
+      if (error.message) {
         errorMessage = error.message;
       }
       toast({ title: editingUser ? 'Update User Failed' : 'Add User Failed', description: errorMessage, variant: 'destructive' });
-      // Keep dialog open on re-auth failure so user can retry password
-      // But close if it was a different type of error
-      if (!(error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential' || error.code === 'auth/too-many-requests')) {
-        setIsUserFormDialogOpen(false); 
+      
+      // Keep dialog open only on specific re-auth errors, which are removed now.
+      // So, if any other error, it will still close.
+      // if (!(error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential' || error.code === 'auth/too-many-requests')) {
+      //   setIsUserFormDialogOpen(false); 
+      // }
+      // For simplicity now, always try to close on error unless it was a specific type of error we want to keep open,
+      // but since re-auth is removed, this path is less likely.
+       // If error is not one of the re-auth types that should keep dialog open, close it.
+      const reAuthErrorCodes = ['auth/wrong-password', 'auth/invalid-credential', 'auth/too-many-requests'];
+      if (!reAuthErrorCodes.includes(error.code)) {
+        setIsUserFormDialogOpen(false);
       }
+
     } finally {
       setIsSubmitting(false);
     }
@@ -229,7 +238,7 @@ export default function UserManagementPage() {
     console.log("Intentando eliminar usuario...", userToDelete);
     if (!userToDelete || !deletePassword) {
       toast({ title: 'Input Required', description: 'Admin password is required to delete.', variant: 'destructive' });
-      setIsSubmitting(false); // Ensure isSubmitting is reset
+      setIsSubmitting(false); 
       return;
     }
      if (!authUser) {
@@ -260,10 +269,11 @@ export default function UserManagementPage() {
         errorMessage = error.message;
       }
       toast({ title: 'Delete Failed', description: errorMessage, variant: 'destructive' });
-       // Keep dialog open on re-auth failure so user can retry password
-       // But close if it was a different type of error
-      if (!(error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential' || error.code === 'auth/too-many-requests')) {
+      
+      const reAuthErrorCodes = ['auth/wrong-password', 'auth/invalid-credential', 'auth/too-many-requests'];
+      if (!reAuthErrorCodes.includes(error.code)) {
          setIsDeleteUserDialogOpen(false);
+         setDeletePassword(''); 
       }
     } finally {
       setIsSubmitting(false);
@@ -306,7 +316,8 @@ export default function UserManagementPage() {
               setEditingUser(null); 
               form.reset({
                   name: '', email: '', role: 'student', photoUrl: '',
-                  level: undefined, notes: '', age: undefined, gender: undefined, adminPassword: ''
+                  level: undefined, notes: '', age: undefined, gender: undefined, 
+                  // adminPassword reset removed
               });
             }
           }}>
@@ -321,7 +332,7 @@ export default function UserManagementPage() {
                 <DialogTitle>{editingUser ? 'Edit User Record' : 'Add New User (Firestore Only)'}</DialogTitle>
                 <DialogDescription>
                   {editingUser ? 'Update user details.' : 'Fill in user details. This adds to Firestore only.'}
-                  Admin password required to authorize.
+                  {/* Admin password required to authorize removed from this description */}
                 </DialogDescription>
               </DialogHeader>
               <Form {...form}>
@@ -443,6 +454,7 @@ export default function UserManagementPage() {
                     </>
                   )}
 
+                  {/* Admin Password field removed from add/edit form
                   <FormField
                     control={form.control}
                     name="adminPassword"
@@ -455,6 +467,7 @@ export default function UserManagementPage() {
                       </FormItem>
                     )}
                   />
+                  */}
 
                   <DialogFooter>
                     <DialogClose asChild><Button type="button" variant="outline">Cancel</Button></DialogClose>
