@@ -1,4 +1,9 @@
 
+export interface ScoreDetail {
+  name?: string | null; // Custom name for the activity
+  score?: number | null; // Score for the activity
+}
+
 export interface User {
   id: string; // Firestore document ID
   uid?: string; // Firebase Auth UID
@@ -12,7 +17,6 @@ export interface User {
   age?: number; 
   gender?: 'male' | 'female' | 'other'; 
   preferredShift?: 'Saturday' | 'Sunday'; 
-  // Deprecated: partial1Grade, partial2Grade, partial3Grade. Replaced by 'grades' object.
   grades?: {
     partial1?: PartialScores;
     partial2?: PartialScores;
@@ -21,11 +25,11 @@ export interface User {
 }
 
 export interface PartialScores {
-  acc1?: number | null; // Accumulated score 1 (max 10)
-  acc2?: number | null; // Accumulated score 2 (max 10)
-  acc3?: number | null; // Accumulated score 3 (max 10)
-  acc4?: number | null; // Accumulated score 4 (max 10)
-  exam?: number | null;   // Exam score (max 60)
+  acc1?: ScoreDetail | null;
+  acc2?: ScoreDetail | null;
+  acc3?: ScoreDetail | null;
+  acc4?: ScoreDetail | null;
+  exam?: ScoreDetail | null;
 }
 
 export interface Session {

@@ -12,7 +12,7 @@ import { Loader2, Save, UserCircle, ClipboardCheck, Search, Users } from 'lucide
 import { useToast } from '@/hooks/use-toast';
 import { db } from '@/lib/firebase';
 import { collection, doc, getDocs, getDoc, updateDoc, query, where } from 'firebase/firestore';
-import type { User, Group, PartialScores } from '@/types';
+import type { User, Group, PartialScores, ScoreDetail } from '@/types';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -32,22 +32,46 @@ const parseOptionalFloat = (val: unknown): number | null | undefined => {
   return isNaN(num) ? undefined : num;
 };
 
-const partialScoresSchema = z.object({
-  acc1: z.preprocess(parseOptionalFloat, z.number().min(0, "Min 0").max(10, "Max 10").optional().nullable()),
-  acc2: z.preprocess(parseOptionalFloat, z.number().min(0, "Min 0").max(10, "Max 10").optional().nullable()),
-  acc3: z.preprocess(parseOptionalFloat, z.number().min(0, "Min 0").max(10, "Max 10").optional().nullable()),
-  acc4: z.preprocess(parseOptionalFloat, z.number().min(0, "Min 0").max(10, "Max 10").optional().nullable()),
-  exam: z.preprocess(parseOptionalFloat, z.number().min(0, "Min 0").max(60, "Max 60").optional().nullable()),
+const DEFAULT_ACTIVITY_LABELS: { [K in keyof Omit<PartialScores, 'id'>]-?: string } = {
+  acc1: "Acumulado 1",
+  acc2: "Acumulado 2",
+  acc3: "Acumulado 3",
+  acc4: "Acumulado 4",
+  exam: "Examen",
+};
+
+const activityScoreSchema = (maxScore: number) => z.object({
+  name: z.string().optional().nullable(),
+  score: z.preprocess(
+    parseOptionalFloat,
+    z.number().min(0, "Min 0").max(maxScore, `Max ${maxScore}`).optional().nullable()
+  ),
 }).deepPartial().optional();
 
-// Schema for the grade entry form itself
+const partialScoresObjectSchema = z.object({
+  acc1: activityScoreSchema(10),
+  acc2: activityScoreSchema(10),
+  acc3: activityScoreSchema(10),
+  acc4: activityScoreSchema(10),
+  exam: activityScoreSchema(60),
+}).deepPartial().optional();
+
 const gradeEntryFormSchema = z.object({
-  partial1: partialScoresSchema,
-  partial2: partialScoresSchema,
-  partial3: partialScoresSchema,
+  partial1: partialScoresObjectSchema,
+  partial2: partialScoresObjectSchema,
+  partial3: partialScoresObjectSchema,
 }).deepPartial().optional();
 
 type GradeEntryFormValues = z.infer<typeof gradeEntryFormSchema>;
+
+const getDefaultPartialData = (): PartialScores => ({
+  acc1: { name: '', score: null },
+  acc2: { name: '', score: null },
+  acc3: { name: '', score: null },
+  acc4: { name: '', score: null },
+  exam: { name: '', score: null },
+});
+
 
 export default function GradesManagementPage() {
   const router = useRouter();
@@ -66,9 +90,9 @@ export default function GradesManagementPage() {
   const gradeForm = useForm<GradeEntryFormValues>({
     resolver: zodResolver(gradeEntryFormSchema),
     defaultValues: {
-      partial1: { acc1: null, acc2: null, acc3: null, acc4: null, exam: null },
-      partial2: { acc1: null, acc2: null, acc3: null, acc4: null, exam: null },
-      partial3: { acc1: null, acc2: null, acc3: null, acc4: null, exam: null },
+      partial1: getDefaultPartialData(),
+      partial2: getDefaultPartialData(),
+      partial3: getDefaultPartialData(),
     }
   });
 
@@ -87,7 +111,7 @@ export default function GradesManagementPage() {
       if (studentIdFromParams) {
         const preselectedStudent = studentList.find(s => s.id === studentIdFromParams);
         if (preselectedStudent) {
-          handleSelectStudentForGrading(preselectedStudent, false); // Don't push router here, already on page
+          handleSelectStudentForGrading(preselectedStudent, false);
         } else {
           toast({ title: 'Error', description: 'Student from URL not found.', variant: 'destructive' });
         }
@@ -97,7 +121,7 @@ export default function GradesManagementPage() {
       toast({ title: 'Error', description: 'Could not load students or groups.', variant: 'destructive' });
     }
     setIsLoadingData(false);
-  }, [searchParams, toast]); // Removed gradeForm and router from deps as they are stable
+  }, [searchParams, toast]); 
 
   useEffect(() => {
     fetchInitialData();
@@ -110,7 +134,7 @@ export default function GradesManagementPage() {
       const group = allGroups.find(g => g.id === selectedGroupIdForFilter);
       if (group && Array.isArray(group.studentIds)) {
         studentsToDisplay = studentsToDisplay.filter(student => group.studentIds.includes(student.id));
-      } else if (group) { // Group selected but has no students
+      } else if (group) {
         studentsToDisplay = [];
       }
     }
@@ -126,9 +150,9 @@ export default function GradesManagementPage() {
   const handleSelectStudentForGrading = (student: User, updateUrl: boolean = true) => {
     setSelectedStudent(student);
     gradeForm.reset({
-      partial1: student.grades?.partial1 || { acc1: null, acc2: null, acc3: null, acc4: null, exam: null },
-      partial2: student.grades?.partial2 || { acc1: null, acc2: null, acc3: null, acc4: null, exam: null },
-      partial3: student.grades?.partial3 || { acc1: null, acc2: null, acc3: null, acc4: null, exam: null },
+      partial1: { ...getDefaultPartialData(), ...student.grades?.partial1 },
+      partial2: { ...getDefaultPartialData(), ...student.grades?.partial2 },
+      partial3: { ...getDefaultPartialData(), ...student.grades?.partial3 },
     });
     if (updateUrl) {
       router.push(`/grades-management?studentId=${student.id}`, { scroll: false });
@@ -143,7 +167,6 @@ export default function GradesManagementPage() {
     setIsSubmitting(true);
     try {
       const studentRef = doc(db, "users", selectedStudent.id);
-      // Ensure all partials exist, even if empty, to match schema
       const gradesToSave = {
         partial1: data.partial1 || {},
         partial2: data.partial2 || {},
@@ -153,12 +176,10 @@ export default function GradesManagementPage() {
       
       toast({ title: "Grades Updated", description: `Grades for ${selectedStudent.name} saved successfully.` });
       
-      // Refresh selected student data to reflect saved changes
       const updatedStudentDoc = await getDoc(studentRef);
       if(updatedStudentDoc.exists()){
         const updatedStudentData = { id: updatedStudentDoc.id, ...updatedStudentDoc.data() } as User;
-        setSelectedStudent(updatedStudentData); // Update local state for selected student
-        // Also update this student in the main list
+        setSelectedStudent(updatedStudentData);
         setAllStudents(prev => prev.map(s => s.id === updatedStudentData.id ? updatedStudentData : s));
       }
 
@@ -171,59 +192,61 @@ export default function GradesManagementPage() {
   };
 
   const renderGradeInputFields = (partialKey: "partial1" | "partial2" | "partial3") => {
-    const accumulatedFields: (keyof PartialScores)[] = ['acc1', 'acc2', 'acc3', 'acc4'];
+    const activities = Object.keys(DEFAULT_ACTIVITY_LABELS) as (keyof PartialScores)[];
+    
     return (
-      <div className="space-y-3 p-1">
-        {accumulatedFields.map((accKey, index) => (
-          <FormField
-            key={`${partialKey}-${accKey}`}
-            control={gradeForm.control}
-            name={`${partialKey}.${accKey}`}
-            render={({ field }) => (
-              <FormItem className="flex flex-col sm:flex-row sm:items-center sm:gap-2">
-                <FormLabel className="w-full sm:w-32 whitespace-nowrap mb-1 sm:mb-0">Acumulado {index + 1}</FormLabel>
-                <FormControl>
-                  <Input
-                    type="number"
-                    step="0.1"
-                    placeholder="0-10"
-                    {...field}
-                    value={field.value === null ? '' : field.value ?? ''}
-                    onChange={e => field.onChange(parseOptionalFloat(e.target.value))}
-                    className="w-full"
-                    disabled={isSubmitting}
-                  />
-                </FormControl>
-                <FormMessage className="text-xs mt-1 sm:mt-0 sm:ml-2"/>
-              </FormItem>
-            )}
-          />
+      <div className="space-y-4 p-1">
+        {activities.map((activityKey) => (
+          <div key={`${partialKey}-${activityKey}`} className="space-y-3 rounded-md border p-4 shadow-sm bg-card">
+            <p className="text-md font-semibold text-card-foreground">{DEFAULT_ACTIVITY_LABELS[activityKey]}</p>
+            <FormField
+              control={gradeForm.control}
+              name={`${partialKey}.${activityKey}.name`}
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="text-sm text-muted-foreground">Activity Name (Optional)</FormLabel>
+                  <FormControl>
+                    <Input
+                      type="text"
+                      placeholder={`Custom name for ${DEFAULT_ACTIVITY_LABELS[activityKey]}`}
+                      {...field}
+                      value={field.value ?? ''}
+                      className="text-sm"
+                      disabled={isSubmitting}
+                    />
+                  </FormControl>
+                  <FormMessage className="text-xs"/>
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={gradeForm.control}
+              name={`${partialKey}.${activityKey}.score`}
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="text-sm text-muted-foreground">Score</FormLabel>
+                  <FormControl>
+                    <Input
+                      type="number"
+                      step="0.1"
+                      placeholder={activityKey.startsWith('acc') ? "0-10" : "0-60"}
+                      {...field}
+                      value={field.value === null ? '' : field.value ?? ''}
+                      onChange={e => field.onChange(parseOptionalFloat(e.target.value))}
+                      className="text-sm"
+                      disabled={isSubmitting}
+                    />
+                  </FormControl>
+                  <FormMessage className="text-xs"/>
+                </FormItem>
+              )}
+            />
+          </div>
         ))}
-        <FormField
-          control={gradeForm.control}
-          name={`${partialKey}.exam`}
-          render={({ field }) => (
-            <FormItem className="flex flex-col sm:flex-row sm:items-center sm:gap-2">
-              <FormLabel className="w-full sm:w-32 mb-1 sm:mb-0">Examen</FormLabel>
-              <FormControl>
-                <Input
-                  type="number"
-                  step="0.1"
-                  placeholder="0-60"
-                  {...field}
-                  value={field.value === null ? '' : field.value ?? ''}
-                  onChange={e => field.onChange(parseOptionalFloat(e.target.value))}
-                  className="w-full"
-                  disabled={isSubmitting}
-                />
-              </FormControl>
-              <FormMessage className="text-xs mt-1 sm:mt-0 sm:ml-2"/>
-            </FormItem>
-          )}
-        />
       </div>
     );
   };
+
 
   if (isLoadingData && !allStudents.length && !allGroups.length) {
     return (
@@ -249,9 +272,10 @@ export default function GradesManagementPage() {
             <ClipboardCheck className="h-6 w-6 text-primary" />
             Grades Management
           </CardTitle>
-          <CardDescription>Filter students by group or search by name, then select a student to edit their grades.</CardDescription>
+          <CardDescription>Filter students by group or search by name, then select a student to edit their grades, including activity names and scores.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+         <Form {...gradeForm}> {/* Form provider now wraps filters and grade form area */}
           <div className="flex flex-col sm:flex-row gap-4">
             <div className="flex-1 min-w-[200px]">
               <Label htmlFor="group-filter">Filter by Group</Label>
@@ -259,8 +283,8 @@ export default function GradesManagementPage() {
                 value={selectedGroupIdForFilter}
                 onValueChange={(value) => {
                   setSelectedGroupIdForFilter(value);
-                  setSelectedStudent(null); // Clear student selection when filter changes
-                  router.push('/grades-management', { scroll: false }); // Clear studentId from URL
+                  setSelectedStudent(null); 
+                  router.push('/grades-management', { scroll: false }); 
                 }}
                 disabled={isLoadingData}
               >
@@ -288,7 +312,7 @@ export default function GradesManagementPage() {
                   value={searchTerm}
                   onChange={(e) => {
                     setSearchTerm(e.target.value);
-                    setSelectedStudent(null); // Clear student selection
+                    setSelectedStudent(null); 
                     router.push('/grades-management', { scroll: false });
                   }}
                   className="pl-8 w-full"
@@ -337,7 +361,7 @@ export default function GradesManagementPage() {
               All students are listed. Use filters to narrow down or select from above if list is too long.
             </p>
            )}
-
+          </Form>
         </CardContent>
       </Card>
 
@@ -345,7 +369,7 @@ export default function GradesManagementPage() {
         <Card>
           <CardHeader>
             <CardTitle>Editing Grades for: {selectedStudent.name}</CardTitle>
-            <CardDescription>Enter accumulated scores (max 10 each) and exam score (max 60) for each partial.</CardDescription>
+            <CardDescription>Enter activity names (optional) and scores for each partial. Accumulated max 10, Exam max 60.</CardDescription>
           </CardHeader>
           <CardContent>
             <Form {...gradeForm}>
@@ -356,13 +380,13 @@ export default function GradesManagementPage() {
                     <TabsTrigger value="partial2">2do Parcial</TabsTrigger>
                     <TabsTrigger value="partial3">3er Parcial</TabsTrigger>
                   </TabsList>
-                  <TabsContent value="partial1" className="border p-4 rounded-b-md">
+                  <TabsContent value="partial1" className="border-x border-b p-4 rounded-b-md">
                     {renderGradeInputFields("partial1")}
                   </TabsContent>
-                  <TabsContent value="partial2" className="border p-4 rounded-b-md">
+                  <TabsContent value="partial2" className="border-x border-b p-4 rounded-b-md">
                     {renderGradeInputFields("partial2")}
                   </TabsContent>
-                  <TabsContent value="partial3" className="border p-4 rounded-b-md">
+                  <TabsContent value="partial3" className="border-x border-b p-4 rounded-b-md">
                     {renderGradeInputFields("partial3")}
                   </TabsContent>
                 </Tabs>
@@ -383,4 +407,3 @@ export default function GradesManagementPage() {
     </div>
   );
 }
-
