@@ -11,17 +11,30 @@
 import {ai} from '@/ai/genkit';
 import {z} from 'genkit';
 import * as admin from 'firebase-admin';
+import type { App } from 'firebase-admin/app'; // Import App type
 import type { User } from '@/types';
 
-// Initialize Firebase Admin SDK
-// Ensure your service account key is set in environment variables for Genkit deployment (e.g., GOOGLE_APPLICATION_CREDENTIALS)
-// or that Genkit is running in an environment with appropriate default credentials (like Cloud Functions/Run).
-if (!admin.apps.length) {
-  admin.initializeApp();
+// Helper function to initialize Firebase Admin app
+function initializeAdminApp(): App {
+  if (admin.apps.length > 0) {
+    const defaultApp = admin.app();
+    if (defaultApp) {
+      return defaultApp;
+    }
+    // This case should ideally not be reached if admin.apps.length > 0
+    // but as a fallback, re-initialize.
+    console.warn("Firebase Admin SDK: admin.apps has members, but admin.app() returned undefined. Re-initializing.");
+  }
+  // Ensure your service account key is set in environment variables for Genkit deployment
+  // (e.g., GOOGLE_APPLICATION_CREDENTIALS) or that Genkit is running in an environment
+  // with appropriate default credentials (like Cloud Functions/Run).
+  return admin.initializeApp();
 }
 
-const firestore = admin.firestore();
-const auth = admin.auth();
+// Initialize Firebase Admin SDK
+const appInstance: App = initializeAdminApp();
+const firestore = admin.firestore(appInstance);
+const auth = admin.auth(appInstance);
 
 export const CreateUserAccountInputSchema = z.object({
   name: z.string().min(2, "Name must be at least 2 characters."),
@@ -98,6 +111,8 @@ const createUserAccountFlow = ai.defineFlow(
         message = 'The email address is already in use by another account.';
       } else if (error.code === 'auth/invalid-password') {
         message = 'The password must be a string with at least six characters.';
+      } else if (error.message && error.message.includes("Must be invoked with service account credentials")) {
+        message = "Firebase Admin SDK not initialized. Check service account credentials (GOOGLE_APPLICATION_CREDENTIALS).";
       }
       return {
         message: message,
