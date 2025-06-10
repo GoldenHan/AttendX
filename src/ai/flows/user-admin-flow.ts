@@ -11,30 +11,29 @@
 import {ai} from '@/ai/genkit';
 import {z} from 'genkit';
 import * as admin from 'firebase-admin';
-import type { App } from 'firebase-admin/app'; // Import App type
+// No need for 'firebase-admin/app' type if using default app behavior
 import type { User } from '@/types';
 
-// Helper function to initialize Firebase Admin app
-function initializeAdminApp(): App {
-  if (admin.apps.length > 0) {
-    const defaultApp = admin.app();
-    if (defaultApp) {
-      return defaultApp;
-    }
-    // This case should ideally not be reached if admin.apps.length > 0
-    // but as a fallback, re-initialize.
-    console.warn("Firebase Admin SDK: admin.apps has members, but admin.app() returned undefined. Re-initializing.");
+// Initialize Firebase Admin SDK directly at the module scope
+// This is the most standard way. If this fails, the issue is likely deeper.
+if (!admin.apps.length) {
+  try {
+    admin.initializeApp();
+    console.log("Firebase Admin SDK initialized successfully in user-admin-flow.ts");
+  } catch (e: any) {
+    console.error("CRITICAL: Firebase Admin SDK admin.initializeApp() FAILED in user-admin-flow.ts:", e);
+    // Re-throwing the error is important so the failure is obvious.
+    throw new Error(`Firebase Admin SDK initialization failed: ${e.message}. Check GOOGLE_APPLICATION_CREDENTIALS and server logs.`);
   }
-  // Ensure your service account key is set in environment variables for Genkit deployment
-  // (e.g., GOOGLE_APPLICATION_CREDENTIALS) or that Genkit is running in an environment
-  // with appropriate default credentials (like Cloud Functions/Run).
-  return admin.initializeApp();
+} else {
+  console.log("Firebase Admin SDK: App already initialized in user-admin-flow.ts.");
 }
 
-// Initialize Firebase Admin SDK
-const appInstance: App = initializeAdminApp();
-const firestore = admin.firestore(appInstance);
-const auth = admin.auth(appInstance);
+// Get Firestore and Auth instances.
+// If admin.initializeApp() was called above, or if an app was already initialized,
+// these calls will use the default app.
+const firestore = admin.firestore();
+const auth = admin.auth();
 
 export const CreateUserAccountInputSchema = z.object({
   name: z.string().min(2, "Name must be at least 2 characters."),
@@ -113,6 +112,9 @@ const createUserAccountFlow = ai.defineFlow(
         message = 'The password must be a string with at least six characters.';
       } else if (error.message && error.message.includes("Must be invoked with service account credentials")) {
         message = "Firebase Admin SDK not initialized. Check service account credentials (GOOGLE_APPLICATION_CREDENTIALS).";
+      } else if (error.message && error.message.includes("Firebase Admin SDK setup failed")) {
+        // Propagate the initialization failure message
+        message = error.message;
       }
       return {
         message: message,
