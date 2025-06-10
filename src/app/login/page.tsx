@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, LogIn } from 'lucide-react';
+import { Loader2, LogIn, UserPlus } from 'lucide-react';
 import Link from 'next/link';
 
 export default function LoginPage() {
@@ -93,9 +93,16 @@ export default function LoginPage() {
             </Button>
           </form>
         </CardContent>
-        <CardFooter className="flex flex-col items-center text-xs text-muted-foreground">
-           <p>Ensure you have an account before attempting to log in.</p>
-           <p className="mt-1">Contact admin for account creation.</p>
+        <CardFooter className="flex flex-col items-center text-sm">
+           <p className="text-muted-foreground">Ensure you have an account before attempting to log in.</p>
+           <div className="mt-4">
+            <Button variant="outline" asChild>
+              <Link href="/signup">
+                <UserPlus className="mr-2 h-4 w-4" />
+                Create an Account
+              </Link>
+            </Button>
+           </div>
         </CardFooter>
       </Card>
     </div>

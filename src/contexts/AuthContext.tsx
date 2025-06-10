@@ -4,8 +4,13 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { auth, db } from '@/lib/firebase';
 import type { User as FirebaseUser } from 'firebase/auth';
-import { onAuthStateChanged, signInWithEmailAndPassword, signOut as firebaseSignOut } from 'firebase/auth';
-import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import { 
+  onAuthStateChanged, 
+  signInWithEmailAndPassword, 
+  signOut as firebaseSignOut,
+  createUserWithEmailAndPassword 
+} from 'firebase/auth';
+import { doc, getDoc, collection, query, where, getDocs, setDoc } from 'firebase/firestore';
 import type { User as FirestoreUserType } from '@/types';
 import { useRouter, usePathname } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
@@ -15,6 +20,7 @@ interface AuthContextType {
   firestoreUser: FirestoreUserType | null;
   loading: boolean;
   signIn: (email: string, pass: string) => Promise<void>;
+  signUp: (name: string, email: string, pass: string) => Promise<void>;
   signOut: () => Promise<void>;
 }
 
@@ -32,9 +38,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setLoading(true);
       if (user) {
         setAuthUser(user);
-        // Fetch Firestore user data
         const usersRef = collection(db, 'users');
-        // Try fetching by UID first, then by email as a fallback if UID field is not yet populated in all user docs
         let userDocSnapshot;
         const qUid = query(usersRef, where('uid', '==', user.uid));
         const uidSnapshot = await getDocs(qUid);
@@ -42,7 +46,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         if (!uidSnapshot.empty) {
           userDocSnapshot = uidSnapshot.docs[0];
         } else if (user.email) {
-          // Fallback to email if UID query yields no results
           const qEmail = query(usersRef, where('email', '==', user.email));
           const emailSnapshot = await getDocs(qEmail);
           if (!emailSnapshot.empty) {
@@ -54,10 +57,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           setFirestoreUser({ id: userDocSnapshot.id, ...userDocSnapshot.data() } as FirestoreUserType);
         } else {
           console.warn('No Firestore document found for user:', user.uid, user.email);
+          // If user exists in Auth but not Firestore (e.g., just signed up),
+          // and we expect a Firestore doc to be created by signUp, this state is temporary.
+          // For existing users, this might indicate an issue or a new user whose Firestore doc creation is pending/failed.
           setFirestoreUser(null); 
-          // Potentially sign out user if Firestore record is mandatory
-          // await firebaseSignOut(auth);
-          // setAuthUser(null);
         }
       } else {
         setAuthUser(null);
@@ -73,7 +76,28 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setLoading(true);
     try {
       await signInWithEmailAndPassword(auth, email, pass);
-      // onAuthStateChanged will handle setting user and redirecting
+    } catch (error) {
+      setLoading(false);
+      throw error;
+    }
+  };
+
+  const signUp = async (name: string, email: string, pass: string) => {
+    setLoading(true);
+    try {
+      const userCredential = await createUserWithEmailAndPassword(auth, email, pass);
+      const firebaseUser = userCredential.user;
+      
+      // Create Firestore document for the new user
+      const newUserDoc: FirestoreUserType = {
+        id: firebaseUser.uid, // Use Firebase UID as Firestore document ID for simplicity, or generate one
+        uid: firebaseUser.uid,
+        name: name,
+        email: firebaseUser.email || undefined,
+        role: 'student', // Default role for new sign-ups
+      };
+      await setDoc(doc(db, 'users', firebaseUser.uid), newUserDoc);
+      // onAuthStateChanged will handle setting authUser and firestoreUser, and redirection
     } catch (error) {
       setLoading(false);
       throw error;
@@ -94,31 +118,19 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
   
-  // Handle redirection logic within the provider to avoid FOUC or layout shifts
   useEffect(() => {
     if (!loading) {
-      const isAuthPage = pathname === '/login';
+      const isAuthPage = pathname === '/login' || pathname === '/signup';
       if (!authUser && !isAuthPage) {
         router.push('/login');
       } else if (authUser && isAuthPage) {
-        router.push('/dashboard'); // Or '/'
+        router.push('/dashboard');
       }
     }
   }, [authUser, loading, pathname, router]);
 
-  // If still loading, show a full-page loader or nothing to prevent FOUC
-  // This component doesn't render UI itself, but AppLayout can use this loading state
-  // if (loading) {
-  //   return (
-  //     <div className="flex h-screen w-screen items-center justify-center">
-  //       <Loader2 className="h-12 w-12 animate-spin text-primary" />
-  //     </div>
-  //   );
-  // }
-
-
   return (
-    <AuthContext.Provider value={{ authUser, firestoreUser, loading, signIn, signOut }}>
+    <AuthContext.Provider value={{ authUser, firestoreUser, loading, signIn, signUp, signOut }}>
       {children}
     </AuthContext.Provider>
   );
