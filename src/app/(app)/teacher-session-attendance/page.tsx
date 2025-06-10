@@ -37,9 +37,8 @@ const studentAttendanceSchema = z.object({
   status: z.enum(['present', 'absent'], { required_error: 'Status is required.' }),
   observation: z.string().optional(),
 }).refine(data => {
-    // Observation is only relevant if status is 'absent'
     if (data.status === 'present' && data.observation && data.observation.trim() !== '') {
-        return false; // Invalid: observation for present student
+        return false;
     }
     return true;
 }, {
@@ -61,7 +60,7 @@ export default function TeacherSessionAttendancePage() {
   const { toast } = useToast();
   const { firestoreUser, loading: authLoading } = useAuth();
   
-  const [assignedGroups, setAssignedGroups] = useState<Group[]>([]);
+  const [availableGroups, setAvailableGroups] = useState<Group[]>([]); // Groups available for selection
   const [allStudents, setAllStudents] = useState<User[]>([]); 
   
   const [isLoadingData, setIsLoadingData] = useState(true);
@@ -80,26 +79,25 @@ export default function TeacherSessionAttendancePage() {
   const { fields, append, remove } = useFieldArray({
     control: form.control,
     name: 'attendances',
-    keyName: 'fieldId', // Keep using fieldId, it's fine
+    keyName: 'fieldId',
   });
 
   const watchedGroupId = form.watch('groupId');
 
   const populateStudentsForGroup = useCallback((groupId: string) => {
-    remove(); // Clear previous students
-    const selectedGroup = assignedGroups.find(g => g.id === groupId);
+    remove(); 
+    const selectedGroup = availableGroups.find(g => g.id === groupId);
     if (selectedGroup && Array.isArray(selectedGroup.studentIds)) {
       const studentsInGroup = selectedGroup.studentIds.map(studentId => {
         const student = allStudents.find(s => s.id === studentId);
         return student ? { userId: student.id, name: student.name, status: 'present' as 'present' | 'absent', observation: '' } : null;
-      }).filter(Boolean); // Ensure no nulls if a studentId is not found
+      }).filter(Boolean);
       
-      // Append each valid student to the field array
       studentsInGroup.forEach(studentData => {
         if (studentData) append(studentData);
       });
     }
-  }, [assignedGroups, allStudents, append, remove]);
+  }, [availableGroups, allStudents, append, remove]);
 
 
   useEffect(() => {
@@ -110,22 +108,31 @@ export default function TeacherSessionAttendancePage() {
       }
       setIsLoadingData(true);
       try {
-        const groupsQuery = query(collection(db, 'groups'), where('teacherId', '==', firestoreUser.id));
+        let groupsQuery;
+        if (firestoreUser.role === 'admin') {
+          groupsQuery = query(collection(db, 'groups')); // Admin sees all groups
+        } else if (firestoreUser.role === 'teacher') {
+          groupsQuery = query(collection(db, 'groups'), where('teacherId', '==', firestoreUser.id)); // Teacher sees their assigned groups
+        } else {
+          setAvailableGroups([]); // Other roles see no groups here
+          setIsLoadingData(false);
+          return;
+        }
+
         const groupsSnapshot = await getDocs(groupsQuery);
         const fetchedGroups = groupsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as Group));
-        setAssignedGroups(fetchedGroups);
+        setAvailableGroups(fetchedGroups);
 
-        // Fetch all students once, they are needed to map studentIds to names
         const studentsSnapshot = await getDocs(collection(db, 'students'));
         setAllStudents(studentsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as User)));
         
-        if (fetchedGroups.length === 1) { // Auto-select if only one group
+        if (fetchedGroups.length === 1 && firestoreUser.role === 'teacher') {
           form.setValue('groupId', fetchedGroups[0].id);
         }
 
       } catch (error) {
-        console.error("Error fetching teacher's groups or students: ", error);
-        toast({ title: 'Error fetching data', description: 'Could not load your assigned groups or student list.', variant: 'destructive' });
+        console.error("Error fetching groups or students: ", error);
+        toast({ title: 'Error fetching data', description: 'Could not load groups or student list.', variant: 'destructive' });
       }
       setIsLoadingData(false);
     };
@@ -133,19 +140,19 @@ export default function TeacherSessionAttendancePage() {
   }, [firestoreUser, authLoading, toast, form]);
 
   useEffect(() => {
-    if (watchedGroupId && assignedGroups.length > 0 && allStudents.length > 0) {
+    if (watchedGroupId && availableGroups.length > 0 && allStudents.length > 0) {
       populateStudentsForGroup(watchedGroupId);
     } else if (!watchedGroupId) {
-      remove(); // Clear students if no group is selected
+      remove(); 
     }
-  }, [watchedGroupId, assignedGroups, allStudents, populateStudentsForGroup, remove]);
+  }, [watchedGroupId, availableGroups, allStudents, populateStudentsForGroup, remove]);
 
 
   const findOrCreateSession = async (groupId: string, date: Date, time: string): Promise<string> => {
     const sessionDateStr = format(date, 'yyyy-MM-dd');
     const sessionsRef = collection(db, 'sessions');
     const q = query(sessionsRef, 
-      where('classId', '==', groupId), // classId in Session corresponds to Group.id
+      where('classId', '==', groupId), 
       where('date', '==', sessionDateStr),
       where('time', '==', time)
     );
@@ -155,7 +162,7 @@ export default function TeacherSessionAttendancePage() {
       return querySnapshot.docs[0].id;
     } else {
       const newSessionData: Omit<Session, 'id'> = {
-        classId: groupId, // Store Group.id as classId in Session
+        classId: groupId, 
         date: sessionDateStr,
         time: time,
       };
@@ -175,7 +182,7 @@ export default function TeacherSessionAttendancePage() {
       data.attendances.forEach(att => {
         const newRecordRef = doc(attendanceRecordsCollectionRef); 
         const record: Omit<AttendanceRecord, 'id'> = {
-          userId: att.userId, // This is student's ID from 'students' collection
+          userId: att.userId, 
           sessionId: sessionId,
           status: att.status,
           timestamp: Timestamp.fromDate(new Date(`${format(data.sessionDate, 'yyyy-MM-dd')}T${data.sessionTime}:00`)).toDate().toISOString(),
@@ -192,14 +199,11 @@ export default function TeacherSessionAttendancePage() {
         title: 'Attendance Logged',
         description: `Attendance for group recorded successfully for session on ${format(data.sessionDate, 'PPP')} at ${data.sessionTime}.`,
       });
-      // Reset part of the form, keep group if desired or reset all
-      // form.reset(); // Resets everything
-      // Or reset selectively:
-      form.setValue('attendances', []); // Clear attendances
-      if (assignedGroups.length > 1) form.setValue('groupId', ''); // Reset group if multiple options
-      // populateStudentsForGroup(form.getValues('groupId')); // Re-populate if group is kept
+      form.setValue('attendances', []); 
+      if (firestoreUser?.role === 'admin' || (firestoreUser?.role === 'teacher' && availableGroups.length > 1)) {
+         form.setValue('groupId', ''); 
+      }
       remove();
-
 
     } catch (error) {
       console.error("Error logging attendance: ", error);
@@ -213,7 +217,7 @@ export default function TeacherSessionAttendancePage() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2"><UserCheck className="h-6 w-6 text-primary" /> Session Attendance</CardTitle>
-          <CardDescription>Take attendance for your assigned group sessions.</CardDescription>
+          <CardDescription>Take attendance for group sessions.</CardDescription>
         </CardHeader>
         <CardContent className="flex items-center justify-center py-10">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -241,7 +245,7 @@ export default function TeacherSessionAttendancePage() {
     );
   }
   
-  if (!isLoadingData && assignedGroups.length === 0 && firestoreUser.role === 'teacher') {
+  if (!isLoadingData && availableGroups.length === 0 && firestoreUser.role === 'teacher') {
     return (
       <Card>
         <CardHeader>
@@ -259,7 +263,9 @@ export default function TeacherSessionAttendancePage() {
     <Card>
       <CardHeader>
         <CardTitle  className="flex items-center gap-2"><UserCheck className="h-6 w-6 text-primary" /> Session Attendance</CardTitle>
-        <CardDescription>Select your group, session date and time, then mark student attendance.</CardDescription>
+        <CardDescription>
+          {firestoreUser?.role === 'admin' ? 'Select any group to manage session attendance.' : 'Select your assigned group, session date and time, then mark student attendance.'}
+        </CardDescription>
       </CardHeader>
       <CardContent>
         <Form {...form}>
@@ -270,27 +276,28 @@ export default function TeacherSessionAttendancePage() {
                 name="groupId"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Your Assigned Group</FormLabel>
+                    <FormLabel>{firestoreUser?.role === 'admin' ? 'Select Group (Admin View)' : 'Your Assigned Group'}</FormLabel>
                     <Select
                       onValueChange={(value) => {
                         field.onChange(value);
                       }}
                       value={field.value}
-                      disabled={isLoadingData || assignedGroups.length === 0}
+                      disabled={isLoadingData || availableGroups.length === 0}
                     >
                       <FormControl>
                         <SelectTrigger>
-                          <SelectValue placeholder="Select your group" />
+                          <SelectValue placeholder={firestoreUser?.role === 'admin' ? 'Select any group' : 'Select your group'} />
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        {assignedGroups.map((g) => (
+                        {availableGroups.map((g) => (
                           <SelectItem key={g.id} value={g.id}>
                             {g.name}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
+                    {availableGroups.length === 0 && !isLoadingData && <FormDescription>No groups available.</FormDescription>}
                     <FormMessage />
                   </FormItem>
                 )}
@@ -365,12 +372,11 @@ export default function TeacherSessionAttendancePage() {
                         control={form.control}
                         name={`attendances.${index}.status`}
                         render={({ field: statusField }) => (
-                          <FormItem className="space-y-1 md:pt-1"> {/* Adjusted padding for alignment */}
+                          <FormItem className="space-y-1 md:pt-1">
                             <FormControl>
                               <RadioGroup
                                 onValueChange={(value) => {
                                   statusField.onChange(value);
-                                  // Clear observation if student is marked present
                                   if (value === 'present') {
                                     form.setValue(`attendances.${index}.observation`, '');
                                   }
@@ -402,7 +408,7 @@ export default function TeacherSessionAttendancePage() {
                           control={form.control}
                           name={`attendances.${index}.observation`}
                           render={({ field: obsField }) => (
-                            <FormItem className="flex-1 md:min-w-[250px] min-w-full"> {/* Ensure it takes space */}
+                            <FormItem className="flex-1 md:min-w-[250px] min-w-full">
                               <FormLabel className="text-xs text-muted-foreground">Observation (if absent)</FormLabel>
                               <FormControl>
                                 <Textarea
@@ -440,3 +446,4 @@ export default function TeacherSessionAttendancePage() {
     </Card>
   );
 }
+
