@@ -1,21 +1,14 @@
 
 export interface User {
-  id: string;
+  id: string; // Firestore document ID
+  uid?: string; // Firebase Auth UID
   name: string;
-  role: 'student' | 'teacher' | 'admin';
+  role: 'student' | 'teacher' | 'admin' | 'caja';
   email?: string;
   photoUrl?: string; // Optional: URL to the student's photo
   level?: 'Beginner' | 'Intermediate' | 'Advanced' | 'Other'; // Optional: Student's level
   notes?: string; // Optional: General notes about the student
 }
-
-// ClassInfo has been removed and consolidated into Group.
-// export interface ClassInfo {
-//   id: string;
-//   name: string;
-//   teacherId: string;
-//   studentIds: string[];
-// }
 
 export interface Session {
   id: string;
