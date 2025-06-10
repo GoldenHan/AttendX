@@ -16,7 +16,7 @@ import { Button } from '@/components/ui/button';
 import { Loader2, Pencil, Trash2, UserPlus, FolderKanban, Users as UsersIcon } from 'lucide-react'; // Renamed Users to UsersIcon
 import type { User } from '@/types';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, deleteDoc, doc } from 'firebase/firestore'; // Removed addDoc
+import { collection, getDocs, deleteDoc, doc, addDoc } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import {
   Dialog,
@@ -29,7 +29,7 @@ import {
   DialogClose,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-// import { Label } from "@/components/ui/label"; // No longer directly used in this version of the form
+// import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from '@/components/ui/textarea';
 import { useForm } from 'react-hook-form';
@@ -43,18 +43,15 @@ import {
   FormLabel,
   FormMessage,
 } from '@/components/ui/form';
-import { createUserAccount, type CreateUserAccountInput } from '@/ai/flows/user-admin-flow';
 
+// Reverted userFormSchema: email optional, no password, age, or gender.
 const userFormSchema = z.object({
   name: z.string().min(2, { message: "Name must be at least 2 characters." }),
-  email: z.string().email({ message: "Invalid email address." }), // Email is now required
-  password: z.string().min(6, { message: "Password must be at least 6 characters."}),
+  email: z.string().email({ message: "Invalid email address." }).optional().or(z.literal('')),
   role: z.enum(['student', 'teacher', 'admin', 'caja'], { required_error: "Role is required." }),
   photoUrl: z.string().url({ message: "Please enter a valid URL for photo." }).optional().or(z.literal('')),
   level: z.enum(['Beginner', 'Intermediate', 'Advanced', 'Other']).optional(),
   notes: z.string().optional(),
-  age: z.coerce.number().positive("Age must be a positive number.").int("Age must be an integer.").optional().or(z.literal('')), // Coerce to number
-  gender: z.enum(['male', 'female', 'other']).optional(),
 });
 
 type UserFormValues = z.infer<typeof userFormSchema>;
@@ -71,13 +68,10 @@ export default function UserManagementPage() {
     defaultValues: {
       name: '',
       email: '',
-      password: '',
       role: 'student',
       photoUrl: '',
       level: undefined,
       notes: '',
-      age: undefined,
-      gender: undefined,
     },
   });
 
@@ -101,52 +95,47 @@ export default function UserManagementPage() {
   }, []);
 
   const handleDeleteUser = async (userId: string) => {
-    // Consider adding a Genkit flow for deleting Firebase Auth user as well
-    if (!confirm('Are you sure you want to delete this user? This action only removes the Firestore record, not the Auth account.')) return;
+    if (!confirm('Are you sure you want to delete this user? This action only removes the Firestore record.')) return;
     try {
       await deleteDoc(doc(db, 'users', userId));
-      // Note: This does not delete the Firebase Auth user. That would require a backend function (e.g., Genkit flow with Admin SDK).
       setUsers(prevUsers => prevUsers.filter(u => u.id !== userId));
-      toast({ title: 'User Record Deleted', description: 'User Firestore record removed successfully. Auth account may still exist.' });
+      toast({ title: 'User Record Deleted', description: 'User Firestore record removed successfully.' });
     } catch (error) {
       console.error("Error deleting user record:", error);
       toast({ title: 'Delete Failed', description: 'Could not delete the user record.', variant: 'destructive' });
     }
   };
 
+  // Reverted handleAddUserSubmit to a placeholder/simple Firestore add
   const handleAddUserSubmit = async (data: UserFormValues) => {
     setIsSubmitting(true);
     try {
-      const flowInput: CreateUserAccountInput = {
+      // Placeholder: Simple Firestore add (without Auth user creation)
+      // This is NOT a secure way to create users with passwords.
+      // For a real app, a secure backend function (like the Genkit flow previously) is needed.
+      const newUserDocData: Omit<User, 'id' | 'uid'> = {
         name: data.name,
-        email: data.email,
-        password: data.password,
         role: data.role,
+        email: data.email || undefined,
+        photoUrl: data.photoUrl || undefined,
       };
-      if (data.photoUrl) flowInput.photoUrl = data.photoUrl;
       if (data.role === 'student') {
-        if (data.level) flowInput.level = data.level;
-        if (data.notes) flowInput.notes = data.notes;
-        if (data.age) flowInput.age = Number(data.age); // Ensure age is a number
-        if (data.gender) flowInput.gender = data.gender;
+        if (data.level) (newUserDocData as Partial<User>).level = data.level;
+        if (data.notes) (newUserDocData as Partial<User>).notes = data.notes;
       }
 
-      const result = await createUserAccount(flowInput);
+      await addDoc(collection(db, 'users'), newUserDocData);
 
-      if (result.success) {
-        toast({ title: 'User Added', description: result.message });
-        form.reset({
-          name: '', email: '', password: '', role: 'student', photoUrl: '',
-          level: undefined, notes: '', age: undefined, gender: undefined,
-        });
-        setIsAddUserDialogOpen(false);
-        await fetchUsers(); 
-      } else {
-        toast({ title: 'Add User Failed', description: result.message, variant: 'destructive' });
-      }
+      toast({ title: 'User Added (Firestore Only)', description: `${data.name} added to Firestore. No Auth account created.` });
+      form.reset({
+        name: '', email: '', role: 'student', photoUrl: '',
+        level: undefined, notes: '',
+      });
+      setIsAddUserDialogOpen(false);
+      await fetchUsers(); 
     } catch (error: any) {
-      console.error("Error adding user via flow:", error);
-      toast({ title: 'Add User Failed', description: error.message || 'Could not add the user.', variant: 'destructive' });
+      console.error("Error adding user directly to Firestore:", error);
+      toast({ title: 'Add User Failed', description: 'Could not add the user to Firestore.', variant: 'destructive' });
     } finally {
       setIsSubmitting(false);
     }
@@ -189,8 +178,8 @@ export default function UserManagementPage() {
             setIsAddUserDialogOpen(isOpen);
             if (!isOpen) {
               form.reset({
-                  name: '', email: '', password: '', role: 'student', photoUrl: '',
-                  level: undefined, notes: '', age: undefined, gender: undefined,
+                  name: '', email: '', role: 'student', photoUrl: '',
+                  level: undefined, notes: '',
               });
             }
           }}>
@@ -204,7 +193,7 @@ export default function UserManagementPage() {
               <DialogHeader>
                 <DialogTitle>Add New User</DialogTitle>
                 <DialogDescription>
-                  Fill in the details for the new user. An authentication account will be created.
+                  Fill in the details for the new user. (Note: This currently only adds to Firestore).
                 </DialogDescription>
               </DialogHeader>
               <Form {...form}>
@@ -225,19 +214,8 @@ export default function UserManagementPage() {
                     name="email"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Email</FormLabel>
+                        <FormLabel>Email (Optional)</FormLabel>
                         <FormControl><Input type="email" placeholder="john.doe@example.com" {...field} /></FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                  <FormField
-                    control={form.control}
-                    name="password"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Initial Password</FormLabel>
-                        <FormControl><Input type="password" placeholder="••••••••" {...field} /></FormControl>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -264,35 +242,6 @@ export default function UserManagementPage() {
 
                   {watchedRole === 'student' && (
                     <>
-                      <FormField
-                        control={form.control}
-                        name="age"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Age (Optional)</FormLabel>
-                            <FormControl><Input type="number" placeholder="18" {...field} onChange={e => field.onChange(e.target.value === '' ? '' : Number(e.target.value))} /></FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      <FormField
-                        control={form.control}
-                        name="gender"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Gender (Optional)</FormLabel>
-                            <Select onValueChange={field.onChange} value={field.value} defaultValue={field.value}>
-                              <FormControl><SelectTrigger><SelectValue placeholder="Select student's gender" /></SelectTrigger></FormControl>
-                              <SelectContent>
-                                <SelectItem value="male">Male</SelectItem>
-                                <SelectItem value="female">Female</SelectItem>
-                                <SelectItem value="other">Other</SelectItem>
-                              </SelectContent>
-                            </Select>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
                       <FormField
                         control={form.control}
                         name="photoUrl"
@@ -375,7 +324,7 @@ export default function UserManagementPage() {
                   <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
                     user.role === 'admin' ? 'bg-purple-500/20 text-purple-700 dark:text-purple-400' :
                     user.role === 'teacher' ? 'bg-blue-500/20 text-blue-700 dark:text-blue-400' :
-                    user.role === 'caja' ? 'bg-orange-500/20 text-orange-700 dark:text-orange-400' : // Added 'caja' style
+                    user.role === 'caja' ? 'bg-orange-500/20 text-orange-700 dark:text-orange-400' :
                     'bg-green-500/20 text-green-700 dark:text-green-400'
                   }`}>
                     {user.role.charAt(0).toUpperCase() + user.role.slice(1)}

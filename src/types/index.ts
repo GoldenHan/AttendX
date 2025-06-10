@@ -8,8 +8,6 @@ export interface User {
   photoUrl?: string; // Optional: URL to the student's photo
   level?: 'Beginner' | 'Intermediate' | 'Advanced' | 'Other'; // Optional: Student's level
   notes?: string; // Optional: General notes about the student
-  age?: number; // Optional: Student's age
-  gender?: 'male' | 'female' | 'other'; // Optional: Student's gender
 }
 
 export interface Session {
