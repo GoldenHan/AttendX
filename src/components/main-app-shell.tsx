@@ -43,26 +43,7 @@ export function MainAppShell({ children }: { children: React.ReactNode }) {
           )}
         </SidebarContent>
         <SidebarFooter className="flex flex-col items-center">
-          <div className="my-4 group-data-[collapsible=icon]:hidden">
-            <Image
-              src="https://storage.googleapis.com/project-boreal-fire.appspot.com/snoopy.jpg"
-              alt="Snoopy brand character"
-              width={100}
-              height={100}
-              className="rounded-full object-cover"
-              data-ai-hint="dog cartoon"
-            />
-          </div>
-           <div className="my-2 group-data-[collapsible=icon]:flex group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:w-full hidden">
-            <Image
-              src="https://storage.googleapis.com/project-boreal-fire.appspot.com/snoopy.jpg"
-              alt="Snoopy brand character"
-              width={32} 
-              height={32}
-              className="rounded-full object-cover"
-              data-ai-hint="dog cartoon"
-            />
-          </div>
+          {/* Snoopy image removed from here */}
           <Button variant="ghost" className="w-full justify-start group-data-[collapsible=icon]:justify-center" onClick={handleLogout} disabled={authLoading}>
             {authLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin group-data-[collapsible=icon]:mr-0" />}
             {!authLoading && <LogOut className="mr-2 h-4 w-4 group-data-[collapsible=icon]:mr-0" />}
