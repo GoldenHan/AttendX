@@ -14,7 +14,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Loader2, Pencil, Trash2, UserPlus, Search, GraduationCap, NotebookPen } from 'lucide-react';
-import type { User, Group } from '@/types'; // PartialScores removed as it's not used here directly
+import type { User, Group } from '@/types';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, deleteDoc, doc, updateDoc, query, where, addDoc, writeBatch } from 'firebase/firestore';
 import { useAuth } from '@/contexts/AuthContext';
@@ -24,7 +24,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogDescription,
+  DialogDescription as DialogPrimitiveDescription, // Aliased to avoid conflict if any
   DialogFooter,
   DialogTrigger,
   DialogClose,
@@ -38,13 +38,13 @@ import * as z from 'zod';
 import {
   Form,
   FormControl,
+  FormDescription, // Ensure FormDescription is imported here
   FormField,
   FormItem,
   FormLabel,
   FormMessage,
 } from '@/components/ui/form';
 import { Label } from "@/components/ui/label";
-// Tabs, TabsContent, TabsList, TabsTrigger removed as grade dialog is removed
 
 // Schema for student add/edit dialog (Firestore data only)
 const studentFormSchema = z.object({
@@ -64,10 +64,9 @@ const studentFormSchema = z.object({
 
 type StudentFormValues = z.infer<typeof studentFormSchema>;
 
-// studentGradeFormSchema and StudentGradeFormValues removed
 
 export default function StudentManagementPage() {
-  const router = useRouter(); // Initialize router
+  const router = useRouter(); 
   const [allStudents, setAllStudents] = useState<User[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -82,11 +81,6 @@ export default function StudentManagementPage() {
 
   const [selectedGroupIdForFilter, setSelectedGroupIdForFilter] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState<string>('');
-
-  // Grade dialog states and functions removed
-  // const [isGradeDialogOpen, setIsGradeDialogOpen] = useState(false);
-  // const [studentForGrading, setStudentForGrading] = useState<User | null>(null);
-  // const [isSubmittingGrades, setIsSubmittingGrades] = useState(false);
 
   const { toast } = useToast();
   const { reauthenticateCurrentUser, authUser } = useAuth();
@@ -106,12 +100,9 @@ export default function StudentManagementPage() {
     },
   });
 
-  // gradeForm removed
-
   const fetchData = async () => {
     setIsLoading(true);
     try {
-      // Fetch from 'students' collection
       const studentsQuery = query(collection(db, 'students')); 
       const studentsSnapshot = await getDocs(studentsQuery);
       setAllStudents(studentsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data(), role: 'student' } as User)));
@@ -138,7 +129,7 @@ export default function StudentManagementPage() {
       const group = groups.find(g => g.id === selectedGroupIdForFilter);
       if (group && Array.isArray(group.studentIds)) {
         studentsToDisplay = studentsToDisplay.filter(student => group.studentIds.includes(student.id));
-      } else if (group) { // Group selected but might have no studentIds array or is empty
+      } else if (group) { 
         studentsToDisplay = []; 
       }
     }
@@ -170,7 +161,7 @@ export default function StudentManagementPage() {
       photoUrl: studentToEdit.photoUrl || '',
       level: studentToEdit.level || undefined,
       notes: studentToEdit.notes || '',
-      age: studentToEdit.age ?? undefined, // Use ?? to handle 0 or null correctly if age can be 0
+      age: studentToEdit.age ?? undefined, 
       gender: studentToEdit.gender || undefined,
       preferredShift: studentToEdit.preferredShift || undefined,
     });
@@ -180,7 +171,7 @@ export default function StudentManagementPage() {
   const handleStudentFormSubmit = async (data: StudentFormValues) => {
     setIsSubmitting(true);
         
-    const studentDetails: Omit<User, 'id' | 'uid' | 'grades' | 'role'> = {
+    const studentDetails: Omit<User, 'id' | 'uid' | 'role' | 'grades'> = {
         name: data.name,
         email: data.email || undefined,
         phoneNumber: data.phoneNumber || undefined,
@@ -192,7 +183,6 @@ export default function StudentManagementPage() {
         preferredShift: data.preferredShift,
     };
 
-    // Remove undefined fields before saving to Firestore
     const finalStudentDetails = Object.fromEntries(
         Object.entries(studentDetails).filter(([_, v]) => v !== undefined)
     );
@@ -216,20 +206,24 @@ export default function StudentManagementPage() {
       }
     } else { 
       try {
-        // Ensure new students have an initialized grades field
-        const newStudentDocData = {
+        const newStudentDocData: User = {
           ...finalStudentDetails,
-          role: 'student' as 'student', // Explicitly set role
+          id: '', // Firestore will generate this, but satisfy type for a moment
+          role: 'student' as 'student',
           grades: { 
             partial1: { accumulatedActivities: [], exam: { name: null, score: null } },
             partial2: { accumulatedActivities: [], exam: { name: null, score: null } },
             partial3: { accumulatedActivities: [], exam: { name: null, score: null } },
           },
         };
-        await addDoc(collection(db, 'students'), newStudentDocData);
+        // Firestore will generate the ID, so we don't pass `id` to addDoc
+        const { id: _id, ...dataToSave } = newStudentDocData;
+
+        await addDoc(collection(db, 'students'), dataToSave);
+
         toast({
           title: 'Student Record Added',
-          description: `${data.name}'s record added to Firestore.`,
+          description: `${data.name}'s record added to Firestore. Auth accounts must be managed separately.`,
         });
         studentForm.reset();
         setIsStudentFormDialogOpen(false);
@@ -277,7 +271,6 @@ export default function StudentManagementPage() {
       const studentRef = doc(db, 'students', studentToDelete.id);
       batch.delete(studentRef);
 
-      // Remove student from any groups they were in
       const groupsToUpdate = groups.filter(g => g.studentIds?.includes(studentToDelete.id));
       groupsToUpdate.forEach(group => {
         const groupRef = doc(db, 'groups', group.id);
@@ -319,13 +312,10 @@ export default function StudentManagementPage() {
     }
   };
 
-  // handleOpenGradeDialog and handleGradeFormSubmit removed
-
   const handleGoToManageGrades = (studentId: string) => {
     router.push(`/grades-management?studentId=${studentId}`);
   };
 
-  // renderGradeInputFields removed
 
   if (isLoading && allStudents.length === 0 && groups.length === 0) {
     return (
@@ -370,9 +360,9 @@ export default function StudentManagementPage() {
                 <DialogContent className="sm:max-w-md">
                 <DialogHeader>
                     <DialogTitle>{editingStudent ? 'Edit Student Record' : 'Add New Student Record'}</DialogTitle>
-                    <DialogDescription>
+                    <DialogPrimitiveDescription>
                     {editingStudent ? 'Update student details in Firestore.' : 'Fill in student details to add to Firestore. Auth accounts are managed separately.'}
-                    </DialogDescription>
+                    </DialogPrimitiveDescription>
                 </DialogHeader>
                 <Form {...studentForm}>
                     <form onSubmit={studentForm.handleSubmit(handleStudentFormSubmit)} className="space-y-4 py-4 max-h-[70vh] overflow-y-auto pr-2">
@@ -612,11 +602,11 @@ export default function StudentManagementPage() {
         <DialogContent className="sm:max-w-md">
             <DialogHeader>
                 <DialogTitle>Delete Student Record</DialogTitle>
-                <DialogDescription>
+                <DialogPrimitiveDescription>
                     Are you sure you want to delete the Firestore record for {studentToDelete?.name}?
                     This action cannot be undone. Enter your admin password to confirm.
                     Note: This action does NOT delete the Firebase Authentication account if one exists.
-                </DialogDescription>
+                </DialogPrimitiveDescription>
             </DialogHeader>
             <div className="space-y-4 py-4">
                  <div className="space-y-1.5">
@@ -646,8 +636,6 @@ export default function StudentManagementPage() {
             </DialogFooter>
         </DialogContent>
     </Dialog>
-
-    {/* Grade Entry Dialog and related logic completely removed */}
     </>
   );
 }
