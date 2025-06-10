@@ -41,7 +41,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
-import { format, isValid } from 'date-fns';
+import { format, isValid, parseISO } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { Checkbox } from '@/components/ui/checkbox';
 
@@ -49,7 +49,7 @@ const groupFormSchema = z.object({
   name: z.string().min(2, { message: "Group name must be at least 2 characters." }),
   type: z.enum(['Saturday', 'Sunday'], { required_error: "Group type is required." }),
   startDate: z.date({ required_error: "Start date is required." }),
-  endDate: z.date().optional(),
+  endDate: z.date().optional().nullable(), // Allow null for optional end date
 });
 
 type GroupFormValues = z.infer<typeof groupFormSchema>;
@@ -58,7 +58,8 @@ export default function GroupManagementPage() {
   const [groups, setGroups] = useState<Group[]>([]);
   const [isLoadingGroups, setIsLoadingGroups] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isAddGroupDialogOpen, setIsAddGroupDialogOpen] = useState(false);
+  const [isGroupFormDialogOpen, setIsGroupFormDialogOpen] = useState(false);
+  const [editingGroup, setEditingGroup] = useState<Group | null>(null);
   
   const [isManageStudentsDialogOpen, setIsManageStudentsDialogOpen] = useState(false);
   const [selectedGroupForStudentManagement, setSelectedGroupForStudentManagement] = useState<Group | null>(null);
@@ -95,54 +96,84 @@ export default function GroupManagementPage() {
     fetchGroups();
   }, []);
 
-  const handleAddGroupSubmit = async (data: GroupFormValues) => {
+  const handleGroupFormSubmit = async (data: GroupFormValues) => {
     setIsSubmitting(true);
     try {
-      const newGroupDataToSave: Omit<Group, 'id' | 'studentIds'> & { studentIds: string[] } = {
-        name: data.name,
-        type: data.type,
-        startDate: data.startDate.toISOString(),
-        endDate: data.endDate ? data.endDate.toISOString() : undefined,
-        studentIds: [], // New groups start with no students
-      };
-      const docRef = await addDoc(collection(db, 'groups'), newGroupDataToSave);
-      
-      // Optimistic update of local state
-      const newGroupWithId: Group = {
-        ...newGroupDataToSave,
-        id: docRef.id,
-      };
-      setGroups(prevGroups => [...prevGroups, newGroupWithId]);
+      if (editingGroup) { // Update existing group
+        const groupRef = doc(db, 'groups', editingGroup.id);
+        const updatedGroupData = {
+          name: data.name,
+          type: data.type,
+          startDate: data.startDate.toISOString(),
+          endDate: data.endDate ? data.endDate.toISOString() : null, // Store as null if undefined
+        };
+        await updateDoc(groupRef, updatedGroupData);
+        
+        setGroups(prevGroups => prevGroups.map(g => 
+          g.id === editingGroup.id ? { ...g, ...updatedGroupData, studentIds: g.studentIds } : g // Preserve studentIds
+        ));
+        toast({ title: 'Group Updated', description: `Group "${data.name}" updated successfully.` });
 
-      toast({ title: 'Group Created', description: `${data.name} created successfully.` });
+      } else { // Create new group
+        const newGroupDataToSave = {
+          name: data.name,
+          type: data.type,
+          startDate: data.startDate.toISOString(),
+          endDate: data.endDate ? data.endDate.toISOString() : null, // Store as null if undefined
+          studentIds: [], 
+        };
+        const docRef = await addDoc(collection(db, 'groups'), newGroupDataToSave);
+        
+        const newGroupWithId: Group = {
+          ...(newGroupDataToSave as Omit<Group, 'id' | 'studentIds'> & {studentIds: string[]}), // Type assertion for studentIds
+          id: docRef.id,
+          studentIds: []
+        };
+        setGroups(prevGroups => [...prevGroups, newGroupWithId]);
+        toast({ title: 'Group Created', description: `${data.name} created successfully.` });
+      }
+      
       form.reset({ name: '', type: 'Saturday', startDate: undefined, endDate: undefined });
-      setIsAddGroupDialogOpen(false);
-      // No need to call fetchGroups() here anymore
+      setEditingGroup(null);
+      setIsGroupFormDialogOpen(false);
     } catch (error) {
-      console.error("Error adding group:", error);
-      toast({ title: 'Create Group Failed', description: 'Could not create the group.', variant: 'destructive' });
+      console.error("Error saving group:", error);
+      toast({ title: editingGroup ? 'Update Group Failed' : 'Create Group Failed', description: 'Could not save the group.', variant: 'destructive' });
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  const openEditGroupDialog = (group: Group) => {
+    setEditingGroup(group);
+    form.reset({
+      name: group.name,
+      type: group.type,
+      startDate: group.startDate ? parseISO(group.startDate) : new Date(),
+      endDate: group.endDate ? parseISO(group.endDate) : null,
+    });
+    setIsGroupFormDialogOpen(true);
+  };
+
+  const openAddGroupDialog = () => {
+    setEditingGroup(null);
+    form.reset({ name: '', type: 'Saturday', startDate: new Date(), endDate: undefined });
+    setIsGroupFormDialogOpen(true);
+  };
+
+
   const handleDeleteGroup = async (groupId: string, groupName: string) => {
     if (!confirm(`Are you sure you want to delete the group "${groupName}"? This action cannot be undone.`)) return;
     try {
       await deleteDoc(doc(db, 'groups', groupId));
-      setGroups(prevGroups => prevGroups.filter(g => g.id !== groupId)); // Optimistic update
+      setGroups(prevGroups => prevGroups.filter(g => g.id !== groupId));
       toast({ title: 'Group Deleted', description: `Group "${groupName}" removed successfully.` });
-      // No need to call fetchGroups() here if we optimistically update
     } catch (error)      {
       console.error("Error deleting group:", error);
       toast({ title: 'Delete Failed', description: 'Could not delete the group.', variant: 'destructive' });
     }
   };
   
-  const handleEditGroup = (group: Group) => {
-    toast({ title: 'Not Implemented', description: `Edit functionality for "${group.name}" will be added soon.` });
-  };
-
   const openManageStudentsDialog = async (group: Group) => {
     setSelectedGroupForStudentManagement(group);
     setSelectedStudentIdsForGroup(Array.isArray(group.studentIds) ? [...group.studentIds] : []);
@@ -175,7 +206,6 @@ export default function GroupManagementPage() {
       const groupRef = doc(db, 'groups', selectedGroupForStudentManagement.id);
       await updateDoc(groupRef, { studentIds: selectedStudentIdsForGroup });
       
-      // Optimistic update for the student count in the table
       setGroups(prevGroups => prevGroups.map(g => 
         g.id === selectedGroupForStudentManagement.id 
         ? { ...g, studentIds: selectedStudentIdsForGroup } 
@@ -185,7 +215,6 @@ export default function GroupManagementPage() {
       toast({ title: 'Students Updated', description: `Student assignments for group "${selectedGroupForStudentManagement.name}" updated.` });
       setIsManageStudentsDialogOpen(false);
       setSelectedGroupForStudentManagement(null);
-      // No need to call fetchGroups()
     } catch (error) {
       console.error("Error updating students in group:", error);
       toast({ title: 'Update Failed', description: 'Could not update student assignments.', variant: 'destructive' });
@@ -194,18 +223,15 @@ export default function GroupManagementPage() {
     }
   };
 
-  const formatDate = (dateString?: string) => {
-    if (!dateString) return 'N/A';
-    try {
-        // Attempt to parse as ISO string first (which is how it's stored)
-        const date = new Date(dateString);
-        if (isValid(date)) {
-            return format(date, 'PPP');
-        }
-    } catch (e) {
-        // Fallback for other potential formats, though less likely with current setup
+  const formatDateDisplay = (dateInput?: Date | string | null) => {
+    if (!dateInput) return 'N/A';
+    let date: Date;
+    if (typeof dateInput === 'string') {
+      date = parseISO(dateInput);
+    } else {
+      date = dateInput;
     }
-    return 'Invalid Date';
+    return isValid(date) ? format(date, 'PPP') : 'Invalid Date';
   };
 
 
@@ -232,24 +258,27 @@ export default function GroupManagementPage() {
             <CardTitle className="flex items-center gap-2"><Users className="h-6 w-6 text-primary" /> Group Management</CardTitle>
             <CardDescription>Create and manage student groups for specific days and durations.</CardDescription>
           </div>
-          <Dialog open={isAddGroupDialogOpen} onOpenChange={(isOpen) => {
-            setIsAddGroupDialogOpen(isOpen);
-            if (!isOpen) form.reset({ name: '', type: 'Saturday', startDate: undefined, endDate: undefined });
+          <Dialog open={isGroupFormDialogOpen} onOpenChange={(isOpen) => {
+            setIsGroupFormDialogOpen(isOpen);
+            if (!isOpen) {
+              form.reset({ name: '', type: 'Saturday', startDate: undefined, endDate: undefined });
+              setEditingGroup(null);
+            }
           }}>
             <DialogTrigger asChild>
-              <Button size="sm" className="gap-1.5 text-sm">
+              <Button size="sm" className="gap-1.5 text-sm" onClick={openAddGroupDialog}>
                 <PlusCircle className="size-3.5" />
                 Add New Group
               </Button>
             </DialogTrigger>
             <DialogContent className="sm:max-w-lg">
               <DialogHeader>
-                <DialogTitle>Create New Group</DialogTitle>
+                <DialogTitle>{editingGroup ? 'Edit Group' : 'Create New Group'}</DialogTitle>
                 <DialogDescription>
-                  Fill in the details for the new group. You can add students later.
+                  {editingGroup ? 'Update the details for this group.' : 'Fill in the details for the new group. You can add students later.'}
                 </DialogDescription>
               </DialogHeader>
-              <form onSubmit={form.handleSubmit(handleAddGroupSubmit)} className="space-y-4 py-4">
+              <form onSubmit={form.handleSubmit(handleGroupFormSubmit)} className="space-y-4 py-4">
                 <div>
                   <Label htmlFor="groupName">Group Name</Label>
                   <Input
@@ -269,7 +298,7 @@ export default function GroupManagementPage() {
                   render={({ field }) => (
                     <div>
                       <Label>Group Type</Label>
-                      <Select onValueChange={field.onChange} defaultValue={field.value}>
+                      <Select onValueChange={field.onChange} value={field.value} defaultValue={field.value || "Saturday"}>
                         <SelectTrigger className="mt-1">
                           <SelectValue placeholder="Select group type" />
                         </SelectTrigger>
@@ -336,15 +365,17 @@ export default function GroupManagementPage() {
                                     )}
                                 >
                                     <CalendarIcon className="mr-2 h-4 w-4" />
-                                    {field.value ? format(field.value, "PPP") : <span>Pick a date</span>}
+                                    {field.value ? format(field.value, "PPP") : <span>Pick a date or clear</span>}
                                 </Button>
                                 </PopoverTrigger>
-                                <PopoverContent className="w-auto p-0">
-                                <Calendar
-                                    mode="single"
-                                    selected={field.value}
-                                    onSelect={field.onChange}
-                                />
+                                <PopoverContent className="w-auto p-0" align="start">
+                                    <Calendar
+                                        mode="single"
+                                        selected={field.value || undefined} // Pass undefined if null to allow deselection in Calendar
+                                        onSelect={(date) => field.onChange(date || null)} // Set to null if date is undefined (cleared)
+                                        initialFocus={!!field.value}
+                                    />
+                                    <Button variant="ghost" className="w-full mt-1 text-sm" onClick={() => field.onChange(null)}>Clear End Date</Button>
                                 </PopoverContent>
                             </Popover>
                              {form.formState.errors.endDate && (
@@ -362,7 +393,7 @@ export default function GroupManagementPage() {
                   </DialogClose>
                   <Button type="submit" disabled={isSubmitting}>
                     {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    Create Group
+                    {editingGroup ? 'Save Changes' : 'Create Group'}
                   </Button>
                 </DialogFooter>
               </form>
@@ -397,14 +428,14 @@ export default function GroupManagementPage() {
                   <TableRow key={group.id}>
                     <TableCell className="font-medium">{group.name}</TableCell>
                     <TableCell>{group.type}</TableCell>
-                    <TableCell>{formatDate(group.startDate)}</TableCell>
-                    <TableCell>{formatDate(group.endDate)}</TableCell>
+                    <TableCell>{formatDateDisplay(group.startDate)}</TableCell>
+                    <TableCell>{formatDateDisplay(group.endDate)}</TableCell>
                     <TableCell>{Array.isArray(group.studentIds) ? group.studentIds.length : 0} student(s)</TableCell>
                     <TableCell className="space-x-1">
                       <Button variant="outline" size="sm" onClick={() => openManageStudentsDialog(group)}>
                         <Users className="mr-1 h-3.5 w-3.5" /> Manage Students
                       </Button>
-                      <Button variant="ghost" size="icon" onClick={() => handleEditGroup(group)}>
+                      <Button variant="ghost" size="icon" onClick={() => openEditGroupDialog(group)}>
                         <Edit className="h-4 w-4" />
                         <span className="sr-only">Edit Group</span>
                       </Button>
