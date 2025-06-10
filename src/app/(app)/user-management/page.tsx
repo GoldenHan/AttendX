@@ -45,6 +45,7 @@ import {
   FormMessage,
 } from '@/components/ui/form';
 
+// Schema without adminPassword for add/edit
 const userFormSchema = z.object({
   name: z.string().min(2, { message: "Name must be at least 2 characters." }),
   email: z.string().email({ message: "Invalid email address." }).optional().or(z.literal('')),
@@ -57,7 +58,6 @@ const userFormSchema = z.object({
     z.number({ invalid_type_error: "Age must be a number." }).positive("Age must be positive.").int("Age must be an integer.").optional()
   ),
   gender: z.enum(['male', 'female', 'other']).optional(),
-  // adminPassword removed from here
 });
 
 type UserFormValues = z.infer<typeof userFormSchema>;
@@ -74,7 +74,6 @@ export default function UserManagementPage() {
   const [userToDelete, setUserToDelete] = useState<User | null>(null);
   const [deletePassword, setDeletePassword] = useState('');
 
-
   const { toast } = useToast();
   const { reauthenticateCurrentUser, authUser } = useAuth();
 
@@ -89,7 +88,6 @@ export default function UserManagementPage() {
       notes: '',
       age: undefined,
       gender: undefined,
-      // adminPassword default removed
     },
   });
 
@@ -111,13 +109,21 @@ export default function UserManagementPage() {
   useEffect(() => {
     fetchUsers();
   }, []);
+  
+  useEffect(() => {
+    if (watchedRole !== 'student') {
+      form.setValue('level', undefined);
+      form.setValue('notes', '');
+      form.setValue('age', undefined);
+      form.setValue('gender', undefined);
+    }
+  }, [watchedRole, form]);
 
   const handleOpenAddDialog = () => {
     setEditingUser(null);
     form.reset({
       name: '', email: '', role: 'student', photoUrl: '',
       level: undefined, notes: '', age: undefined, gender: undefined, 
-      // adminPassword reset removed
     });
     setIsUserFormDialogOpen(true);
   };
@@ -134,53 +140,65 @@ export default function UserManagementPage() {
       notes: userToEdit.notes || '',
       age: userToEdit.age ?? undefined,
       gender: userToEdit.gender || undefined,
-      // adminPassword reset removed
     });
     setIsUserFormDialogOpen(true);
   };
 
   const handleUserFormSubmit = async (data: UserFormValues) => {
-    console.log(editingUser ? "Intentando editar usuario..." : "Intentando añadir usuario...", data);
-    
-    if (!authUser) {
-        toast({ title: 'Authorization Failed', description: 'Admin user not found. Please log in.', variant: 'destructive' });
-        setIsSubmitting(false);
-        return;
-    }
-    
+    console.log(editingUser ? "Intentando editar usuario con datos del formulario:" : "Intentando añadir usuario con datos del formulario:", data);
     setIsSubmitting(true);
-    try {
-      // Re-authentication for add/edit is removed
-      // await reauthenticateCurrentUser(data.adminPassword);
-      // toast({ title: 'Admin Re-authenticated', description: 'Proceeding with operation.' });
+    
+    // Prepare data for Firestore
+    // Use Omit<User, 'id'> to ensure 'id' is not part of the data payload itself
+    const firestoreData: Omit<User, 'id'> & { uid?: string } = {
+      name: data.name,
+      role: data.role,
+      email: data.email || '', 
+      photoUrl: data.photoUrl || '', 
+    };
 
-      const userDataToSave: Partial<User> = {
-        name: data.name,
-        role: data.role,
-        uid: editingUser?.uid // Preserve existing UID if editing, or it will be undefined for new users
-      };
-      if (data.email) userDataToSave.email = data.email;
-      if (data.photoUrl) userDataToSave.photoUrl = data.photoUrl;
-      
-      if (data.role === 'student') {
-        if (data.level) userDataToSave.level = data.level;
-        if (data.notes) userDataToSave.notes = data.notes;
-        if (data.age !== undefined) userDataToSave.age = data.age;
-        if (data.gender) userDataToSave.gender = data.gender;
-      } else { // Clear student-specific fields if role is not student
-        userDataToSave.level = undefined;
-        userDataToSave.notes = undefined;
-        userDataToSave.age = undefined;
-        userDataToSave.gender = undefined;
+    if (editingUser?.uid) { // Preserve existing Auth UID if user is being edited and has one
+      firestoreData.uid = editingUser.uid;
+    }
+    // For new users, UID will be undefined as Auth account is not created here.
+
+    if (data.role === 'student') {
+      firestoreData.level = data.level || undefined;
+      firestoreData.notes = data.notes || '';
+      firestoreData.age = data.age ?? undefined;
+      firestoreData.gender = data.gender || undefined;
+    } else { 
+      // Explicitly set student-specific fields to undefined if role is not student
+      // This ensures they are removed if the role changes from student to non-student during an edit
+      firestoreData.level = undefined;
+      firestoreData.notes = undefined;
+      firestoreData.age = undefined;
+      firestoreData.gender = undefined;
+    }
+
+    // Clean out any top-level undefined properties from the data object
+    // Firestore's updateDoc typically removes fields if their value is undefined,
+    // but this makes it explicit.
+    Object.keys(firestoreData).forEach(keyStr => {
+      const key = keyStr as keyof typeof firestoreData;
+      if (firestoreData[key] === undefined) {
+        delete firestoreData[key];
       }
+    });
 
+    console.log("Datos preparados para Firestore:", firestoreData);
 
+    try {
       if (editingUser) {
+        console.log("Editing user object details:", JSON.stringify(editingUser));
+        console.log("User ID for update:", editingUser.id);
         const userRef = doc(db, 'users', editingUser.id);
-        await updateDoc(userRef, userDataToSave);
-        toast({ title: 'User Updated', description: `${data.name}'s record updated in Firestore.` });
+        console.log("User ref path for update:", userRef.path);
+        await updateDoc(userRef, firestoreData);
+        toast({ title: 'User Updated', description: `${data.name}'s record updated successfully.` });
       } else {
-        const docRef = await addDoc(collection(db, 'users'), userDataToSave);
+        console.log("Adding new user to Firestore.");
+        const docRef = await addDoc(collection(db, 'users'), firestoreData);
         toast({ 
           title: 'User Record Added', 
           description: `${data.name} (ID: ${docRef.id}) added to Firestore. Note: No Firebase Auth account created.` 
@@ -190,38 +208,23 @@ export default function UserManagementPage() {
       form.reset({
         name: '', email: '', role: 'student', photoUrl: '',
         level: undefined, notes: '', age: undefined, gender: undefined, 
-        // adminPassword reset removed
       });
       setEditingUser(null);
       setIsUserFormDialogOpen(false);
       await fetchUsers();
     } catch (error: any) {
-      console.error("Error in user form submission:", error);
-      let errorMessage = editingUser ? 'Failed to update user.' : 'Failed to add user.';
-      // Removed re-auth specific error messages as it's no longer part of this flow
-      // if (error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
-      //   errorMessage = 'Admin re-authentication failed: Incorrect password.';
-      // } else if (error.code === 'auth/too-many-requests') {
-      //   errorMessage = 'Admin re-authentication failed: Too many attempts. Try again later.';
-      // } else 
-      if (error.message) {
-        errorMessage = error.message;
-      }
-      toast({ title: editingUser ? 'Update User Failed' : 'Add User Failed', description: errorMessage, variant: 'destructive' });
-      
-      // Keep dialog open only on specific re-auth errors, which are removed now.
-      // So, if any other error, it will still close.
-      // if (!(error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential' || error.code === 'auth/too-many-requests')) {
-      //   setIsUserFormDialogOpen(false); 
-      // }
-      // For simplicity now, always try to close on error unless it was a specific type of error we want to keep open,
-      // but since re-auth is removed, this path is less likely.
-       // If error is not one of the re-auth types that should keep dialog open, close it.
-      const reAuthErrorCodes = ['auth/wrong-password', 'auth/invalid-credential', 'auth/too-many-requests'];
-      if (!reAuthErrorCodes.includes(error.code)) {
-        setIsUserFormDialogOpen(false);
-      }
-
+      console.error("Error in user form submission (add/edit):", error);
+      // Log the specific error object
+      console.error("Firestore operation error object:", JSON.stringify(error));
+      toast({ 
+        title: editingUser ? 'Update User Failed' : 'Add User Failed', 
+        description: `An error occurred: ${error.message || 'Please try again.'}`, 
+        variant: 'destructive' 
+      });
+      // Keep dialog open on error for user to retry or see fields, unless it's a non-specific error
+      // In this version, we'll let it close and rely on the toast.
+      // If you want to keep it open:
+      // setIsUserFormDialogOpen(true); 
     } finally {
       setIsSubmitting(false);
     }
@@ -235,7 +238,7 @@ export default function UserManagementPage() {
   };
 
   const confirmDeleteUser = async () => {
-    console.log("Intentando eliminar usuario...", userToDelete);
+    console.log("Intentando eliminar usuario Firestore record for:", userToDelete);
     if (!userToDelete || !deletePassword) {
       toast({ title: 'Input Required', description: 'Admin password is required to delete.', variant: 'destructive' });
       setIsSubmitting(false); 
@@ -251,6 +254,7 @@ export default function UserManagementPage() {
       await reauthenticateCurrentUser(deletePassword);
       toast({ title: 'Admin Re-authenticated', description: 'Proceeding with deletion.' });
 
+      console.log("Deleting Firestore document for user ID:", userToDelete.id);
       await deleteDoc(doc(db, 'users', userToDelete.id));
       toast({ title: 'User Record Deleted', description: `${userToDelete.name}'s Firestore record removed successfully. Auth account (if any) not affected.` });
       
@@ -260,6 +264,7 @@ export default function UserManagementPage() {
       await fetchUsers();
     } catch (error: any) {
       console.error("Error deleting user record:", error);
+      console.error("Deletion error object:", JSON.stringify(error));
       let errorMessage = 'Failed to delete user record.';
        if (error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
         errorMessage = 'Admin re-authentication failed: Incorrect password.';
@@ -274,6 +279,9 @@ export default function UserManagementPage() {
       if (!reAuthErrorCodes.includes(error.code)) {
          setIsDeleteUserDialogOpen(false);
          setDeletePassword(''); 
+      } else {
+        // Keep dialog open if it was a re-auth error
+        setIsDeleteUserDialogOpen(true);
       }
     } finally {
       setIsSubmitting(false);
@@ -301,7 +309,7 @@ export default function UserManagementPage() {
       <CardHeader className="flex flex-row items-center justify-between">
         <div>
           <CardTitle className="flex items-center gap-2"><UsersIcon className="h-6 w-6 text-primary" /> User Management</CardTitle>
-          <CardDescription>Manage student, teacher, and administrator accounts.</CardDescription>
+          <CardDescription>Manage student, teacher, and administrator accounts (Firestore records only).</CardDescription>
         </div>
         <div className="flex gap-2">
           <Button asChild size="sm" variant="outline" className="gap-1.5 text-sm">
@@ -317,22 +325,20 @@ export default function UserManagementPage() {
               form.reset({
                   name: '', email: '', role: 'student', photoUrl: '',
                   level: undefined, notes: '', age: undefined, gender: undefined, 
-                  // adminPassword reset removed
               });
             }
           }}>
             <DialogTrigger asChild>
               <Button size="sm" className="gap-1.5 text-sm" onClick={handleOpenAddDialog}>
                 <UserPlus className="size-3.5" />
-                Add User
+                Add User Record
               </Button>
             </DialogTrigger>
             <DialogContent className="sm:max-w-md">
               <DialogHeader>
-                <DialogTitle>{editingUser ? 'Edit User Record' : 'Add New User (Firestore Only)'}</DialogTitle>
+                <DialogTitle>{editingUser ? 'Edit User Record' : 'Add New User Record (Firestore Only)'}</DialogTitle>
                 <DialogDescription>
-                  {editingUser ? 'Update user details.' : 'Fill in user details. This adds to Firestore only.'}
-                  {/* Admin password required to authorize removed from this description */}
+                  {editingUser ? 'Update user details in Firestore.' : 'Fill in user details to add to Firestore. No Auth account will be created.'}
                 </DialogDescription>
               </DialogHeader>
               <Form {...form}>
@@ -453,22 +459,6 @@ export default function UserManagementPage() {
                       />
                     </>
                   )}
-
-                  {/* Admin Password field removed from add/edit form
-                  <FormField
-                    control={form.control}
-                    name="adminPassword"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Admin's Current Password</FormLabel>
-                        <FormControl><Input type="password" placeholder="Enter your admin password" {...field} /></FormControl>
-                        <FormDescription>Your password is required to authorize this action.</FormDescription>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                  */}
-
                   <DialogFooter>
                     <DialogClose asChild><Button type="button" variant="outline">Cancel</Button></DialogClose>
                     <Button type="submit" disabled={isSubmitting}>
@@ -589,4 +579,3 @@ export default function UserManagementPage() {
     </>
   );
 }
-
