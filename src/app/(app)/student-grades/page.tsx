@@ -1,7 +1,7 @@
 
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Table,
   TableBody,
@@ -37,14 +37,13 @@ interface StudentWithDetailedGrades extends User {
 }
 
 const MAX_ACCUMULATED_ACTIVITIES = 5;
+const MAX_ACCUMULATED_SCORE_TOTAL = 50;
+const MAX_EXAM_SCORE = 50;
+const PASSING_GRADE = 70;
 
-// Helper function to calculate total for accumulated activities for a single partial
+
 const calculateAccumulatedTotal = (activities?: ActivityScore[]): number | null => {
-  if (!activities || activities.length === 0) {
-    // If no activities defined, or array is empty, consider it not graded or 0.
-    // Let's return null if no activities, and 0 if activities exist but all scores are null.
-    if (!activities) return null; 
-  }
+  if (!activities || activities.length === 0) return null; // If no activities defined, return null
 
   let total = 0;
   let hasAnyNumericScore = false;
@@ -55,32 +54,36 @@ const calculateAccumulatedTotal = (activities?: ActivityScore[]): number | null 
     }
   });
   
-  // If activities array exists but all scores are null/undefined, it's a 0.
-  // If activities array itself is undefined, it's null (not graded).
-  return activities ? (hasAnyNumericScore ? Math.min(total, 50) : 0) : null;
+  if (!hasAnyNumericScore && activities.length > 0) return 0; // Activities exist but all scores are null
+  if (!hasAnyNumericScore) return null; // No activities had numeric scores
+
+  return Math.min(total, MAX_ACCUMULATED_SCORE_TOTAL);
 };
 
 
-// Helper function to calculate total for a single partial (accumulated + exam)
 const calculatePartialTotal = (partialScores?: PartialScores): number | null => {
   if (!partialScores) return null;
 
   const accumulatedTotal = calculateAccumulatedTotal(partialScores.accumulatedActivities);
   const examScore = partialScores.exam?.score;
 
-  // If both parts are null (e.g. exam doesn't exist or its score is null, and no accumulated activities scored)
+  // If exam score is null/undefined AND accumulatedTotal is null (meaning no accumulated activities or all were null)
   // then the partial total is null.
   if (accumulatedTotal === null && (examScore === null || examScore === undefined)) {
-      // Check if exam object itself is missing or just its score
-      if (accumulatedTotal === null && (!partialScores.exam || partialScores.exam.score === null || partialScores.exam.score === undefined) ) {
-         return null;
-      }
+    // Check if exam object itself is missing or just its score is null
+    // And if accumulatedActivities is an empty array or also yielded null
+     if ( (partialScores.accumulatedActivities && partialScores.accumulatedActivities.length > 0 && accumulatedTotal === null && (!partialScores.exam || partialScores.exam.score === null) ) ) {
+        // This case means there were activity definitions but none had scores AND exam was not scored or defined.
+        // Let's consider this a 0 if there were attempts to define activities or exam.
+     } else if (accumulatedTotal === null && (!partialScores.exam || partialScores.exam.score === null)) {
+        return null; // Truly nothing defined or scored
+     }
   }
   
   const currentAccumulated = accumulatedTotal ?? 0;
   const currentExam = examScore ?? 0;
   
-  return Math.min(currentAccumulated + currentExam, 100);
+  return Math.min(currentAccumulated + currentExam, MAX_ACCUMULATED_SCORE_TOTAL + MAX_EXAM_SCORE);
 };
 
 
@@ -90,7 +93,7 @@ export default function StudentGradesPage() {
   const { toast } = useToast();
   const router = useRouter();
 
-  const fetchStudents = async () => {
+  const fetchStudents = useCallback(async () => {
     setIsLoading(true);
     try {
       const studentQuery = query(collection(db, 'users'), where('role', '==', 'student'));
@@ -130,11 +133,11 @@ export default function StudentGradesPage() {
       toast({ title: 'Error fetching data', description: 'Could not load student grades.', variant: 'destructive' });
     }
     setIsLoading(false);
-  };
+  }, [toast]);
 
   useEffect(() => {
     fetchStudents();
-  }, [toast]);
+  }, [fetchStudents]);
 
   const handleOpenEditGrades = (studentId: string) => {
     router.push(`/grades-management?studentId=${studentId}`);
@@ -145,7 +148,7 @@ export default function StudentGradesPage() {
     
     let badgeContent: string;
     if (typeof scoreValue === 'number') {
-        if (isFinalGrade || (isTotal && scoreValue % 1 !== 0)) { // Show decimals for final grade or totals with decimals
+        if (isFinalGrade || (isTotal && scoreValue % 1 !== 0)) {
             badgeContent = scoreValue.toFixed(isFinalGrade ? 2 : 1);
         } else {
             badgeContent = scoreValue.toFixed(0);
@@ -157,17 +160,17 @@ export default function StudentGradesPage() {
     let badgeClassName = 'font-semibold text-xs px-1.5 py-0.5 min-w-[30px] text-center justify-center ';
     if (typeof scoreValue !== 'number') {
       badgeClassName += 'bg-gray-100 dark:bg-gray-700/50 text-gray-500 dark:text-gray-400 border-gray-300 dark:border-gray-600';
-    } else if (isTotal || isFinalGrade) { // Totals and Final Grade
-      badgeClassName += scoreValue >= 70 
+    } else if (isTotal || isFinalGrade) {
+      badgeClassName += scoreValue >= PASSING_GRADE 
         ? 'bg-green-100 dark:bg-green-900/70 text-green-700 dark:text-green-300 border-green-500/50' 
         : 'bg-red-100 dark:bg-red-900/70 text-red-700 dark:text-red-300 border-red-500/50';
-    } else { // Sub-component scores (accumulated activities, exam)
+    } else { 
       badgeClassName += 'bg-blue-100 dark:bg-blue-900/70 text-blue-700 dark:text-blue-300 border-blue-500/50';
     }
 
     const badgeElement = <Badge variant="outline" className={badgeClassName}>{badgeContent}</Badge>;
 
-    if (displayName && !isTotal && !isFinalGrade) { // Show tooltip for individual activities with names
+    if (displayName && !isTotal && !isFinalGrade) {
       return (
         <Tooltip>
           <TooltipTrigger asChild><span>{badgeElement}</span></TooltipTrigger>
@@ -184,7 +187,7 @@ export default function StudentGradesPage() {
       const activity = activities?.[i];
       cells.push(
         <TableCell key={`${partialKey}-acc-${i}`} className="text-center">
-          {getScoreDisplay(activity?.score, activity?.name, `Acum. ${i + 1}`)}
+          {getScoreDisplay(activity?.score, activity?.name, `Ac. ${i + 1}`)}
         </TableCell>
       );
     }
@@ -196,7 +199,7 @@ export default function StudentGradesPage() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2"><ClipboardCheck className="h-6 w-6 text-primary" /> Student Grades</CardTitle>
-          <CardDescription>View detailed partial and final grades. Edit notes via the 'Grades Management' page.</CardDescription>
+          <CardDescription>View detailed partial and final grades. Max 5 accumulated activities (total 50pts) and 1 exam (50pts) per partial. Final grade is average of partials.</CardDescription>
         </CardHeader>
         <CardContent className="flex items-center justify-center py-10">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -212,19 +215,19 @@ export default function StudentGradesPage() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2"><ClipboardCheck className="h-6 w-6 text-primary" /> Student Grades</CardTitle>
           <CardDescription>
-            Detailed view of student grades. Up to 5 accumulated activities per partial (max 50 pts total), plus an exam (max 50 pts).
-            Partial totals (max 100 pts) and final grade (average of partials) below 70 are highlighted in red.
-            Custom activity names are shown on hover. Click the edit icon to manage grades.
+            Detailed view: up to 5 accumulated activities (total 50pts) and 1 exam (50pts) per partial.
+            Partial totals (max 100pts) and final grade (average of partials) below {PASSING_GRADE} are highlighted red.
+            Custom activity names shown on hover. Click <NotebookPen className="inline-block h-4 w-4" /> to manage grades.
           </CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto">
-          <Table className="min-w-[1800px]"> {/* Adjusted min-width for more columns */}
+          <Table className="min-w-[1900px]"> {/* Adjusted min-width for more columns */}
             <TableHeader className="sticky top-0 bg-card z-20">
               <TableRow>
                 <TableHead rowSpan={2} className="align-bottom min-w-[150px] sticky left-0 bg-card z-30">Student Name</TableHead>
                 <TableHead rowSpan={2} className="align-bottom min-w-[80px] sticky left-[150px] bg-card z-30">Actions</TableHead>
                 
-                {/* Spanning 7 columns: 5 Acc + 1 Exam + 1 Total */}
+                {/* Spanning (MAX_ACCUMULATED_ACTIVITIES) + Exam + Total */}
                 <TableHead colSpan={MAX_ACCUMULATED_ACTIVITIES + 2} className="text-center bg-yellow-100 dark:bg-yellow-800/50 text-yellow-800 dark:text-yellow-200">1st Partial</TableHead>
                 <TableHead colSpan={MAX_ACCUMULATED_ACTIVITIES + 2} className="text-center bg-green-100 dark:bg-green-800/50 text-green-800 dark:text-green-200">2nd Partial</TableHead>
                 <TableHead colSpan={MAX_ACCUMULATED_ACTIVITIES + 2} className="text-center bg-orange-100 dark:bg-orange-800/50 text-orange-800 dark:text-orange-200">3rd Partial</TableHead>
@@ -235,22 +238,22 @@ export default function StudentGradesPage() {
                 {[1, 2, 3].map(pNum => (
                   <React.Fragment key={`partial-headers-${pNum}`}>
                     {Array.from({ length: MAX_ACCUMULATED_ACTIVITIES }).map((_, i) => (
-                      <TableHead key={`p${pNum}-acc${i+1}`} className={`text-center text-xs ${
+                      <TableHead key={`p${pNum}-acc${i+1}`} className={`text-center text-xs whitespace-nowrap ${
                         pNum === 1 ? 'bg-yellow-100 dark:bg-yellow-800/50 text-yellow-700 dark:text-yellow-300' :
                         pNum === 2 ? 'bg-green-100 dark:bg-green-800/50 text-green-700 dark:text-green-300' :
                         'bg-orange-100 dark:bg-orange-800/50 text-orange-700 dark:text-orange-300'
                       }`}>Ac. {i + 1}</TableHead>
                     ))}
-                    <TableHead className={`text-center text-xs ${
+                    <TableHead className={`text-center text-xs whitespace-nowrap ${
                         pNum === 1 ? 'bg-yellow-100 dark:bg-yellow-800/50 text-yellow-700 dark:text-yellow-300' :
                         pNum === 2 ? 'bg-green-100 dark:bg-green-800/50 text-green-700 dark:text-green-300' :
                         'bg-orange-100 dark:bg-orange-800/50 text-orange-700 dark:text-orange-300'
                       }`}>Exam</TableHead>
-                    <TableHead className={`text-center font-bold text-xs ${
+                    <TableHead className={`text-center font-bold text-xs whitespace-nowrap ${
                         pNum === 1 ? 'bg-yellow-100 dark:bg-yellow-800/50 text-yellow-700 dark:text-yellow-300' :
                         pNum === 2 ? 'bg-green-100 dark:bg-green-800/50 text-green-700 dark:text-green-300' :
                         'bg-orange-100 dark:bg-orange-800/50 text-orange-700 dark:text-orange-300'
-                      }`}>Total</TableHead>
+                      }`}>Total Parcial</TableHead>
                   </React.Fragment>
                 ))}
               </TableRow>
@@ -258,7 +261,7 @@ export default function StudentGradesPage() {
             <TableBody>
               {students.length > 0 ? students.map((student) => (
                 <TableRow key={student.id}>
-                  <TableCell className="font-medium sticky left-0 bg-card z-10">{student.name}</TableCell>
+                  <TableCell className="font-medium sticky left-0 bg-card z-10 whitespace-nowrap">{student.name}</TableCell>
                   <TableCell className="sticky left-[150px] bg-card z-10">
                     <Button variant="ghost" size="icon" onClick={() => handleOpenEditGrades(student.id)}>
                         <NotebookPen className="h-4 w-4" />
@@ -266,21 +269,18 @@ export default function StudentGradesPage() {
                     </Button>
                   </TableCell>
                   
-                  {/* Partial 1 Scores */}
                   {renderAccumulatedActivitiesScores(student.grades?.partial1?.accumulatedActivities, 'p1')}
                   <TableCell className="text-center">
                     {getScoreDisplay(student.grades?.partial1?.exam?.score, student.grades?.partial1?.exam?.name, "Examen")}
                   </TableCell>
                   <TableCell className="text-center font-semibold">{getScoreDisplay(student.calculatedPartial1Total, null, null, true)}</TableCell>
                   
-                  {/* Partial 2 Scores */}
                   {renderAccumulatedActivitiesScores(student.grades?.partial2?.accumulatedActivities, 'p2')}
                   <TableCell className="text-center">
                     {getScoreDisplay(student.grades?.partial2?.exam?.score, student.grades?.partial2?.exam?.name, "Examen")}
                   </TableCell>
                   <TableCell className="text-center font-semibold">{getScoreDisplay(student.calculatedPartial2Total, null, null, true)}</TableCell>
                   
-                  {/* Partial 3 Scores */}
                   {renderAccumulatedActivitiesScores(student.grades?.partial3?.accumulatedActivities, 'p3')}
                   <TableCell className="text-center">
                     {getScoreDisplay(student.grades?.partial3?.exam?.score, student.grades?.partial3?.exam?.name, "Examen")}
@@ -303,4 +303,4 @@ export default function StudentGradesPage() {
     </TooltipProvider>
   );
 }
-
+    
