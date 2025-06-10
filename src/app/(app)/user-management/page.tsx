@@ -47,15 +47,16 @@ import { Label } from "@/components/ui/label";
 // Schema for staff add/edit
 const staffFormSchema = z.object({
   name: z.string().min(2, { message: "Name must be at least 2 characters." }),
-  email: z.string().email({ message: "Invalid email address." }),
+  email: z.string().email({ message: "Invalid email address." }).optional().or(z.literal('')),
+  phoneNumber: z.string().optional().or(z.literal('')),
   role: z.enum(['teacher', 'admin', 'caja'], { required_error: "Role is required." }),
   photoUrl: z.string().url({ message: "Please enter a valid URL for photo." }).optional().or(z.literal('')),
-  assignedGroupId: z.string().optional(), // ID of the group the teacher is assigned to
+  assignedGroupId: z.string().optional(), 
 });
 
 type StaffFormValues = z.infer<typeof staffFormSchema>;
 
-const UNASSIGN_VALUE_KEY = "##UNASSIGNED##"; // Special non-empty value for the "Unassigned" SelectItem
+const UNASSIGN_VALUE_KEY = "##UNASSIGNED##"; 
 
 export default function StaffManagementPage() {
   const [staffUsers, setStaffUsers] = useState<User[]>([]);
@@ -78,9 +79,10 @@ export default function StaffManagementPage() {
     defaultValues: {
       name: '',
       email: '',
+      phoneNumber: '',
       role: 'teacher',
       photoUrl: '',
-      assignedGroupId: undefined, // Use undefined for "unassigned" to show placeholder
+      assignedGroupId: undefined, 
     },
   });
 
@@ -110,7 +112,7 @@ export default function StaffManagementPage() {
   const handleOpenAddDialog = () => {
     setEditingStaff(null);
     form.reset({
-      name: '', email: '', role: 'teacher', photoUrl: '', assignedGroupId: undefined,
+      name: '', email: '', phoneNumber: '', role: 'teacher', photoUrl: '', assignedGroupId: undefined,
     });
     setIsStaffFormDialogOpen(true);
   };
@@ -121,6 +123,7 @@ export default function StaffManagementPage() {
     form.reset({
       name: staffToEdit.name,
       email: staffToEdit.email || '',
+      phoneNumber: staffToEdit.phoneNumber || '',
       role: staffToEdit.role as 'teacher' | 'admin' | 'caja',
       photoUrl: staffToEdit.photoUrl || '',
       assignedGroupId: currentGroupAssignment ? currentGroupAssignment.id : undefined,
@@ -134,7 +137,8 @@ export default function StaffManagementPage() {
     
     const firestoreUserData: Partial<User> = {
       name: data.name,
-      email: data.email,
+      email: data.email || '',
+      phoneNumber: data.phoneNumber || '',
       role: data.role,
       photoUrl: data.photoUrl || '',
     };
@@ -156,7 +160,7 @@ export default function StaffManagementPage() {
       }
 
       if (data.role === 'teacher' && staffMemberId) {
-        const newlySelectedGroupId = data.assignedGroupId || null; // undefined becomes null
+        const newlySelectedGroupId = data.assignedGroupId || null; 
         const previouslyAssignedGroup = allGroups.find(g => g.teacherId === staffMemberId);
         const previouslyAssignedGroupId = previouslyAssignedGroup ? previouslyAssignedGroup.id : null;
 
@@ -192,7 +196,7 @@ export default function StaffManagementPage() {
         }
       }
       
-      form.reset({ name: '', email: '', role: 'teacher', photoUrl: '', assignedGroupId: undefined });
+      form.reset({ name: '', email: '', phoneNumber: '', role: 'teacher', photoUrl: '', assignedGroupId: undefined });
       setEditingStaff(null);
       setIsStaffFormDialogOpen(false);
       await fetchData(); 
@@ -274,14 +278,10 @@ export default function StaffManagementPage() {
       toast({ title: 'Delete Failed', description: errorMessage, variant: 'destructive' });
       
        if (!reAuthErrorCodes.includes(error.code) && error.code !== 'auth/too-many-requests' && error.code !== 'auth/requires-recent-login') {
-         // This logic was reversed, should be: if it's NOT one of these, close dialog.
-         // If it IS one of these, keep dialog open.
-         // For now, let's simplify: close dialog on any error other than specific re-auth ones.
          setIsDeleteStaffDialogOpen(false); 
          setDeleteAdminPassword('');
 
        } else {
-         // Keep dialog open for specific re-auth issues
          setIsDeleteStaffDialogOpen(true); 
        }
     } finally {
@@ -326,7 +326,7 @@ export default function StaffManagementPage() {
             if (!isOpen) {
               setEditingStaff(null); 
               form.reset({
-                  name: '', email: '', role: 'teacher', photoUrl: '', assignedGroupId: undefined,
+                  name: '', email: '', phoneNumber: '', role: 'teacher', photoUrl: '', assignedGroupId: undefined,
               });
             }
           }}>
@@ -361,8 +361,19 @@ export default function StaffManagementPage() {
                     name="email"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Email</FormLabel>
+                        <FormLabel>Email (Optional)</FormLabel>
                         <FormControl><Input type="email" placeholder="jane.doe@example.com" {...field} /></FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="phoneNumber"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Phone Number (Optional)</FormLabel>
+                        <FormControl><Input type="tel" placeholder="e.g., 123-456-7890" {...field} /></FormControl>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -389,14 +400,14 @@ export default function StaffManagementPage() {
                     <FormField
                       control={form.control}
                       name="assignedGroupId"
-                      render={({ field }) => ( // field.value here is string | undefined
+                      render={({ field }) => ( 
                         <FormItem>
                           <FormLabel>Assign to Group (Optional)</FormLabel>
                           <Select
                             onValueChange={(value) => {
                               field.onChange(value === UNASSIGN_VALUE_KEY ? undefined : value);
                             }}
-                            value={field.value} // string | undefined, Select handles undefined by showing placeholder
+                            value={field.value} 
                           >
                             <FormControl>
                               <SelectTrigger>
@@ -453,6 +464,7 @@ export default function StaffManagementPage() {
             <TableRow>
               <TableHead>Name</TableHead>
               <TableHead>Email</TableHead>
+              <TableHead>Phone</TableHead>
               <TableHead>Role</TableHead>
               <TableHead>Assigned Group</TableHead>
               <TableHead>Actions</TableHead>
@@ -465,6 +477,7 @@ export default function StaffManagementPage() {
               <TableRow key={staff.id}>
                 <TableCell>{staff.name}</TableCell>
                 <TableCell>{staff.email || 'N/A'}</TableCell>
+                <TableCell>{staff.phoneNumber || 'N/A'}</TableCell>
                 <TableCell>
                   <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
                     staff.role === 'admin' ? 'bg-purple-500/20 text-purple-700 dark:text-purple-400' :
@@ -490,7 +503,7 @@ export default function StaffManagementPage() {
             )}) : (
               !isLoading && (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center">No staff users found.</TableCell>
+                  <TableCell colSpan={6} className="text-center">No staff users found.</TableCell>
                 </TableRow>
               )
             )}
