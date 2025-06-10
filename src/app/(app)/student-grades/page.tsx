@@ -11,10 +11,10 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import type { User, PartialScores, ActivityScore, ExamScore } from '@/types';
+import type { User, PartialScores, ActivityScore, ExamScore, Group } from '@/types';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, query, where } from 'firebase/firestore';
-import { Loader2, ClipboardCheck, NotebookPen } from 'lucide-react';
+import { Loader2, ClipboardCheck, NotebookPen, Search } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -25,6 +25,9 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 
 interface StudentWithDetailedGrades extends User {
   calculatedAccumulatedTotalP1?: number | null;
@@ -66,7 +69,6 @@ const calculatePartialTotal = (partialScores?: PartialScores): number | null => 
   const accumulatedTotal = calculateAccumulatedTotal(partialScores.accumulatedActivities);
   const examScore = partialScores.exam?.score;
 
-  // If both are null, the partial total is null.
   if (accumulatedTotal === null && (examScore === null || examScore === undefined)) {
       return null;
   }
@@ -79,17 +81,26 @@ const calculatePartialTotal = (partialScores?: PartialScores): number | null => 
 
 
 export default function StudentGradesPage() {
-  const [students, setStudents] = useState<StudentWithDetailedGrades[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [allStudents, setAllStudents] = useState<StudentWithDetailedGrades[]>([]);
+  const [allGroups, setAllGroups] = useState<Group[]>([]);
+  const [selectedGroupId, setSelectedGroupId] = useState<string>(''); // Default to empty, meaning "Select a group"
+  const [searchTerm, setSearchTerm] = useState<string>('');
+  
+  const [isLoadingStudents, setIsLoadingStudents] = useState(true);
+  const [isLoadingGroups, setIsLoadingGroups] = useState(true);
+
   const { toast } = useToast();
   const router = useRouter();
 
-  const fetchStudents = useCallback(async () => {
-    setIsLoading(true);
+  const isLoading = isLoadingStudents || isLoadingGroups;
+
+  const fetchData = useCallback(async () => {
+    setIsLoadingStudents(true);
+    setIsLoadingGroups(true);
     try {
-      const studentQuery = query(collection(db, 'users'), where('role', '==', 'student'));
-      const usersSnapshot = await getDocs(studentQuery);
-      const studentData = usersSnapshot.docs.map(doc => {
+      const studentQuery = query(collection(db, 'students')); // Fetch all students
+      const studentsSnapshot = await getDocs(studentQuery);
+      const studentData = studentsSnapshot.docs.map(doc => {
         const student = { id: doc.id, ...doc.data() } as User;
         
         const calculatedAccumulatedTotalP1 = calculateAccumulatedTotal(student.grades?.partial1?.accumulatedActivities);
@@ -118,17 +129,49 @@ export default function StudentGradesPage() {
           calculatedFinalGrade 
         };
       });
-      setStudents(studentData);
+      setAllStudents(studentData);
+      setIsLoadingStudents(false);
+
+      const groupsSnapshot = await getDocs(collection(db, 'groups'));
+      setAllGroups(groupsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as Group)));
+      setIsLoadingGroups(false);
+
     } catch (error) {
-      console.error("Error fetching student data:", error);
-      toast({ title: 'Error fetching data', description: 'Could not load student grades.', variant: 'destructive' });
+      console.error("Error fetching data:", error);
+      toast({ title: 'Error fetching data', description: 'Could not load student grades or groups.', variant: 'destructive' });
+      setIsLoadingStudents(false);
+      setIsLoadingGroups(false);
     }
-    setIsLoading(false);
   }, [toast]);
 
   useEffect(() => {
-    fetchStudents();
-  }, [fetchStudents]);
+    fetchData();
+  }, [fetchData]);
+
+  const studentsToDisplay = useMemo(() => {
+    if (isLoading) return [];
+
+    let filtered = allStudents;
+
+    if (selectedGroupId && selectedGroupId !== 'all') {
+      const group = allGroups.find(g => g.id === selectedGroupId);
+      if (group?.studentIds) {
+        filtered = filtered.filter(s => group.studentIds.includes(s.id));
+      } else {
+        // If a specific group is selected but not found or has no studentIds, show no students for that group
+        filtered = [];
+      }
+    }
+    // If selectedGroupId is 'all' or not set yet, 'filtered' remains all students (or students from previous step).
+
+    if (searchTerm.trim()) {
+      filtered = filtered.filter(s =>
+        s.name.toLowerCase().includes(searchTerm.toLowerCase())
+      );
+    }
+    return filtered;
+  }, [allStudents, allGroups, selectedGroupId, searchTerm, isLoading]);
+
 
   const handleOpenEditGrades = (studentId: string) => {
     router.push(`/grades-management?studentId=${studentId}`);
@@ -139,16 +182,16 @@ export default function StudentGradesPage() {
     
     let badgeContent: string;
     if (typeof scoreValue === 'number') {
-        if (isFinalGrade || (isTotal && scoreValue % 1 !== 0)) { // For final grade or totals that are not whole numbers
-            badgeContent = scoreValue.toFixed(isFinalGrade ? 2 : 1); // Final grade with 2 decimals, others with 1 if not whole
+        if (isFinalGrade || (isTotal && scoreValue % 1 !== 0)) { 
+            badgeContent = scoreValue.toFixed(isFinalGrade ? 2 : 1);
         } else {
-            badgeContent = scoreValue.toFixed(0); // Whole numbers with 0 decimals
+            badgeContent = scoreValue.toFixed(0); 
         }
     } else {
         badgeContent = 'N/A';
     }
 
-    let badgeClassName = 'font-semibold text-xs px-1.5 py-0.5 min-w-[30px] text-center justify-center border '; // Added base border
+    let badgeClassName = 'font-semibold text-xs px-1.5 py-0.5 min-w-[30px] text-center justify-center border ';
     if (typeof scoreValue !== 'number') {
       badgeClassName += 'bg-gray-100 dark:bg-gray-700/50 text-gray-500 dark:text-gray-400 border-gray-300 dark:border-gray-600';
     } else if (isTotal || isFinalGrade) {
@@ -191,14 +234,13 @@ export default function StudentGradesPage() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2"><ClipboardCheck className="h-6 w-6 text-primary" /> Student Grades</CardTitle>
           <CardDescription>
-            Vista detallada: hasta {MAX_ACCUMULATED_ACTIVITIES} actividades acumuladas (total {MAX_ACCUMULATED_SCORE_TOTAL}pts) y 1 examen ({MAX_EXAM_SCORE}pts) por parcial.
-            Totales parciales (máx 100pts) y nota final (promedio de parciales) por debajo de {PASSING_GRADE} se resaltan en rojo.
-            Nombres de actividad personalizados en tooltip. Click <NotebookPen className="inline-block h-4 w-4" /> para gestionar.
+            Filter by group or search by student name. Detailed view: up to {MAX_ACCUMULATED_ACTIVITIES} accumulated activities (total {MAX_ACCUMULATED_SCORE_TOTAL}pts) and 1 exam ({MAX_EXAM_SCORE}pts) per partial.
+            Partial totals (max 100pts) and final grade (average of partials) below {PASSING_GRADE} are highlighted.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex items-center justify-center py-10">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
-          <p className="ml-2">Loading student grades...</p>
+          <p className="ml-2">Loading student grades and groups...</p>
         </CardContent>
       </Card>
     );
@@ -210,10 +252,46 @@ export default function StudentGradesPage() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2"><ClipboardCheck className="h-6 w-6 text-primary" /> Student Grades</CardTitle>
            <CardDescription>
-            Vista detallada: hasta {MAX_ACCUMULATED_ACTIVITIES} actividades acumuladas (total {MAX_ACCUMULATED_SCORE_TOTAL}pts) y 1 examen ({MAX_EXAM_SCORE}pts) por parcial.
-            Totales parciales (máx 100pts) y nota final (promedio de parciales) por debajo de {PASSING_GRADE} se resaltan en rojo.
-            Nombres de actividad personalizados en tooltip. Click <NotebookPen className="inline-block h-4 w-4" /> para gestionar.
+            Filter by group or search by student name. Detailed view: up to {MAX_ACCUMULATED_ACTIVITIES} accumulated activities (total {MAX_ACCUMULATED_SCORE_TOTAL}pts) and 1 exam ({MAX_EXAM_SCORE}pts) per partial.
+            Partial totals (max 100pts) and final grade (average of partials) below {PASSING_GRADE} are highlighted.
+            Custom activity names in tooltip. Click <NotebookPen className="inline-block h-4 w-4" /> to manage grades.
           </CardDescription>
+           <div className="mt-4 flex flex-col sm:flex-row gap-4">
+            <div className="flex-1 min-w-[200px]">
+              <Label htmlFor="group-filter-grades">Filter by Group</Label>
+              <Select
+                value={selectedGroupId}
+                onValueChange={setSelectedGroupId}
+              >
+                <SelectTrigger id="group-filter-grades">
+                  <SelectValue placeholder="Select a group or 'All'" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">Select a group</SelectItem>
+                  <SelectItem value="all">All Groups</SelectItem>
+                  {allGroups.map((group) => (
+                    <SelectItem key={group.id} value={group.id}>
+                      {group.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex-1 min-w-[200px]">
+              <Label htmlFor="search-student-grades">Search Student by Name</Label>
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  id="search-student-grades"
+                  type="search"
+                  placeholder="Enter student name..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-8 w-full"
+                />
+              </div>
+            </div>
+          </div>
         </CardHeader>
         <CardContent className="overflow-x-auto">
           <Table className="min-w-[2100px]">
@@ -253,7 +331,7 @@ export default function StudentGradesPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {students.length > 0 ? students.map((student) => (
+              {studentsToDisplay.length > 0 ? studentsToDisplay.map((student) => (
                 <TableRow key={student.id}>
                   <TableCell className="font-medium sticky left-0 bg-card z-10 whitespace-nowrap">{student.name}</TableCell>
                   <TableCell className="sticky left-[150px] bg-card z-10">
@@ -288,7 +366,10 @@ export default function StudentGradesPage() {
               )) : (
                  <TableRow>
                     <TableCell colSpan={MAX_ACCUMULATED_ACTIVITIES * 3 + 3 * 2 + 3} className="text-center h-24">
-                      No student data with detailed grades found.
+                      {(!selectedGroupId || selectedGroupId === 'all') && !searchTerm.trim()
+                        ? "Select a group or search for a student to view grades."
+                        : "No students found matching your criteria."
+                      }
                     </TableCell>
                 </TableRow>
               )}
@@ -301,3 +382,5 @@ export default function StudentGradesPage() {
 }
     
       
+
+    
