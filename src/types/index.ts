@@ -10,6 +10,7 @@ export interface User {
   notes?: string; // Optional: General notes about the student
   age?: number; // Optional: Student's age
   gender?: 'male' | 'female' | 'other'; // Optional: Student's gender
+  preferredShift?: 'Saturday' | 'Sunday'; // Optional: Student's preferred shift
 }
 
 export interface Session {
