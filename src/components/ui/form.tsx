@@ -1,3 +1,4 @@
+
 "use client"
 
 import * as React from "react"
@@ -32,11 +33,28 @@ const FormField = <
   TFieldValues extends FieldValues = FieldValues,
   TName extends FieldPath<TFieldValues> = FieldPath<TFieldValues>
 >({
-  ...props
+  // Explicitly destructure all props that Controller might use from ControllerProps
+  name,
+  control,
+  render,
+  rules,
+  shouldUnregister,
+  defaultValue,
+  disabled,
 }: ControllerProps<TFieldValues, TName>) => {
   return (
-    <FormFieldContext.Provider value={{ name: props.name }}>
-      <Controller {...props} />
+    <FormFieldContext.Provider value={{ name: name }}>
+      <Controller
+        name={name}
+        control={control}
+        render={render}
+        // Conditionally include optional props only if they are defined
+        // This prevents passing `rules: undefined` if rules wasn't provided, for instance.
+        {...(rules !== undefined ? { rules } : {})}
+        {...(shouldUnregister !== undefined ? { shouldUnregister } : {})}
+        {...(defaultValue !== undefined ? { defaultValue } : {})}
+        {...(disabled !== undefined ? { disabled } : {})}
+      />
     </FormFieldContext.Provider>
   )
 }
