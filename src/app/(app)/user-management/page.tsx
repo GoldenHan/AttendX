@@ -55,6 +55,8 @@ const staffFormSchema = z.object({
 
 type StaffFormValues = z.infer<typeof staffFormSchema>;
 
+const UNASSIGN_VALUE_KEY = "##UNASSIGNED##"; // Special non-empty value for the "Unassigned" SelectItem
+
 export default function StaffManagementPage() {
   const [staffUsers, setStaffUsers] = useState<User[]>([]);
   const [allGroups, setAllGroups] = useState<Group[]>([]);
@@ -78,11 +80,11 @@ export default function StaffManagementPage() {
       email: '',
       role: 'teacher',
       photoUrl: '',
-      assignedGroupId: '',
+      assignedGroupId: undefined, // Use undefined for "unassigned" to show placeholder
     },
   });
 
-  const fetchData = async () => { // Combined fetching for staff and groups
+  const fetchData = async () => { 
     setIsLoading(true);
     try {
       const staffRoles: User['role'][] = ['admin', 'teacher', 'caja'];
@@ -108,7 +110,7 @@ export default function StaffManagementPage() {
   const handleOpenAddDialog = () => {
     setEditingStaff(null);
     form.reset({
-      name: '', email: '', role: 'teacher', photoUrl: '', assignedGroupId: '',
+      name: '', email: '', role: 'teacher', photoUrl: '', assignedGroupId: undefined,
     });
     setIsStaffFormDialogOpen(true);
   };
@@ -121,7 +123,7 @@ export default function StaffManagementPage() {
       email: staffToEdit.email || '',
       role: staffToEdit.role as 'teacher' | 'admin' | 'caja',
       photoUrl: staffToEdit.photoUrl || '',
-      assignedGroupId: currentGroupAssignment ? currentGroupAssignment.id : '',
+      assignedGroupId: currentGroupAssignment ? currentGroupAssignment.id : undefined,
     });
     setIsStaffFormDialogOpen(true);
   };
@@ -140,22 +142,21 @@ export default function StaffManagementPage() {
     let staffMemberId: string | undefined = editingStaff?.id;
 
     try {
-      if (editingStaff) { // Editing existing staff
+      if (editingStaff) { 
         const staffRef = doc(db, 'users', editingStaff.id);
         await updateDoc(staffRef, firestoreUserData);
         toast({ title: 'Staff User Updated', description: `${data.name}'s record updated successfully.` });
-      } else { // Adding new staff
+      } else { 
         const docRef = await addDoc(collection(db, 'users'), firestoreUserData);
-        staffMemberId = docRef.id; // Get ID of the newly created staff member
+        staffMemberId = docRef.id; 
         toast({ 
           title: 'Staff User Record Added', 
           description: `${data.name} added to Firestore. No Auth account created by default.` 
         });
       }
 
-      // Handle group assignment if the role is teacher
       if (data.role === 'teacher' && staffMemberId) {
-        const newlySelectedGroupId = data.assignedGroupId || null;
+        const newlySelectedGroupId = data.assignedGroupId || null; // undefined becomes null
         const previouslyAssignedGroup = allGroups.find(g => g.teacherId === staffMemberId);
         const previouslyAssignedGroupId = previouslyAssignedGroup ? previouslyAssignedGroup.id : null;
 
@@ -166,19 +167,15 @@ export default function StaffManagementPage() {
         if (newlySelectedGroupId !== previouslyAssignedGroupId) {
           const batch = writeBatch(db);
 
-          // Unassign from the old group
           if (previouslyAssignedGroupId) {
             console.log(`Unassigning teacher ${staffMemberId} from old group ${previouslyAssignedGroupId}`);
             const oldGroupRef = doc(db, 'groups', previouslyAssignedGroupId);
             batch.update(oldGroupRef, { teacherId: null });
           }
 
-          // Assign to the new group
           if (newlySelectedGroupId) {
             console.log(`Assigning teacher ${staffMemberId} to new group ${newlySelectedGroupId}`);
             const newGroupRef = doc(db, 'groups', newlySelectedGroupId);
-            // Check if the new group is already assigned to another teacher.
-            // For simplicity, this implementation will overwrite. A more robust solution might warn the user.
             const groupDoc = allGroups.find(g => g.id === newlySelectedGroupId);
             if(groupDoc && groupDoc.teacherId && groupDoc.teacherId !== staffMemberId) {
                  toast({
@@ -195,10 +192,10 @@ export default function StaffManagementPage() {
         }
       }
       
-      form.reset({ name: '', email: '', role: 'teacher', photoUrl: '', assignedGroupId: '' });
+      form.reset({ name: '', email: '', role: 'teacher', photoUrl: '', assignedGroupId: undefined });
       setEditingStaff(null);
       setIsStaffFormDialogOpen(false);
-      await fetchData(); // Refetch staff users and groups
+      await fetchData(); 
     } catch (error: any) {
       toast({ 
         title: editingStaff ? 'Update Staff User Failed' : 'Add Staff User Failed', 
@@ -241,11 +238,9 @@ export default function StaffManagementPage() {
       await reauthenticateCurrentUser(deleteAdminPassword);
       
       const batch = writeBatch(db);
-      // Remove user from Firestore
       const userRef = doc(db, 'users', staffToDelete.id);
       batch.delete(userRef);
 
-      // If the deleted user was a teacher, unassign them from any group
       if (staffToDelete.role === 'teacher') {
         const assignedGroup = allGroups.find(g => g.teacherId === staffToDelete.id);
         if (assignedGroup) {
@@ -262,7 +257,7 @@ export default function StaffManagementPage() {
       setStaffToDelete(null);
       setDeleteAdminPassword('');
       setIsDeleteStaffDialogOpen(false);
-      await fetchData(); // Refetch staff users and groups
+      await fetchData(); 
     } catch (error: any) {
       let errorMessage = 'Failed to delete staff user record.';
       const reAuthErrorCodes = ['auth/wrong-password', 'auth/invalid-credential', 'auth/user-mismatch'];
@@ -279,11 +274,16 @@ export default function StaffManagementPage() {
       toast({ title: 'Delete Failed', description: errorMessage, variant: 'destructive' });
       
        if (!reAuthErrorCodes.includes(error.code) && error.code !== 'auth/too-many-requests' && error.code !== 'auth/requires-recent-login') {
-         setIsDeleteStaffDialogOpen(true); 
-      } else {
+         // This logic was reversed, should be: if it's NOT one of these, close dialog.
+         // If it IS one of these, keep dialog open.
+         // For now, let's simplify: close dialog on any error other than specific re-auth ones.
          setIsDeleteStaffDialogOpen(false); 
          setDeleteAdminPassword('');
-      }
+
+       } else {
+         // Keep dialog open for specific re-auth issues
+         setIsDeleteStaffDialogOpen(true); 
+       }
     } finally {
       setIsSubmitting(false);
     }
@@ -326,7 +326,7 @@ export default function StaffManagementPage() {
             if (!isOpen) {
               setEditingStaff(null); 
               form.reset({
-                  name: '', email: '', role: 'teacher', photoUrl: '', assignedGroupId: '',
+                  name: '', email: '', role: 'teacher', photoUrl: '', assignedGroupId: undefined,
               });
             }
           }}>
@@ -389,13 +389,14 @@ export default function StaffManagementPage() {
                     <FormField
                       control={form.control}
                       name="assignedGroupId"
-                      render={({ field }) => (
+                      render={({ field }) => ( // field.value here is string | undefined
                         <FormItem>
                           <FormLabel>Assign to Group (Optional)</FormLabel>
                           <Select
-                            onValueChange={field.onChange}
-                            value={field.value || ''}
-                            defaultValue={field.value || ""}
+                            onValueChange={(value) => {
+                              field.onChange(value === UNASSIGN_VALUE_KEY ? undefined : value);
+                            }}
+                            value={field.value} // string | undefined, Select handles undefined by showing placeholder
                           >
                             <FormControl>
                               <SelectTrigger>
@@ -403,7 +404,7 @@ export default function StaffManagementPage() {
                               </SelectTrigger>
                             </FormControl>
                             <SelectContent>
-                              <SelectItem value="">Unassigned</SelectItem>
+                              <SelectItem value={UNASSIGN_VALUE_KEY}>Unassigned</SelectItem>
                               {allGroups.map((group) => (
                                 <SelectItem key={group.id} value={group.id}>
                                   {group.name}
