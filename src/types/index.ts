@@ -1,60 +1,75 @@
 
-export interface ScoreDetail {
-  name?: string | null; // Custom name for the activity
-  score?: number | null; // Score for the activity
+
+export interface ScoreDetail { // Used in User.grades
+  name?: string | null; 
+  score?: number | null;
 }
 
+export interface ActivityScore { // Used directly in PartialScores form type, and User.grades
+  id: string; // Unique ID for the activity within the partial (can be RHF generated or from DB)
+  name?: string | null;
+  score?: number | null;
+}
+
+export interface ExamScore { // Used directly in PartialScores form type, and User.grades
+  name?: string | null;
+  score?: number | null;
+}
+
+
 export interface User {
-  id: string; // Firestore document ID
-  uid?: string; // Firebase Auth UID
+  id: string; // Firestore document ID from 'users' or 'students' collection
+  uid?: string; // Firebase Auth UID (typically for 'users' collection who can log in)
   name: string;
   role: 'student' | 'teacher' | 'admin' | 'caja';
   email?: string; 
   phoneNumber?: string; 
   photoUrl?: string; 
+  
+  // Student-specific fields (primarily in 'students' collection)
   level?: 'Beginner' | 'Intermediate' | 'Advanced' | 'Other'; 
   notes?: string; 
   age?: number; 
   gender?: 'male' | 'female' | 'other'; 
   preferredShift?: 'Saturday' | 'Sunday'; 
   grades?: {
-    partial1?: PartialScores;
+    partial1?: PartialScores; // Represents data stored in Firestore for a student
     partial2?: PartialScores;
     partial3?: PartialScores;
   };
 }
 
-export interface PartialScores {
-  acc1?: ScoreDetail | null;
-  acc2?: ScoreDetail | null;
-  acc3?: ScoreDetail | null;
-  acc4?: ScoreDetail | null;
-  exam?: ScoreDetail | null;
+// Represents the structure of how partial scores are stored in Firestore for a student.
+// Corresponds to what is saved from the GradeEntryFormValues.
+export interface PartialScores { // Stored in Firestore under student.grades.partialX
+  accumulatedActivities: ActivityScore[]; // Array of specific activities with scores
+  exam: ExamScore | null; // Single exam for the partial
 }
 
+
 export interface Session {
-  id: string;
-  classId: string; // This ID now refers to an ID from the 'groups' collection
+  id: string; // Firestore document ID from 'sessions' collection
+  classId: string; // This ID refers to a Group.id from the 'groups' collection
   date: string; // YYYY-MM-DD
   time: string; // HH:MM
-  qrCodeValue?: string; // Could be sessionId or a unique token
+  qrCodeValue?: string; 
 }
 
 export interface AttendanceRecord {
-  id: string;
-  sessionId: string;
-  userId: string;
-  status: 'present' | 'absent' | 'late';
-  timestamp: string; // ISO date string
-  observation?: string; // Optional observation/justification for absence
+  id: string; // Firestore document ID from 'attendanceRecords' collection
+  sessionId: string; // Refers to Session.id
+  userId: string; // Refers to User.id (from 'students' collection)
+  status: 'present' | 'absent' | 'late'; // 'late' might not be used by new teacher form yet
+  timestamp: string; // ISO date string of when the record was made or for the session time
+  observation?: string; 
 }
 
 export interface Group {
-  id: string;
+  id: string; // Firestore document ID from 'groups' collection
   name: string;
-  type: 'Saturday' | 'Sunday';
+  type: 'Saturday' | 'Sunday'; // Or other relevant group types
   startDate: string; // ISO Date string
   endDate?: string | null; // ISO Date string, optional
-  studentIds: string[];
-  teacherId?: string | null; // ID of the assigned teacher
+  studentIds: string[]; // Array of User.id (from 'students' collection)
+  teacherId?: string | null; // User.id of the assigned teacher (from 'users' collection)
 }
