@@ -2,7 +2,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { useRouter } from 'next/navigation'; // Import useRouter
+import { useRouter } from 'next/navigation'; 
 import {
   Table,
   TableBody,
@@ -14,7 +14,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Loader2, Pencil, Trash2, UserPlus, Search, GraduationCap, NotebookPen } from 'lucide-react';
-import type { User, Group, PartialScores, ActivityScore, ExamScore } from '@/types';
+import type { User, Group, PartialScores } from '@/types';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, deleteDoc, doc, updateDoc, query, where, addDoc, writeBatch } from 'firebase/firestore';
 import { useAuth } from '@/contexts/AuthContext';
@@ -24,7 +24,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogDescription as DialogPrimitiveDescription,
+  DialogDescription as DialogPrimitiveDescription, // Aliased to avoid conflict
   DialogFooter,
   DialogTrigger,
   DialogClose,
@@ -38,7 +38,7 @@ import * as z from 'zod';
 import {
   Form,
   FormControl,
-  FormDescription,
+  FormDescription, // Ensured this is imported
   FormField,
   FormItem,
   FormLabel,
@@ -46,7 +46,6 @@ import {
 } from '@/components/ui/form';
 import { Label } from "@/components/ui/label";
 
-// Schema for student add/edit dialog (Firestore data only)
 const studentFormSchema = z.object({
   name: z.string().min(2, { message: "Name must be at least 2 characters." }),
   email: z.string().email({ message: "Invalid email address." }).optional().or(z.literal('')), 
@@ -108,11 +107,11 @@ export default function StudentManagementPage() {
   const fetchData = async () => {
     setIsLoading(true);
     try {
+      // Fetch from 'students' collection
       const studentsQuery = query(collection(db, 'students')); 
       const studentsSnapshot = await getDocs(studentsQuery);
       const fetchedStudents = studentsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data(), role: 'student' } as User));
       setAllStudents(fetchedStudents);
-      console.log('[DEBUG] Fetched students from Firestore:', fetchedStudents); // DEBUG
 
       const groupsSnapshot = await getDocs(collection(db, 'groups'));
       setGroups(groupsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as Group)));
@@ -120,6 +119,8 @@ export default function StudentManagementPage() {
     } catch (error) {
       console.error("Error fetching data:", error);
       toast({ title: 'Error fetching data', description: 'Could not load students or groups.', variant: 'destructive' });
+      setAllStudents([]); // Ensure students list is empty on error
+      setGroups([]);
     } finally {
       setIsLoading(false);
     }
@@ -147,7 +148,6 @@ export default function StudentManagementPage() {
         (student.preferredShift && student.preferredShift.toLowerCase().includes(searchTerm.toLowerCase()))
       );
     }
-    console.log('[DEBUG] Filtered students (after group and search filters):', studentsToDisplay); // DEBUG
     return studentsToDisplay;
   }, [allStudents, groups, selectedGroupIdForFilter, searchTerm]);
   
@@ -216,7 +216,7 @@ export default function StudentManagementPage() {
       try {
         const newStudentDocData: Omit<User, 'id'> & { grades: User['grades'] } = {
           ...finalStudentDetails,
-          role: 'student' as 'student',
+          role: 'student' as 'student', // Explicitly set role
           grades: { 
             partial1: defaultPartialScore(),
             partial2: defaultPartialScore(),
@@ -276,7 +276,8 @@ export default function StudentManagementPage() {
       const studentRef = doc(db, 'students', studentToDelete.id);
       batch.delete(studentRef);
 
-      const groupsToUpdate = groups.filter(g => g.studentIds?.includes(studentToDelete.id));
+      // Remove student from any groups they are in
+      const groupsToUpdate = groups.filter(g => Array.isArray(g.studentIds) && g.studentIds.includes(studentToDelete.id));
       groupsToUpdate.forEach(group => {
         const groupRef = doc(db, 'groups', group.id);
         const updatedStudentIds = group.studentIds.filter(id => id !== studentToDelete.id);
@@ -307,9 +308,9 @@ export default function StudentManagementPage() {
       toast({ title: 'Delete Failed', description: errorMessage, variant: 'destructive' });
       
       if (reAuthErrorCodes.includes(error.code) || error.code === 'auth/too-many-requests' || error.code === 'auth/requires-recent-login') {
-         setIsDeleteStudentDialogOpen(true);
+         setIsDeleteStudentDialogOpen(true); // Keep dialog open for re-auth error
       } else {
-         setIsDeleteStudentDialogOpen(false); 
+         setIsDeleteStudentDialogOpen(false); // Close for other errors
          setDeleteAdminPassword(''); 
       }
     } finally {
@@ -365,7 +366,7 @@ export default function StudentManagementPage() {
                 <DialogContent className="sm:max-w-md">
                 <DialogHeader>
                     <DialogTitle>{editingStudent ? 'Edit Student Record' : 'Add New Student Record'}</DialogTitle>
-                    <DialogPrimitiveDescription>
+                    <DialogPrimitiveDescription> {/* Uses aliased import */}
                     {editingStudent ? 'Update student details in Firestore.' : 'Fill in student details to add to Firestore. Auth accounts are managed separately.'}
                     </DialogPrimitiveDescription>
                 </DialogHeader>
@@ -558,7 +559,7 @@ export default function StudentManagementPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filteredStudents.length > 0 ? filteredStudents.map((student) => (
+            {(!isLoading && filteredStudents.length > 0) ? filteredStudents.map((student) => (
               <TableRow key={student.id}>
                 <TableCell>{student.name}</TableCell>
                 <TableCell>{student.email || 'N/A'}</TableCell>
@@ -585,8 +586,25 @@ export default function StudentManagementPage() {
             )) : (
               !isLoading && (
                 <TableRow>
-                  <TableCell colSpan={8} className="text-center">
-                    No students found matching your criteria.
+                  <TableCell colSpan={8} className="text-center py-10">
+                    {allStudents.length === 0 && selectedGroupIdForFilter === 'all' && !searchTerm ? (
+                      <div>
+                        <p className="text-lg font-semibold">No student records found in the 'students' collection.</p>
+                        <p className="text-muted-foreground mt-2">
+                          This could be because:
+                        </p>
+                        <ul className="list-disc list-inside text-muted-foreground mt-1 text-left mx-auto max-w-lg sm:max-w-xl md:max-w-2xl">
+                          <li>The 'students' collection in your Firestore database is currently empty.</li>
+                          <li>Your Firestore security rules are preventing the application from reading this collection. Please check your rules in the Firebase Console.</li>
+                          <li>If you recently refactored your data (e.g., from a single 'users' collection), student data needs to be present in the 'students' collection.</li>
+                        </ul>
+                        <Button className="mt-6" onClick={handleOpenAddDialog}>
+                          <UserPlus className="mr-2 h-4 w-4" /> Add First Student Record
+                        </Button>
+                      </div>
+                    ) : (
+                      <p>No students found matching your current filter criteria. Try adjusting your group filter or search term.</p>
+                    )}
                   </TableCell>
                 </TableRow>
               )
@@ -607,7 +625,7 @@ export default function StudentManagementPage() {
         <DialogContent className="sm:max-w-md">
             <DialogHeader>
                 <DialogTitle>Delete Student Record</DialogTitle>
-                <DialogPrimitiveDescription>
+                <DialogPrimitiveDescription> {/* Uses aliased import */}
                     Are you sure you want to delete the Firestore record for {studentToDelete?.name}?
                     This action cannot be undone. Enter your admin password to confirm.
                     Note: This action does NOT delete the Firebase Authentication account if one exists.
