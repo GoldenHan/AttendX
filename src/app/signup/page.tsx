@@ -57,7 +57,7 @@ export default function SignupPage() {
       // Navigation is handled by AuthProvider's useEffect
       toast({
         title: 'Account Created',
-        description: "You've been successfully registered and logged in!",
+        description: "You've been successfully registered and logged in! The first account created is automatically an administrator.",
       });
       // form.reset(); // AuthProvider will redirect, so reset might not be visible
     } catch (error: any) {
@@ -67,6 +67,8 @@ export default function SignupPage() {
         errorMessage = 'This email address is already in use.';
       } else if (error.code === 'auth/weak-password') {
         errorMessage = 'The password is too weak. Please choose a stronger password.';
+      } else if (error.code === 'auth/public-registration-disabled') {
+        errorMessage = 'An administrator account already exists. New accounts are now created by an administrator.';
       }
       toast({
         title: 'Signup Failed',
@@ -88,7 +90,7 @@ export default function SignupPage() {
             <UserPlus className="h-12 w-12 text-primary" />
           </div>
           <CardTitle className="text-3xl font-bold">Create SERVEX Account</CardTitle>
-          <CardDescription>Fill in the details below to register.</CardDescription>
+          <CardDescription>Fill in the details below to register. The first account created will be an administrator.</CardDescription>
         </CardHeader>
         <CardContent>
           <Form {...form}>

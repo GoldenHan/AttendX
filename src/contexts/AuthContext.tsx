@@ -10,7 +10,7 @@ import {
   signOut as firebaseSignOut,
   createUserWithEmailAndPassword 
 } from 'firebase/auth';
-import { doc, getDoc, collection, query, where, getDocs, setDoc } from 'firebase/firestore';
+import { doc, getDoc, collection, query, where, getDocs, setDoc, limit } from 'firebase/firestore';
 import type { User as FirestoreUserType } from '@/types';
 import { useRouter, usePathname } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
@@ -40,26 +40,29 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setAuthUser(user);
         const usersRef = collection(db, 'users');
         let userDocSnapshot;
-        const qUid = query(usersRef, where('uid', '==', user.uid));
-        const uidSnapshot = await getDocs(qUid);
+        // Prioritize UID match
+        const userDocRef = doc(db, 'users', user.uid);
+        const directUserDoc = await getDoc(userDocRef);
 
-        if (!uidSnapshot.empty) {
-          userDocSnapshot = uidSnapshot.docs[0];
-        } else if (user.email) {
-          const qEmail = query(usersRef, where('email', '==', user.email));
+        if (directUserDoc.exists()) {
+          userDocSnapshot = directUserDoc;
+        } else if (user.email) { // Fallback to email match if UID doc not found (e.g., legacy data)
+          const qEmail = query(usersRef, where('email', '==', user.email), limit(1));
           const emailSnapshot = await getDocs(qEmail);
           if (!emailSnapshot.empty) {
             userDocSnapshot = emailSnapshot.docs[0];
+             // If found by email but UID is different or missing, consider updating UID in Firestore
+             if (userDocSnapshot.data().uid !== user.uid) {
+                console.warn(`Firestore user document ${userDocSnapshot.id} found by email but UID mismatch or missing. Auth UID: ${user.uid}. Firestore UID: ${userDocSnapshot.data().uid}`);
+                // Optionally update the Firestore doc with the correct auth UID here if desired
+             }
           }
         }
         
         if (userDocSnapshot && userDocSnapshot.exists()) {
           setFirestoreUser({ id: userDocSnapshot.id, ...userDocSnapshot.data() } as FirestoreUserType);
         } else {
-          console.warn('No Firestore document found for user:', user.uid, user.email);
-          // If user exists in Auth but not Firestore (e.g., just signed up),
-          // and we expect a Firestore doc to be created by signUp, this state is temporary.
-          // For existing users, this might indicate an issue or a new user whose Firestore doc creation is pending/failed.
+          console.warn('No Firestore document found for user UID:', user.uid, 'or email:', user.email);
           setFirestoreUser(null); 
         }
       } else {
@@ -85,16 +88,32 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const signUp = async (name: string, email: string, pass: string) => {
     setLoading(true);
     try {
+      // Check if any user already exists to determine if this is the first admin setup
+      const usersQuery = query(collection(db, 'users'), limit(1));
+      const existingUsersSnapshot = await getDocs(usersQuery);
+
+      let role: FirestoreUserType['role'] = 'student'; // Default role
+
+      if (existingUsersSnapshot.empty) {
+        // No users exist, this is the first user, make them admin
+        role = 'admin';
+      } else {
+        // Users already exist, block further public sign-ups
+        setLoading(false);
+        const error = new Error("Public registration is disabled. Admin already exists.");
+        (error as any).code = "auth/public-registration-disabled";
+        throw error;
+      }
+
       const userCredential = await createUserWithEmailAndPassword(auth, email, pass);
       const firebaseUser = userCredential.user;
       
-      // Create Firestore document for the new user
       const newUserDoc: FirestoreUserType = {
-        id: firebaseUser.uid, // Use Firebase UID as Firestore document ID for simplicity, or generate one
+        id: firebaseUser.uid, 
         uid: firebaseUser.uid,
         name: name,
         email: firebaseUser.email || undefined,
-        role: 'student', // Default role for new sign-ups
+        role: role, 
       };
       await setDoc(doc(db, 'users', firebaseUser.uid), newUserDoc);
       // onAuthStateChanged will handle setting authUser and firestoreUser, and redirection
@@ -124,7 +143,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       if (!authUser && !isAuthPage) {
         router.push('/login');
       } else if (authUser && isAuthPage) {
-        router.push('/dashboard');
+        router.push('/dashboard'); 
       }
     }
   }, [authUser, loading, pathname, router]);
