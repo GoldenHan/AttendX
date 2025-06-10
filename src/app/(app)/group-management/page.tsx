@@ -1,7 +1,7 @@
 
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Card,
   CardContent,
@@ -50,7 +50,7 @@ const groupFormSchema = z.object({
   type: z.enum(['Saturday', 'Sunday'], { required_error: "Group type is required." }),
   startDate: z.date({ required_error: "Start date is required." }),
   endDate: z.date().optional().nullable(),
-  teacherId: z.string().optional().or(z.literal('')), // Allow empty string to represent "No Teacher"
+  teacherId: z.string().optional().or(z.literal('')),
 });
 
 type GroupFormValues = z.infer<typeof groupFormSchema>;
@@ -59,8 +59,13 @@ const NO_TEACHER_ASSIGNED_VALUE = "##NO_TEACHER##";
 
 export default function GroupManagementPage() {
   const [groups, setGroups] = useState<Group[]>([]);
-  const [allUsers, setAllUsers] = useState<User[]>([]);
-  const [isLoadingData, setIsLoadingData] = useState(true);
+  const [allTeachers, setAllTeachers] = useState<User[]>([]);
+  const [allStudents, setAllStudents] = useState<User[]>([]);
+  
+  const [isLoadingGroups, setIsLoadingGroups] = useState(true);
+  const [isLoadingTeachers, setIsLoadingTeachers] = useState(true);
+  const [isLoadingStudents, setIsLoadingStudents] = useState(true);
+
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isGroupFormDialogOpen, setIsGroupFormDialogOpen] = useState(false);
   const [editingGroup, setEditingGroup] = useState<Group | null>(null);
@@ -70,8 +75,9 @@ export default function GroupManagementPage() {
   const [selectedStudentIdsForGroup, setSelectedStudentIdsForGroup] = useState<string[]>([]);
   const [studentSearchTerm, setStudentSearchTerm] = useState('');
 
-
   const { toast } = useToast();
+
+  const isLoadingData = isLoadingGroups || isLoadingTeachers || isLoadingStudents;
 
   const form = useForm<GroupFormValues>({
     resolver: zodResolver(groupFormSchema),
@@ -84,29 +90,54 @@ export default function GroupManagementPage() {
     },
   });
 
-  const teachers = useMemo(() => allUsers.filter(user => user.role === 'teacher'), [allUsers]);
-  const students = useMemo(() => allUsers.filter(user => user.role === 'student'), [allUsers]);
-
-  const fetchInitialData = async () => {
-    setIsLoadingData(true);
+  const fetchInitialData = useCallback(async () => {
+    setIsLoadingGroups(true);
+    setIsLoadingTeachers(true);
+    setIsLoadingStudents(true);
     try {
-      const groupsSnapshot = await getDocs(collection(db, 'groups'));
+      const groupsSnapshotPromise = getDocs(collection(db, 'groups'));
+      const teachersQuery = query(collection(db, 'users'), where('role', '==', 'teacher'));
+      const teachersSnapshotPromise = getDocs(teachersQuery);
+      const studentsSnapshotPromise = getDocs(collection(db, 'students'));
+
+      const [groupsSnapshot, teachersSnapshot, studentsSnapshot] = await Promise.all([
+        groupsSnapshotPromise,
+        teachersSnapshotPromise,
+        studentsSnapshotPromise
+      ]);
+
       setGroups(groupsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as Group)));
+      setIsLoadingGroups(false);
       
-      const usersSnapshot = await getDocs(collection(db, 'users'));
-      setAllUsers(usersSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as User)));
+      setAllTeachers(teachersSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as User)));
+      setIsLoadingTeachers(false);
+
+      setAllStudents(studentsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as User)));
+      setIsLoadingStudents(false);
 
     } catch (error) {
       console.error("Error fetching initial data:", error);
-      toast({ title: 'Error fetching data', description: 'Could not load groups or users.', variant: 'destructive' });
-    } finally {
-      setIsLoadingData(false);
+      toast({ title: 'Error fetching data', description: 'Could not load groups, teachers, or students.', variant: 'destructive' });
+      setIsLoadingGroups(false);
+      setIsLoadingTeachers(false);
+      setIsLoadingStudents(false);
     }
-  };
+  }, [toast]);
 
   useEffect(() => {
     fetchInitialData();
-  }, []);
+  }, [fetchInitialData]);
+
+  const getValidatedStudentCount = useCallback((groupId: string) => {
+    const group = groups.find(g => g.id === groupId);
+    if (!group || !Array.isArray(group.studentIds) || group.studentIds.length === 0) {
+      return 0;
+    }
+    const validStudentIdsInGroup = group.studentIds.filter(studentId =>
+      allStudents.some(s => s.id === studentId)
+    );
+    return validStudentIdsInGroup.length;
+  }, [groups, allStudents]);
 
   const handleGroupFormSubmit = async (data: GroupFormValues) => {
     setIsSubmitting(true);
@@ -127,7 +158,7 @@ export default function GroupManagementPage() {
         });
         
         setGroups(prevGroups => prevGroups.map(g => 
-          g.id === editingGroup.id ? { ...g, ...groupDataToSave, studentIds: g.studentIds } as Group : g
+          g.id === editingGroup.id ? { ...g, ...groupDataToSave, studentIds: g.studentIds || [] } as Group : g
         ));
         toast({ title: 'Group Updated', description: `Group "${data.name}" updated successfully.` });
 
@@ -171,7 +202,6 @@ export default function GroupManagementPage() {
     setIsGroupFormDialogOpen(true);
   };
 
-
   const handleDeleteGroup = async (groupId: string, groupName: string) => {
     if (!confirm(`Are you sure you want to delete the group "${groupName}"? This action cannot be undone.`)) return;
     try {
@@ -192,12 +222,12 @@ export default function GroupManagementPage() {
   };
 
   const filteredStudentsForDialog = useMemo(() => {
-    if (!studentSearchTerm) return students;
-    return students.filter(student => 
+    if (!studentSearchTerm) return allStudents; // Use allStudents state
+    return allStudents.filter(student => 
       student.name.toLowerCase().includes(studentSearchTerm.toLowerCase()) ||
       (student.preferredShift && student.preferredShift.toLowerCase().includes(studentSearchTerm.toLowerCase()))
     );
-  }, [students, studentSearchTerm]);
+  }, [allStudents, studentSearchTerm]);
 
 
   const handleStudentSelectionChange = (studentId: string, checked: boolean) => {
@@ -243,12 +273,11 @@ export default function GroupManagementPage() {
 
   const getTeacherName = (teacherId?: string | null) => {
     if (!teacherId) return 'N/A';
-    const teacher = teachers.find(t => t.id === teacherId);
+    const teacher = allTeachers.find(t => t.id === teacherId); // Use allTeachers state
     return teacher ? teacher.name : 'Unknown Teacher';
   };
 
-
-  if (isLoadingData && groups.length === 0) {
+  if (isLoadingData) {
     return (
       <Card>
         <CardHeader>
@@ -257,7 +286,7 @@ export default function GroupManagementPage() {
         </CardHeader>
         <CardContent className="flex items-center justify-center py-10">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
-          <p className="ml-2">Loading groups and users...</p>
+          <p className="ml-2">Loading groups, teachers, and students...</p>
         </CardContent>
       </Card>
     );
@@ -413,7 +442,7 @@ export default function GroupManagementPage() {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value={NO_TEACHER_ASSIGNED_VALUE}>No Teacher Assigned</SelectItem>
-                          {teachers.map(teacher => (
+                          {allTeachers.map(teacher => (
                             <SelectItem key={teacher.id} value={teacher.id}>
                               {teacher.name}
                             </SelectItem>
@@ -426,7 +455,6 @@ export default function GroupManagementPage() {
                     </div>
                   )}
                 />
-
 
                 <DialogFooter className="pt-4">
                   <DialogClose asChild>
@@ -444,13 +472,7 @@ export default function GroupManagementPage() {
           </Dialog>
         </CardHeader>
         <CardContent>
-          {isLoadingData && groups.length > 0 && (
-            <div className="flex items-center justify-center py-4">
-              <Loader2 className="h-6 w-6 animate-spin text-primary" />
-              <p className="ml-2 text-sm text-muted-foreground">Refreshing groups...</p>
-            </div>
-          )}
-          {groups.length === 0 && !isLoadingData ? (
+          {groups.length === 0 ? (
             <div className="text-center py-10">
               <p className="text-muted-foreground">No groups found. Get started by adding a new group.</p>
             </div>
@@ -475,7 +497,7 @@ export default function GroupManagementPage() {
                     <TableCell>{formatDateDisplay(group.startDate)}</TableCell>
                     <TableCell>{formatDateDisplay(group.endDate)}</TableCell>
                     <TableCell>{getTeacherName(group.teacherId)}</TableCell>
-                    <TableCell>{Array.isArray(group.studentIds) ? group.studentIds.length : 0}</TableCell>
+                    <TableCell>{getValidatedStudentCount(group.id)}</TableCell>
                     <TableCell className="space-x-1">
                       <Button variant="outline" size="sm" onClick={() => openManageStudentsDialog(group)} className="text-xs">
                         <UserCheck className="mr-1 h-3.5 w-3.5" /> Students
@@ -497,7 +519,6 @@ export default function GroupManagementPage() {
         </CardContent>
       </Card>
 
-      {/* Manage Students Dialog */}
       <Dialog open={isManageStudentsDialogOpen} onOpenChange={(isOpen) => {
         setIsManageStudentsDialogOpen(isOpen);
         if (!isOpen) {
@@ -525,7 +546,7 @@ export default function GroupManagementPage() {
                 />
             </div>
           </div>
-          {isLoadingData && students.length === 0 ? ( 
+          {isLoadingStudents && allStudents.length === 0 ? ( 
             <div className="flex items-center justify-center py-10">
               <Loader2 className="h-8 w-8 animate-spin text-primary" />
               <p className="ml-2">Loading students...</p>
@@ -534,7 +555,7 @@ export default function GroupManagementPage() {
             <div className="py-2 space-y-2 max-h-60 overflow-y-auto">
               {filteredStudentsForDialog.length === 0 && (
                 <p className="text-sm text-muted-foreground text-center">
-                  {studentSearchTerm ? 'No students match your search.' : 'No students available.'}
+                  {studentSearchTerm ? 'No students match your search.' : (allStudents.length === 0 ? 'No students available in the system.' : 'No students found.')}
                 </p>
               )}
               {filteredStudentsForDialog.map(student => (
@@ -557,7 +578,7 @@ export default function GroupManagementPage() {
                 Cancel
               </Button>
             </DialogClose>
-            <Button type="button" onClick={handleSaveStudentAssignments} disabled={isSubmitting || (isLoadingData && students.length === 0) }>
+            <Button type="button" onClick={handleSaveStudentAssignments} disabled={isSubmitting || isLoadingStudents }>
               {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Save Assignments
             </Button>
