@@ -18,12 +18,11 @@ import {
   BarChart3,
   Brain,
   QrCode,
-  Users,
   Settings,
   FolderKanban,
   ClipboardCheck,
-  Briefcase, 
-  GraduationCap, 
+  Briefcase,
+  GraduationCap,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import type { User } from '@/types';
@@ -32,26 +31,26 @@ interface NavItem {
   href: string;
   label: string;
   icon: React.ElementType;
-  roles?: User['role'][]; 
+  roles?: User['role'][];
 }
 
-const generalNavItems: NavItem[] = [ 
+const generalNavItems: NavItem[] = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['admin', 'teacher', 'caja', 'student'] },
   { href: '/attendance-log', label: 'Log Attendance', icon: ClipboardEdit, roles: ['admin', 'teacher', 'caja'] },
   { href: '/attendance-records', label: 'Records', icon: BookUser, roles: ['admin', 'teacher', 'caja', 'student'] },
   { href: '/reports', label: 'Reports', icon: BarChart3, roles: ['admin', 'teacher', 'caja', 'student'] },
-  { href: '/student-grades', label: 'Student Grades View', icon: ClipboardCheck, roles: ['admin', 'teacher'] }, 
+  { href: '/student-grades', label: 'Student Grades View', icon: ClipboardCheck, roles: ['admin', 'teacher'] },
   { href: '/ai-analysis', label: 'AI Analysis', icon: Brain, roles: ['admin', 'teacher'] },
 ];
 
-const managementNavItems: NavItem[] = [ 
+const managementNavItems: NavItem[] = [
    { href: '/student-management', label: 'Student Management', icon: GraduationCap, roles: ['admin', 'teacher'] },
    { href: '/group-management', label: 'Groups', icon: FolderKanban, roles: ['admin', 'teacher'] },
    { href: '/grades-management', label: 'Grades Management', icon: ClipboardCheck, roles: ['admin', 'teacher'] },
 ];
 
 const adminNavItems: NavItem[] = [
-   { href: '/user-management', label: 'Staff Management', icon: Briefcase, roles: ['admin'] }, 
+   { href: '/user-management', label: 'Staff Management', icon: Briefcase, roles: ['admin'] },
    { href: '/app-settings', label: 'Settings', icon: Settings, roles: ['admin'] },
    { href: '/qr-login-setup', label: 'QR Session Login', icon: QrCode, roles: ['admin', 'teacher', 'caja'] },
 ];
@@ -63,13 +62,13 @@ export function SidebarNav() {
   const userRole = firestoreUser?.role;
 
   if (loading && !userRole) {
-    return null; 
+    return null;
   }
 
   const filterNavItems = (items: NavItem[]): NavItem[] => {
-    if (!userRole) return []; 
+    if (!userRole) return [];
     return items.filter(item => {
-      if (!item.roles) return true; 
+      if (!item.roles) return true;
       return item.roles.includes(userRole);
     });
   };
@@ -85,10 +84,10 @@ export function SidebarNav() {
           className={cn(
             'w-full justify-start',
             pathname === item.href
-              ? 'bg-sidebar-accent text-sidebar-accent-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground' 
-              : 'text-sidebar-foreground hover:bg-muted/30 hover:text-sidebar-foreground' 
+              ? 'bg-sidebar-accent text-sidebar-accent-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
+              : 'text-sidebar-foreground hover:bg-muted/30 hover:text-sidebar-foreground'
           )}
-          isActive={pathname === item.href} 
+          isActive={pathname === item.href}
           tooltip={{ children: item.label }}
         >
           <item.icon className="mr-2 h-4 w-4" />
@@ -107,7 +106,7 @@ export function SidebarNav() {
             {visibleGeneralNavItems.map(renderNavItem)}
           </SidebarGroup>
         )}
-        
+
         {visibleManagementNavItems.length > 0 && (
           <SidebarGroup>
             <SidebarGroupLabel>Management</SidebarGroupLabel>
