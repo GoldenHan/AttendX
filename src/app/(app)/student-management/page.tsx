@@ -12,7 +12,7 @@ import {
 } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Loader2, Pencil, Trash2, UserPlus, Search, GraduationCap } from 'lucide-react';
+import { Loader2, Pencil, Trash2, UserPlus, Search, GraduationCap, NotebookPen } from 'lucide-react'; // Added NotebookPen
 import type { User, Group } from '@/types';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, deleteDoc, doc, addDoc, updateDoc, query, where } from 'firebase/firestore';
@@ -57,10 +57,26 @@ const studentFormSchema = z.object({
   ),
   gender: z.enum(['male', 'female', 'other']).optional(),
   preferredShift: z.enum(['Saturday', 'Sunday']).optional(),
-  // Role is implicitly 'student'
 });
 
 type StudentFormValues = z.infer<typeof studentFormSchema>;
+
+const studentGradeFormSchema = z.object({
+  partial1Grade: z.preprocess(
+    (val) => (val === "" || val === undefined || val === null ? undefined : Number(val)),
+    z.number({ invalid_type_error: "Grade must be a number." }).min(0, "Min 0").max(100, "Max 100").optional()
+  ),
+  partial2Grade: z.preprocess(
+    (val) => (val === "" || val === undefined || val === null ? undefined : Number(val)),
+    z.number({ invalid_type_error: "Grade must be a number." }).min(0, "Min 0").max(100, "Max 100").optional()
+  ),
+  partial3Grade: z.preprocess(
+    (val) => (val === "" || val === undefined || val === null ? undefined : Number(val)),
+    z.number({ invalid_type_error: "Grade must be a number." }).min(0, "Min 0").max(100, "Max 100").optional()
+  ),
+});
+type StudentGradeFormValues = z.infer<typeof studentGradeFormSchema>;
+
 
 export default function StudentManagementPage() {
   const [allStudents, setAllStudents] = useState<User[]>([]);
@@ -78,11 +94,15 @@ export default function StudentManagementPage() {
   const [selectedGroupIdForFilter, setSelectedGroupIdForFilter] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState<string>('');
 
+  const [isGradeDialogOpen, setIsGradeDialogOpen] = useState(false);
+  const [studentForGrading, setStudentForGrading] = useState<User | null>(null);
+  const [isSubmittingGrades, setIsSubmittingGrades] = useState(false);
+
 
   const { toast } = useToast();
   const { reauthenticateCurrentUser, authUser } = useAuth();
 
-  const form = useForm<StudentFormValues>({
+  const studentForm = useForm<StudentFormValues>({ // Renamed form to studentForm for clarity
     resolver: zodResolver(studentFormSchema),
     defaultValues: {
       name: '',
@@ -93,6 +113,15 @@ export default function StudentManagementPage() {
       age: undefined,
       gender: undefined,
       preferredShift: undefined,
+    },
+  });
+
+  const gradeForm = useForm<StudentGradeFormValues>({
+    resolver: zodResolver(studentGradeFormSchema),
+    defaultValues: {
+      partial1Grade: undefined,
+      partial2Grade: undefined,
+      partial3Grade: undefined,
     },
   });
 
@@ -126,7 +155,7 @@ export default function StudentManagementPage() {
       if (group && group.studentIds) {
         studentsToDisplay = studentsToDisplay.filter(student => group.studentIds.includes(student.id));
       } else {
-        studentsToDisplay = []; // No students if group not found or has no studentIds
+        studentsToDisplay = []; 
       }
     }
 
@@ -141,7 +170,7 @@ export default function StudentManagementPage() {
   
   const handleOpenAddDialog = () => {
     setEditingStudent(null);
-    form.reset({
+    studentForm.reset({
       name: '', phoneNumber: '', photoUrl: '',
       level: undefined, notes: '', age: undefined, gender: undefined, preferredShift: undefined,
     });
@@ -150,7 +179,7 @@ export default function StudentManagementPage() {
   
   const handleOpenEditDialog = (studentToEdit: User) => {
     setEditingStudent(studentToEdit);
-    form.reset({
+    studentForm.reset({
       name: studentToEdit.name,
       phoneNumber: studentToEdit.phoneNumber || '',
       photoUrl: studentToEdit.photoUrl || '',
@@ -168,7 +197,7 @@ export default function StudentManagementPage() {
     
     const firestoreData: Partial<User> = {
       name: data.name,
-      role: 'student', // Always student for this form
+      role: 'student', 
       phoneNumber: data.phoneNumber || '',
       photoUrl: data.photoUrl || '',
       level: data.level,
@@ -176,10 +205,10 @@ export default function StudentManagementPage() {
       age: data.age,
       gender: data.gender,
       preferredShift: data.preferredShift,
-      email: '', // Ensure email is blank for students
+      email: '', 
     };
     
-    if (editingStudent?.uid) { // Preserve UID if editing an existing auth user's record
+    if (editingStudent?.uid) { 
       firestoreData.uid = editingStudent.uid;
     }
         
@@ -187,17 +216,12 @@ export default function StudentManagementPage() {
       Object.entries(firestoreData).filter(([_, v]) => v !== undefined)
     ) as Partial<User>;
 
-    console.log("Data being sent to Firestore for student add/edit:", firestoreDataForSave);
-
     try {
       if (editingStudent) {
         const studentRef = doc(db, 'users', editingStudent.id);
         await updateDoc(studentRef, firestoreDataForSave);
         toast({ title: 'Student Updated', description: `${data.name}'s record updated successfully.` });
       } else {
-        // For new students, if UID is needed for auth integration later, it would be set post-creation by auth.
-        // For Firestore-only records, UID might not be present or could be same as Firestore doc ID.
-        // Current setup doesn't auto-create auth users.
         const docRef = await addDoc(collection(db, 'users'), firestoreDataForSave);
         toast({ 
           title: 'Student Record Added', 
@@ -205,13 +229,13 @@ export default function StudentManagementPage() {
         });
       }
       
-      form.reset({
+      studentForm.reset({
         name: '', phoneNumber: '', photoUrl: '',
         level: undefined, notes: '', age: undefined, gender: undefined, preferredShift: undefined,
       });
       setEditingStudent(null);
       setIsStudentFormDialogOpen(false);
-      await fetchData(); // Refetch all data
+      await fetchData(); 
     } catch (error: any) {
       toast({ 
         title: editingStudent ? 'Update Student Failed' : 'Add Student Failed', 
@@ -257,7 +281,7 @@ export default function StudentManagementPage() {
       setStudentToDelete(null);
       setDeleteAdminPassword('');
       setIsDeleteStudentDialogOpen(false);
-      await fetchData(); // Refetch all data
+      await fetchData(); 
     } catch (error: any) {
       let errorMessage = 'Failed to delete student record.';
       const reAuthErrorCodes = ['auth/wrong-password', 'auth/invalid-credential', 'auth/user-mismatch'];
@@ -274,7 +298,6 @@ export default function StudentManagementPage() {
       toast({ title: 'Delete Failed', description: errorMessage, variant: 'destructive' });
       
       if (reAuthErrorCodes.includes(error.code) || error.code === 'auth/too-many-requests' || error.code === 'auth/requires-recent-login') {
-        // Keep dialog open only for re-auth failures of specific types
          setIsDeleteStudentDialogOpen(true);
       } else {
          setIsDeleteStudentDialogOpen(false); 
@@ -282,6 +305,41 @@ export default function StudentManagementPage() {
       }
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleOpenGradeDialog = (student: User) => {
+    setStudentForGrading(student);
+    gradeForm.reset({
+        partial1Grade: student.partial1Grade ?? undefined,
+        partial2Grade: student.partial2Grade ?? undefined,
+        partial3Grade: student.partial3Grade ?? undefined,
+    });
+    setIsGradeDialogOpen(true);
+  };
+
+  const handleGradeFormSubmit = async (data: StudentGradeFormValues) => {
+    if (!studentForGrading) {
+        toast({ title: "Error", description: "No student selected for grading.", variant: "destructive" });
+        return;
+    }
+    setIsSubmittingGrades(true);
+    try {
+        const studentRef = doc(db, "users", studentForGrading.id);
+        await updateDoc(studentRef, {
+            partial1Grade: data.partial1Grade ?? null, // Store as null if undefined
+            partial2Grade: data.partial2Grade ?? null,
+            partial3Grade: data.partial3Grade ?? null,
+        });
+        toast({ title: "Grades Updated", description: `Grades for ${studentForGrading.name} saved successfully.` });
+        setIsGradeDialogOpen(false);
+        setStudentForGrading(null);
+        await fetchData(); // Refresh data to show updated grades if needed on this page
+    } catch (error: any) {
+        toast({ title: "Grade Update Failed", description: `An error occurred: ${error.message || 'Please try again.'}`, variant: "destructive" });
+        console.error("Grade update error:", error);
+    } finally {
+        setIsSubmittingGrades(false);
     }
   };
   
@@ -313,7 +371,7 @@ export default function StudentManagementPage() {
                 setIsStudentFormDialogOpen(isOpen);
                 if (!isOpen) {
                 setEditingStudent(null); 
-                form.reset({
+                studentForm.reset({
                     name: '', phoneNumber: '', photoUrl: '',
                     level: undefined, notes: '', age: undefined, gender: undefined, preferredShift: undefined,
                 });
@@ -332,10 +390,10 @@ export default function StudentManagementPage() {
                     {editingStudent ? 'Update student details.' : 'Fill in student details.'}
                     </DialogDescription>
                 </DialogHeader>
-                <Form {...form}>
-                    <form onSubmit={form.handleSubmit(handleStudentFormSubmit)} className="space-y-4 py-4 max-h-[70vh] overflow-y-auto pr-2">
+                <Form {...studentForm}>
+                    <form onSubmit={studentForm.handleSubmit(handleStudentFormSubmit)} className="space-y-4 py-4 max-h-[70vh] overflow-y-auto pr-2">
                     <FormField
-                        control={form.control}
+                        control={studentForm.control}
                         name="name"
                         render={({ field }) => (
                         <FormItem>
@@ -346,7 +404,7 @@ export default function StudentManagementPage() {
                         )}
                     />
                     <FormField
-                        control={form.control}
+                        control={studentForm.control}
                         name="phoneNumber"
                         render={({ field }) => (
                             <FormItem>
@@ -357,7 +415,7 @@ export default function StudentManagementPage() {
                         )}
                         />
                     <FormField
-                        control={form.control}
+                        control={studentForm.control}
                         name="photoUrl"
                         render={({ field }) => (
                         <FormItem>
@@ -368,7 +426,7 @@ export default function StudentManagementPage() {
                         )}
                     />
                     <FormField
-                        control={form.control}
+                        control={studentForm.control}
                         name="level"
                         render={({ field }) => (
                         <FormItem>
@@ -387,7 +445,7 @@ export default function StudentManagementPage() {
                         )}
                     />
                     <FormField
-                        control={form.control}
+                        control={studentForm.control}
                         name="age"
                         render={({ field }) => (
                         <FormItem>
@@ -398,7 +456,7 @@ export default function StudentManagementPage() {
                         )}
                     />
                     <FormField
-                        control={form.control}
+                        control={studentForm.control}
                         name="gender"
                         render={({ field }) => (
                         <FormItem>
@@ -416,7 +474,7 @@ export default function StudentManagementPage() {
                         )}
                     />
                     <FormField
-                        control={form.control}
+                        control={studentForm.control}
                         name="preferredShift"
                         render={({ field }) => (
                         <FormItem>
@@ -433,7 +491,7 @@ export default function StudentManagementPage() {
                         )}
                     />
                     <FormField
-                        control={form.control}
+                        control={studentForm.control}
                         name="notes"
                         render={({ field }) => (
                         <FormItem>
@@ -516,14 +574,18 @@ export default function StudentManagementPage() {
                 <TableCell>{student.age ?? 'N/A'}</TableCell>
                 <TableCell>{student.gender ? student.gender.charAt(0).toUpperCase() + student.gender.slice(1) : 'N/A'}</TableCell>
                 <TableCell>{student.preferredShift || 'N/A'}</TableCell>
-                <TableCell>
-                  <Button variant="ghost" size="icon" className="mr-2" onClick={() => handleOpenEditDialog(student)}>
+                <TableCell className="space-x-1">
+                  <Button variant="ghost" size="icon" onClick={() => handleOpenGradeDialog(student)}>
+                    <NotebookPen className="h-4 w-4" />
+                    <span className="sr-only">Edit Grades</span>
+                  </Button>
+                  <Button variant="ghost" size="icon" onClick={() => handleOpenEditDialog(student)}>
                     <Pencil className="h-4 w-4" />
-                    <span className="sr-only">Edit</span>
+                    <span className="sr-only">Edit Student</span>
                   </Button>
                   <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => handleOpenDeleteDialog(student)}>
                     <Trash2 className="h-4 w-4" />
-                    <span className="sr-only">Delete</span>
+                    <span className="sr-only">Delete Student</span>
                   </Button>
                 </TableCell>
               </TableRow>
@@ -541,6 +603,7 @@ export default function StudentManagementPage() {
       </CardContent>
     </Card>
 
+    {/* Delete Student Dialog */}
     <Dialog open={isDeleteStudentDialogOpen} onOpenChange={(isOpen) => {
         setIsDeleteStudentDialogOpen(isOpen);
         if (!isOpen) {
@@ -582,6 +645,94 @@ export default function StudentManagementPage() {
                     Delete Student Record
                 </Button>
             </DialogFooter>
+        </DialogContent>
+    </Dialog>
+
+    {/* Grade Entry Dialog */}
+    <Dialog open={isGradeDialogOpen} onOpenChange={(isOpen) => {
+        setIsGradeDialogOpen(isOpen);
+        if (!isOpen) {
+            setStudentForGrading(null);
+            gradeForm.reset({ partial1Grade: undefined, partial2Grade: undefined, partial3Grade: undefined });
+        }
+    }}>
+        <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+                <DialogTitle>Registro de Notas: {studentForGrading?.name}</DialogTitle>
+                <DialogDescription>
+                    Enter or update the partial grades for this student. Grades should be between 0 and 100.
+                </DialogDescription>
+            </DialogHeader>
+            <Form {...gradeForm}>
+                <form onSubmit={gradeForm.handleSubmit(handleGradeFormSubmit)} className="space-y-4 py-4">
+                    <FormField
+                        control={gradeForm.control}
+                        name="partial1Grade"
+                        render={({ field }) => (
+                            <FormItem>
+                                <FormLabel>Partial 1 Grade</FormLabel>
+                                <FormControl>
+                                    <Input 
+                                        type="number" 
+                                        placeholder="e.g., 85" 
+                                        {...field} 
+                                        value={field.value ?? ''}
+                                        onChange={e => field.onChange(e.target.value === '' ? undefined : Number(e.target.value))}
+                                    />
+                                </FormControl>
+                                <FormMessage />
+                            </FormItem>
+                        )}
+                    />
+                    <FormField
+                        control={gradeForm.control}
+                        name="partial2Grade"
+                        render={({ field }) => (
+                            <FormItem>
+                                <FormLabel>Partial 2 Grade</FormLabel>
+                                <FormControl>
+                                     <Input 
+                                        type="number" 
+                                        placeholder="e.g., 90" 
+                                        {...field} 
+                                        value={field.value ?? ''}
+                                        onChange={e => field.onChange(e.target.value === '' ? undefined : Number(e.target.value))}
+                                    />
+                                </FormControl>
+                                <FormMessage />
+                            </FormItem>
+                        )}
+                    />
+                    <FormField
+                        control={gradeForm.control}
+                        name="partial3Grade"
+                        render={({ field }) => (
+                            <FormItem>
+                                <FormLabel>Partial 3 Grade</FormLabel>
+                                <FormControl>
+                                     <Input 
+                                        type="number" 
+                                        placeholder="e.g., 75" 
+                                        {...field} 
+                                        value={field.value ?? ''}
+                                        onChange={e => field.onChange(e.target.value === '' ? undefined : Number(e.target.value))}
+                                    />
+                                </FormControl>
+                                <FormMessage />
+                            </FormItem>
+                        )}
+                    />
+                    <DialogFooter>
+                        <DialogClose asChild>
+                            <Button type="button" variant="outline">Cancel</Button>
+                        </DialogClose>
+                        <Button type="submit" disabled={isSubmittingGrades}>
+                            {isSubmittingGrades && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                            Save Grades
+                        </Button>
+                    </DialogFooter>
+                </form>
+            </Form>
         </DialogContent>
     </Dialog>
     </>
