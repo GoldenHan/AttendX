@@ -12,8 +12,8 @@ import {
 } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Loader2, Pencil, Trash2, UserPlus, Search, GraduationCap, NotebookPen } from 'lucide-react'; // Added NotebookPen
-import type { User, Group } from '@/types';
+import { Loader2, Pencil, Trash2, UserPlus, Search, GraduationCap, NotebookPen } from 'lucide-react';
+import type { User, Group, PartialScores } from '@/types';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, deleteDoc, doc, addDoc, updateDoc, query, where } from 'firebase/firestore';
 import { useAuth } from '@/contexts/AuthContext';
@@ -43,6 +43,7 @@ import {
   FormMessage,
 } from '@/components/ui/form';
 import { Label } from "@/components/ui/label";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 // Schema for student add/edit
 const studentFormSchema = z.object({
@@ -61,20 +62,29 @@ const studentFormSchema = z.object({
 
 type StudentFormValues = z.infer<typeof studentFormSchema>;
 
+const parseOptionalFloat = (val: unknown): number | null | undefined => {
+  if (val === "" || val === undefined || val === null) return null;
+  const num = Number(val);
+  return isNaN(num) ? undefined : num; // Return undefined if NaN to trigger Zod's invalid_type_error
+};
+
+const partialScoresSchema = z.object({
+  acc1: z.preprocess(parseOptionalFloat, z.number().min(0, "Min 0").max(10, "Max 10").optional().nullable()),
+  acc2: z.preprocess(parseOptionalFloat, z.number().min(0, "Min 0").max(10, "Max 10").optional().nullable()),
+  acc3: z.preprocess(parseOptionalFloat, z.number().min(0, "Min 0").max(10, "Max 10").optional().nullable()),
+  acc4: z.preprocess(parseOptionalFloat, z.number().min(0, "Min 0").max(10, "Max 10").optional().nullable()),
+  exam: z.preprocess(parseOptionalFloat, z.number().min(0, "Min 0").max(60, "Max 60").optional().nullable()),
+}).deepPartial().optional(); // .deepPartial() makes all fields within optional, .optional() makes the object itself optional
+
+
 const studentGradeFormSchema = z.object({
-  partial1Grade: z.preprocess(
-    (val) => (val === "" || val === undefined || val === null ? undefined : Number(val)),
-    z.number({ invalid_type_error: "Grade must be a number." }).min(0, "Min 0").max(100, "Max 100").optional()
-  ),
-  partial2Grade: z.preprocess(
-    (val) => (val === "" || val === undefined || val === null ? undefined : Number(val)),
-    z.number({ invalid_type_error: "Grade must be a number." }).min(0, "Min 0").max(100, "Max 100").optional()
-  ),
-  partial3Grade: z.preprocess(
-    (val) => (val === "" || val === undefined || val === null ? undefined : Number(val)),
-    z.number({ invalid_type_error: "Grade must be a number." }).min(0, "Min 0").max(100, "Max 100").optional()
-  ),
+  grades: z.object({
+    partial1: partialScoresSchema,
+    partial2: partialScoresSchema,
+    partial3: partialScoresSchema,
+  }).deepPartial().optional(),
 });
+
 type StudentGradeFormValues = z.infer<typeof studentGradeFormSchema>;
 
 
@@ -102,7 +112,7 @@ export default function StudentManagementPage() {
   const { toast } = useToast();
   const { reauthenticateCurrentUser, authUser } = useAuth();
 
-  const studentForm = useForm<StudentFormValues>({ // Renamed form to studentForm for clarity
+  const studentForm = useForm<StudentFormValues>({
     resolver: zodResolver(studentFormSchema),
     defaultValues: {
       name: '',
@@ -119,9 +129,11 @@ export default function StudentManagementPage() {
   const gradeForm = useForm<StudentGradeFormValues>({
     resolver: zodResolver(studentGradeFormSchema),
     defaultValues: {
-      partial1Grade: undefined,
-      partial2Grade: undefined,
-      partial3Grade: undefined,
+      grades: {
+        partial1: { acc1: null, acc2: null, acc3: null, acc4: null, exam: null },
+        partial2: { acc1: null, acc2: null, acc3: null, acc4: null, exam: null },
+        partial3: { acc1: null, acc2: null, acc3: null, acc4: null, exam: null },
+      }
     },
   });
 
@@ -311,9 +323,11 @@ export default function StudentManagementPage() {
   const handleOpenGradeDialog = (student: User) => {
     setStudentForGrading(student);
     gradeForm.reset({
-        partial1Grade: student.partial1Grade ?? undefined,
-        partial2Grade: student.partial2Grade ?? undefined,
-        partial3Grade: student.partial3Grade ?? undefined,
+      grades: {
+        partial1: student.grades?.partial1 || { acc1: null, acc2: null, acc3: null, acc4: null, exam: null },
+        partial2: student.grades?.partial2 || { acc1: null, acc2: null, acc3: null, acc4: null, exam: null },
+        partial3: student.grades?.partial3 || { acc1: null, acc2: null, acc3: null, acc4: null, exam: null },
+      }
     });
     setIsGradeDialogOpen(true);
   };
@@ -326,15 +340,22 @@ export default function StudentManagementPage() {
     setIsSubmittingGrades(true);
     try {
         const studentRef = doc(db, "users", studentForGrading.id);
+        
+        // Ensure that even if a partial is not touched, its existing data isn't wiped out
+        // Zod schema with .deepPartial().optional() should handle this, but let's be safe
+        const gradesToSave = {
+          partial1: data.grades?.partial1 || studentForGrading.grades?.partial1 || {},
+          partial2: data.grades?.partial2 || studentForGrading.grades?.partial2 || {},
+          partial3: data.grades?.partial3 || studentForGrading.grades?.partial3 || {},
+        };
+
         await updateDoc(studentRef, {
-            partial1Grade: data.partial1Grade ?? null, // Store as null if undefined
-            partial2Grade: data.partial2Grade ?? null,
-            partial3Grade: data.partial3Grade ?? null,
+            grades: gradesToSave
         });
         toast({ title: "Grades Updated", description: `Grades for ${studentForGrading.name} saved successfully.` });
         setIsGradeDialogOpen(false);
         setStudentForGrading(null);
-        await fetchData(); // Refresh data to show updated grades if needed on this page
+        await fetchData(); 
     } catch (error: any) {
         toast({ title: "Grade Update Failed", description: `An error occurred: ${error.message || 'Please try again.'}`, variant: "destructive" });
         console.error("Grade update error:", error);
@@ -343,6 +364,58 @@ export default function StudentManagementPage() {
     }
   };
   
+  const renderGradeInputFields = (partialKey: "partial1" | "partial2" | "partial3") => {
+    const accumulatedFields: (keyof PartialScores)[] = ['acc1', 'acc2', 'acc3', 'acc4'];
+    return (
+      <div className="space-y-3 p-1">
+        {accumulatedFields.map((accKey, index) => (
+          <FormField
+            key={`${partialKey}-${accKey}`}
+            control={gradeForm.control}
+            name={`grades.${partialKey}.${accKey}`}
+            render={({ field }) => (
+              <FormItem className="flex items-center gap-2">
+                <FormLabel className="w-28 whitespace-nowrap">Acumulado {index + 1}</FormLabel>
+                <FormControl>
+                  <Input
+                    type="number"
+                    placeholder="0-10"
+                    {...field}
+                    value={field.value === null ? '' : field.value ?? ''}
+                    onChange={e => field.onChange(parseOptionalFloat(e.target.value))}
+                    className="w-full"
+                  />
+                </FormControl>
+                <FormMessage className="text-xs"/>
+              </FormItem>
+            )}
+          />
+        ))}
+        <FormField
+          control={gradeForm.control}
+          name={`grades.${partialKey}.exam`}
+          render={({ field }) => (
+            <FormItem className="flex items-center gap-2">
+              <FormLabel className="w-28">Examen</FormLabel>
+              <FormControl>
+                <Input
+                  type="number"
+                  placeholder="0-60"
+                  {...field}
+                  value={field.value === null ? '' : field.value ?? ''}
+                  onChange={e => field.onChange(parseOptionalFloat(e.target.value))}
+                  className="w-full"
+                />
+              </FormControl>
+              <FormMessage className="text-xs"/>
+            </FormItem>
+          )}
+        />
+      </div>
+    );
+  };
+
+
   if (isLoading && allStudents.length === 0 && groups.length === 0) {
     return (
       <Card>
@@ -653,84 +726,49 @@ export default function StudentManagementPage() {
         setIsGradeDialogOpen(isOpen);
         if (!isOpen) {
             setStudentForGrading(null);
-            gradeForm.reset({ partial1Grade: undefined, partial2Grade: undefined, partial3Grade: undefined });
+            gradeForm.reset({
+              grades: {
+                partial1: { acc1: null, acc2: null, acc3: null, acc4: null, exam: null },
+                partial2: { acc1: null, acc2: null, acc3: null, acc4: null, exam: null },
+                partial3: { acc1: null, acc2: null, acc3: null, acc4: null, exam: null },
+              }
+            });
         }
     }}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-lg"> {/* Increased max-width for more space */}
             <DialogHeader>
                 <DialogTitle>Registro de Notas: {studentForGrading?.name}</DialogTitle>
                 <DialogDescription>
-                    Enter or update the partial grades for this student. Grades should be between 0 and 100.
+                    Enter or update the detailed grades for this student. Max 10 for accumulated, max 60 for exam per partial.
                 </DialogDescription>
             </DialogHeader>
             <Form {...gradeForm}>
-                <form onSubmit={gradeForm.handleSubmit(handleGradeFormSubmit)} className="space-y-4 py-4">
-                    <FormField
-                        control={gradeForm.control}
-                        name="partial1Grade"
-                        render={({ field }) => (
-                            <FormItem>
-                                <FormLabel>Partial 1 Grade</FormLabel>
-                                <FormControl>
-                                    <Input 
-                                        type="number" 
-                                        placeholder="e.g., 85" 
-                                        {...field} 
-                                        value={field.value ?? ''}
-                                        onChange={e => field.onChange(e.target.value === '' ? undefined : Number(e.target.value))}
-                                    />
-                                </FormControl>
-                                <FormMessage />
-                            </FormItem>
-                        )}
-                    />
-                    <FormField
-                        control={gradeForm.control}
-                        name="partial2Grade"
-                        render={({ field }) => (
-                            <FormItem>
-                                <FormLabel>Partial 2 Grade</FormLabel>
-                                <FormControl>
-                                     <Input 
-                                        type="number" 
-                                        placeholder="e.g., 90" 
-                                        {...field} 
-                                        value={field.value ?? ''}
-                                        onChange={e => field.onChange(e.target.value === '' ? undefined : Number(e.target.value))}
-                                    />
-                                </FormControl>
-                                <FormMessage />
-                            </FormItem>
-                        )}
-                    />
-                    <FormField
-                        control={gradeForm.control}
-                        name="partial3Grade"
-                        render={({ field }) => (
-                            <FormItem>
-                                <FormLabel>Partial 3 Grade</FormLabel>
-                                <FormControl>
-                                     <Input 
-                                        type="number" 
-                                        placeholder="e.g., 75" 
-                                        {...field} 
-                                        value={field.value ?? ''}
-                                        onChange={e => field.onChange(e.target.value === '' ? undefined : Number(e.target.value))}
-                                    />
-                                </FormControl>
-                                <FormMessage />
-                            </FormItem>
-                        )}
-                    />
-                    <DialogFooter>
-                        <DialogClose asChild>
-                            <Button type="button" variant="outline">Cancel</Button>
-                        </DialogClose>
-                        <Button type="submit" disabled={isSubmittingGrades}>
-                            {isSubmittingGrades && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                            Save Grades
-                        </Button>
-                    </DialogFooter>
+                <form onSubmit={gradeForm.handleSubmit(handleGradeFormSubmit)} className="space-y-4 py-4 max-h-[70vh] overflow-y-auto">
+                  <Tabs defaultValue="partial1" className="w-full">
+                    <TabsList className="grid w-full grid-cols-3">
+                      <TabsTrigger value="partial1">1er Parcial</TabsTrigger>
+                      <TabsTrigger value="partial2">2do Parcial</TabsTrigger>
+                      <TabsTrigger value="partial3">3er Parcial</TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="partial1">
+                      {renderGradeInputFields("partial1")}
+                    </TabsContent>
+                    <TabsContent value="partial2">
+                      {renderGradeInputFields("partial2")}
+                    </TabsContent>
+                    <TabsContent value="partial3">
+                      {renderGradeInputFields("partial3")}
+                    </TabsContent>
+                  </Tabs>
+                  <DialogFooter className="pt-6">
+                      <DialogClose asChild>
+                          <Button type="button" variant="outline">Cancel</Button>
+                      </DialogClose>
+                      <Button type="submit" disabled={isSubmittingGrades}>
+                          {isSubmittingGrades && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                          Save Grades
+                      </Button>
+                  </DialogFooter>
                 </form>
             </Form>
         </DialogContent>

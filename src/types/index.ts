@@ -12,9 +12,20 @@ export interface User {
   age?: number; 
   gender?: 'male' | 'female' | 'other'; 
   preferredShift?: 'Saturday' | 'Sunday'; 
-  partial1Grade?: number; // Optional: Grade for partial 1
-  partial2Grade?: number; // Optional: Grade for partial 2
-  partial3Grade?: number; // Optional: Grade for partial 3
+  // Deprecated: partial1Grade, partial2Grade, partial3Grade. Replaced by 'grades' object.
+  grades?: {
+    partial1?: PartialScores;
+    partial2?: PartialScores;
+    partial3?: PartialScores;
+  };
+}
+
+export interface PartialScores {
+  acc1?: number | null; // Accumulated score 1 (max 10)
+  acc2?: number | null; // Accumulated score 2 (max 10)
+  acc3?: number | null; // Accumulated score 3 (max 10)
+  acc4?: number | null; // Accumulated score 4 (max 10)
+  exam?: number | null;   // Exam score (max 60)
 }
 
 export interface Session {
@@ -39,8 +50,7 @@ export interface Group {
   name: string;
   type: 'Saturday' | 'Sunday';
   startDate: string; // ISO Date string
-  endDate?: string; // ISO Date string, optional
+  endDate?: string | null; // ISO Date string, optional
   studentIds: string[];
-  teacherId?: string; // ID of the assigned teacher
+  teacherId?: string | null; // ID of the assigned teacher
 }
-
