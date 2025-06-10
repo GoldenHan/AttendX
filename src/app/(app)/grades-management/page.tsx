@@ -5,11 +5,10 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Loader2, Save, UserCircle } from 'lucide-react';
+import { Loader2, Save, UserCircle, ClipboardCheck } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { db } from '@/lib/firebase';
 import { collection, doc, getDocs, getDoc, updateDoc, query, where } from 'firebase/firestore';
@@ -58,7 +57,7 @@ export default function GradesManagementPage() {
 
   const [students, setStudents] = useState<User[]>([]);
   const [selectedStudent, setSelectedStudent] = useState<User | null>(null);
-  const [isLoadingData, setIsLoadingData] = useState(true); // Combined loading state
+  const [isLoadingData, setIsLoadingData] = useState(true); 
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const form = useForm<StudentGradeFormValues>({
@@ -83,12 +82,10 @@ export default function GradesManagementPage() {
 
       const studentIdFromParams = searchParams.get('studentId');
       if (studentIdFromParams) {
-        form.setValue('studentId', studentIdFromParams); // Set studentId for the form
-        // Find and set student for displaying grades
+        form.setValue('studentId', studentIdFromParams); 
         const preselectedStudent = studentList.find(s => s.id === studentIdFromParams);
         if (preselectedStudent) {
-          setSelectedStudent(preselectedStudent); // For UI display
-          // Reset form with preselected student's grades
+          setSelectedStudent(preselectedStudent); 
           form.reset({
             studentId: preselectedStudent.id,
             grades: {
@@ -99,7 +96,7 @@ export default function GradesManagementPage() {
           });
         } else {
           toast({ title: 'Error', description: 'Student from URL not found.', variant: 'destructive' });
-          router.push('/grades-management'); // Clear invalid studentId from URL
+          router.push('/grades-management'); 
         }
       }
     } catch (error) {
@@ -124,11 +121,11 @@ export default function GradesManagementPage() {
           partial3: { acc1: null, acc2: null, acc3: null, acc4: null, exam: null },
         }
       });
-      router.push('/grades-management'); // Clear studentId from URL
+      router.push('/grades-management'); 
       return;
     }
 
-    form.setValue('studentId', studentId); // Update form state
+    form.setValue('studentId', studentId); 
     setIsLoadingData(true);
     const studentDocRef = doc(db, 'users', studentId);
     try {
@@ -136,7 +133,7 @@ export default function GradesManagementPage() {
       if (studentDocSnapshot.exists()) {
         const studentData = { id: studentDocSnapshot.id, ...studentDocSnapshot.data() } as User;
         setSelectedStudent(studentData);
-        form.reset({ // Reset form with selected student's grades
+        form.reset({ 
           studentId: studentData.id,
           grades: {
             partial1: studentData.grades?.partial1 || { acc1: null, acc2: null, acc3: null, acc4: null, exam: null },
@@ -158,7 +155,7 @@ export default function GradesManagementPage() {
   };
 
   const onSubmit = async (data: StudentGradeFormValues) => {
-    if (!data.studentId || !selectedStudent) { // Ensure selectedStudent matches form's studentId logic
+    if (!data.studentId || !selectedStudent) { 
       toast({ title: "Error", description: "No student selected or student ID missing.", variant: "destructive" });
       return;
     }
@@ -174,7 +171,6 @@ export default function GradesManagementPage() {
       });
       toast({ title: "Grades Updated", description: `Grades for ${selectedStudent.name} saved successfully.` });
       
-      // Optimistically update local state for selectedStudent
       const updatedGrades = {
         partial1: data.grades?.partial1,
         partial2: data.grades?.partial2,
@@ -183,7 +179,6 @@ export default function GradesManagementPage() {
       const updatedSelectedStudent = { ...selectedStudent, grades: updatedGrades };
       setSelectedStudent(updatedSelectedStudent);
 
-      // Update the main students list as well
       setStudents(prevStudents => prevStudents.map(s => s.id === data.studentId ? updatedSelectedStudent : s));
 
     } catch (error: any) {
@@ -251,78 +246,76 @@ export default function GradesManagementPage() {
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          <UserCircle className="h-6 w-6 text-primary" />
+          <ClipboardCheck className="h-6 w-6 text-primary" />
           Grades Management
         </CardTitle>
         <CardDescription>Select a student to view or edit their grades for each partial.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
-        <FormField
-            control={form.control}
-            name="studentId"
-            render={({ field }) => (
-                <FormItem>
-                    <FormLabel>Select Student</FormLabel>
-                    <Select
-                        onValueChange={(value) => {
-                           // field.onChange is already handled by react-hook-form's Controller.
-                           // Direct call to handleStudentSelect will ensure UI updates and form sync.
-                            handleStudentSelect(value);
-                        }}
-                        value={field.value} // Ensure this reflects the RHF state
-                        disabled={isLoadingData || students.length === 0}
-                    >
-                        <FormControl>
-                        <SelectTrigger>
-                            <SelectValue placeholder={isLoadingData && !students.length ? "Loading students..." : "Select a student"} />
-                        </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                        {students.map((student) => (
-                            <SelectItem key={student.id} value={student.id}>
-                            {student.name}
-                            </SelectItem>
-                        ))}
-                        </SelectContent>
-                    </Select>
-                    <FormMessage />
-                </FormItem>
-            )}
-        />
+        <Form {...form}> {/* FormProvider now wraps student selection and grade form */}
+          <FormField
+              control={form.control}
+              name="studentId"
+              render={({ field }) => (
+                  <FormItem>
+                      <FormLabel>Select Student</FormLabel>
+                      <Select
+                          onValueChange={(value) => {
+                              handleStudentSelect(value);
+                          }}
+                          value={field.value} 
+                          disabled={isLoadingData || students.length === 0}
+                      >
+                          <FormControl>
+                          <SelectTrigger>
+                              <SelectValue placeholder={isLoadingData && !students.length ? "Loading students..." : "Select a student"} />
+                          </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                          {students.map((student) => (
+                              <SelectItem key={student.id} value={student.id}>
+                              {student.name}
+                              </SelectItem>
+                          ))}
+                          </SelectContent>
+                      </Select>
+                      <FormMessage />
+                  </FormItem>
+              )}
+          />
 
-        {isLoadingData && form.getValues("studentId") && ( // Show loader if studentId is set and data is loading
-          <div className="flex items-center justify-center py-6">
-            <Loader2 className="mr-2 h-6 w-6 animate-spin" />
-            <span>Loading student grades...</span>
-          </div>
-        )}
+          {isLoadingData && form.getValues("studentId") && ( 
+            <div className="flex items-center justify-center py-6">
+              <Loader2 className="mr-2 h-6 w-6 animate-spin" />
+              <span>Loading student grades...</span>
+            </div>
+          )}
 
-        {selectedStudent && !isLoadingData && (
-          <Form {...form}> {/* Ensure FormProvider wraps the form */}
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-              <Tabs defaultValue="partial1" className="w-full">
-                <TabsList className="grid w-full grid-cols-3">
-                  <TabsTrigger value="partial1">1er Parcial</TabsTrigger>
-                  <TabsTrigger value="partial2">2do Parcial</TabsTrigger>
-                  <TabsTrigger value="partial3">3er Parcial</TabsTrigger>
-                </TabsList>
-                <TabsContent value="partial1" className="border p-4 rounded-b-md">
-                  {renderGradeInputFields("partial1")}
-                </TabsContent>
-                <TabsContent value="partial2" className="border p-4 rounded-b-md">
-                  {renderGradeInputFields("partial2")}
-                </TabsContent>
-                <TabsContent value="partial3" className="border p-4 rounded-b-md">
-                  {renderGradeInputFields("partial3")}
-                </TabsContent>
-              </Tabs>
-              <Button type="submit" disabled={isSubmitting || !selectedStudent || isLoadingData} className="w-full sm:w-auto">
-                {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                <Save className="mr-2 h-4 w-4" /> Save Grades for {selectedStudent.name}
-              </Button>
-            </form>
-          </Form>
-        )}
+          {selectedStudent && !isLoadingData && (
+              <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+                <Tabs defaultValue="partial1" className="w-full">
+                  <TabsList className="grid w-full grid-cols-3">
+                    <TabsTrigger value="partial1">1er Parcial</TabsTrigger>
+                    <TabsTrigger value="partial2">2do Parcial</TabsTrigger>
+                    <TabsTrigger value="partial3">3er Parcial</TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="partial1" className="border p-4 rounded-b-md">
+                    {renderGradeInputFields("partial1")}
+                  </TabsContent>
+                  <TabsContent value="partial2" className="border p-4 rounded-b-md">
+                    {renderGradeInputFields("partial2")}
+                  </TabsContent>
+                  <TabsContent value="partial3" className="border p-4 rounded-b-md">
+                    {renderGradeInputFields("partial3")}
+                  </TabsContent>
+                </Tabs>
+                <Button type="submit" disabled={isSubmitting || !selectedStudent || isLoadingData} className="w-full sm:w-auto">
+                  {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  <Save className="mr-2 h-4 w-4" /> Save Grades for {selectedStudent.name}
+                </Button>
+              </form>
+          )}
+        </Form>
          {!selectedStudent && !isLoadingData && (
             <p className="text-muted-foreground text-center py-6">
                 Please select a student to manage their grades.
@@ -332,3 +325,4 @@ export default function GradesManagementPage() {
     </Card>
   );
 }
+
