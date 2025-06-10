@@ -56,13 +56,15 @@ type GroupFormValues = z.infer<typeof groupFormSchema>;
 
 export default function GroupManagementPage() {
   const [groups, setGroups] = useState<Group[]>([]);
-  const [allStudents, setAllStudents] = useState<User[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingGroups, setIsLoadingGroups] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isAddGroupDialogOpen, setIsAddGroupDialogOpen] = useState(false);
+  
   const [isManageStudentsDialogOpen, setIsManageStudentsDialogOpen] = useState(false);
   const [selectedGroupForStudentManagement, setSelectedGroupForStudentManagement] = useState<Group | null>(null);
   const [selectedStudentIdsForGroup, setSelectedStudentIdsForGroup] = useState<string[]>([]);
+  const [studentsForDialog, setStudentsForDialog] = useState<User[]>([]);
+  const [isLoadingStudentsForDialog, setIsLoadingStudentsForDialog] = useState(false);
 
   const { toast } = useToast();
 
@@ -76,26 +78,21 @@ export default function GroupManagementPage() {
     },
   });
 
-  const fetchGroupsAndStudents = async () => {
-    setIsLoading(true);
+  const fetchGroups = async () => {
+    setIsLoadingGroups(true);
     try {
       const groupsSnapshot = await getDocs(collection(db, 'groups'));
-      setGroups(groupsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Group)));
-
-      const studentQuery = query(collection(db, 'users'), where('role', '==', 'student'));
-      const studentsSnapshot = await getDocs(studentQuery);
-      setAllStudents(studentsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as User)));
-
+      setGroups(groupsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as Group)));
     } catch (error) {
-      console.error("Error fetching data:", error);
-      toast({ title: 'Error fetching data', description: 'Could not load groups or students from Firestore.', variant: 'destructive' });
+      console.error("Error fetching groups:", error);
+      toast({ title: 'Error fetching groups', description: 'Could not load groups from Firestore.', variant: 'destructive' });
     } finally {
-      setIsLoading(false);
+      setIsLoadingGroups(false);
     }
   };
 
   useEffect(() => {
-    fetchGroupsAndStudents();
+    fetchGroups();
   }, []);
 
   const handleAddGroupSubmit = async (data: GroupFormValues) => {
@@ -106,13 +103,13 @@ export default function GroupManagementPage() {
         type: data.type,
         startDate: data.startDate.toISOString(),
         endDate: data.endDate ? data.endDate.toISOString() : undefined,
-        studentIds: [], // Ensure studentIds is initialized as an empty array
+        studentIds: [],
       };
       await addDoc(collection(db, 'groups'), newGroupData);
       toast({ title: 'Group Created', description: `${data.name} created successfully.` });
       form.reset();
       setIsAddGroupDialogOpen(false);
-      await fetchGroupsAndStudents();
+      await fetchGroups();
     } catch (error) {
       console.error("Error adding group:", error);
       toast({ title: 'Create Group Failed', description: 'Could not create the group.', variant: 'destructive' });
@@ -126,7 +123,7 @@ export default function GroupManagementPage() {
     try {
       await deleteDoc(doc(db, 'groups', groupId));
       toast({ title: 'Group Deleted', description: `Group "${groupName}" removed successfully.` });
-      await fetchGroupsAndStudents();
+      await fetchGroups();
     } catch (error)      {
       console.error("Error deleting group:", error);
       toast({ title: 'Delete Failed', description: 'Could not delete the group.', variant: 'destructive' });
@@ -137,11 +134,23 @@ export default function GroupManagementPage() {
     toast({ title: 'Not Implemented', description: `Edit functionality for "${group.name}" will be added soon.` });
   };
 
-  const openManageStudentsDialog = (group: Group) => {
+  const openManageStudentsDialog = async (group: Group) => {
     setSelectedGroupForStudentManagement(group);
-    // Defensively handle group.studentIds in case it's not an array
     setSelectedStudentIdsForGroup(Array.isArray(group.studentIds) ? [...group.studentIds] : []);
     setIsManageStudentsDialogOpen(true);
+    
+    setIsLoadingStudentsForDialog(true);
+    setStudentsForDialog([]); // Clear previous students
+    try {
+      const studentQuery = query(collection(db, 'users'), where('role', '==', 'student'));
+      const studentsSnapshot = await getDocs(studentQuery);
+      setStudentsForDialog(studentsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as User)));
+    } catch (error) {
+      console.error("Error fetching students for dialog:", error);
+      toast({ title: 'Error fetching students', description: 'Could not load students for the dialog.', variant: 'destructive' });
+    } finally {
+      setIsLoadingStudentsForDialog(false);
+    }
   };
 
   const handleStudentSelectionChange = (studentId: string, checked: boolean) => {
@@ -159,7 +168,7 @@ export default function GroupManagementPage() {
       toast({ title: 'Students Updated', description: `Student assignments for group "${selectedGroupForStudentManagement.name}" updated.` });
       setIsManageStudentsDialogOpen(false);
       setSelectedGroupForStudentManagement(null);
-      await fetchGroupsAndStudents(); 
+      await fetchGroups(); 
     } catch (error) {
       console.error("Error updating students in group:", error);
       toast({ title: 'Update Failed', description: 'Could not update student assignments.', variant: 'destructive' });
@@ -174,7 +183,7 @@ export default function GroupManagementPage() {
     return isValid(date) ? format(date, 'PPP') : 'Invalid Date';
   };
 
-  if (isLoading && groups.length === 0) {
+  if (isLoadingGroups && groups.length === 0) {
     return (
       <Card>
         <CardHeader>
@@ -183,7 +192,7 @@ export default function GroupManagementPage() {
         </CardHeader>
         <CardContent className="flex items-center justify-center py-10">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
-          <p className="ml-2">Loading groups and students...</p>
+          <p className="ml-2">Loading groups...</p>
         </CardContent>
       </Card>
     );
@@ -335,13 +344,13 @@ export default function GroupManagementPage() {
           </Dialog>
         </CardHeader>
         <CardContent>
-          {isLoading && groups.length > 0 && (
+          {isLoadingGroups && groups.length > 0 && (
             <div className="flex items-center justify-center py-4">
               <Loader2 className="h-6 w-6 animate-spin text-primary" />
               <p className="ml-2 text-sm text-muted-foreground">Refreshing groups...</p>
             </div>
           )}
-          {groups.length === 0 && !isLoading ? (
+          {groups.length === 0 && !isLoadingGroups ? (
             <div className="text-center py-10">
               <p className="text-muted-foreground">No groups found. Get started by adding a new group.</p>
             </div>
@@ -392,6 +401,7 @@ export default function GroupManagementPage() {
         if (!isOpen) {
           setSelectedGroupForStudentManagement(null);
           setSelectedStudentIdsForGroup([]);
+          setStudentsForDialog([]); // Clear students when dialog closes
         }
       }}>
         <DialogContent className="sm:max-w-md">
@@ -401,28 +411,35 @@ export default function GroupManagementPage() {
               Select students to add or remove from this group.
             </DialogDescription>
           </DialogHeader>
-          <div className="py-4 space-y-2 max-h-60 overflow-y-auto">
-            {allStudents.length === 0 && <p className="text-sm text-muted-foreground">No students found to add.</p>}
-            {allStudents.map(student => (
-              <div key={student.id} className="flex items-center space-x-2">
-                <Checkbox
-                  id={`student-${student.id}`}
-                  checked={selectedStudentIdsForGroup.includes(student.id)}
-                  onCheckedChange={(checked) => handleStudentSelectionChange(student.id, !!checked)}
-                />
-                <Label htmlFor={`student-${student.id}`} className="font-normal">
-                  {student.name}
-                </Label>
-              </div>
-            ))}
-          </div>
+          {isLoadingStudentsForDialog ? (
+            <div className="flex items-center justify-center py-10">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              <p className="ml-2">Loading students...</p>
+            </div>
+          ) : (
+            <div className="py-4 space-y-2 max-h-60 overflow-y-auto">
+              {studentsForDialog.length === 0 && <p className="text-sm text-muted-foreground">No students found to add.</p>}
+              {studentsForDialog.map(student => (
+                <div key={student.id} className="flex items-center space-x-2">
+                  <Checkbox
+                    id={`student-${student.id}`}
+                    checked={selectedStudentIdsForGroup.includes(student.id)}
+                    onCheckedChange={(checked) => handleStudentSelectionChange(student.id, !!checked)}
+                  />
+                  <Label htmlFor={`student-${student.id}`} className="font-normal">
+                    {student.name}
+                  </Label>
+                </div>
+              ))}
+            </div>
+          )}
           <DialogFooter>
             <DialogClose asChild>
               <Button type="button" variant="outline">
                 Cancel
               </Button>
             </DialogClose>
-            <Button type="button" onClick={handleSaveStudentAssignments} disabled={isSubmitting}>
+            <Button type="button" onClick={handleSaveStudentAssignments} disabled={isSubmitting || isLoadingStudentsForDialog}>
               {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Save Changes
             </Button>
