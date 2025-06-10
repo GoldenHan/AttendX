@@ -22,7 +22,7 @@ export function Header() {
   };
 
   return (
-    <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b border-primary/60 bg-primary px-4 text-primary-foreground sm:static sm:h-auto sm:px-6 py-2">
+    <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b border-border bg-primary px-4 text-primary-foreground sm:static sm:h-auto sm:px-6 py-2">
       <SidebarTrigger className="text-primary-foreground md:hidden" />
       <div className="flex items-center gap-2">
         {/* SheetIcon refers to lucide-react Sheet icon */}

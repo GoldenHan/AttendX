@@ -4,7 +4,7 @@
 
 @layer base {
   :root {
-    /* Light Mode - Inspirado en la imagen del usuario */
+    /* Light Mode - Azul y Amarillo (según la imagen de referencia del usuario) */
     --background: 220 20% 97%; /* Un gris azulado muy claro, casi blanco */
     --foreground: 220 25% 25%; /* Texto principal - azul oscuro grisáceo */
 
@@ -25,7 +25,7 @@
     --muted: 220 15% 90%; /* Fondo atenuado - gris azulado claro */
     --muted-foreground: 220 10% 45%; /* Texto atenuado */
 
-    /* Similar al amarillo de acento pero podría ser un tono diferente si es necesario */
+    /* Amarillo de acento */
     --accent: 45 95% 55%;
     --accent-foreground: 220 25% 25%;
 
@@ -33,7 +33,7 @@
     --destructive-foreground: 0 0% 98%; /* Texto claro */
 
     --border: 220 15% 85%; /* Bordes - gris azulado */
-    --input: 0 0% 100%; /* Campos de entrada blancos */
+    --input: 220 15% 94%; /* Campos de entrada - gris muy claro, ligeramente diferente del fondo principal */
     --ring: 217 75% 55%; /* Anillo de enfoque azul primario */
 
     --radius: 0.5rem; /* Radio de bordes */

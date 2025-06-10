@@ -73,14 +73,14 @@ export function SidebarNav() {
     <SidebarMenuItem key={item.href}>
       <Link href={item.href}>
         <SidebarMenuButton
-          variant="ghost"
+          // variant prop is not directly used here for custom hover, styling is via cn
           className={cn(
             'w-full justify-start',
             pathname === item.href
-              ? 'bg-sidebar-accent text-sidebar-accent-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
-              : 'hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground'
+              ? 'bg-sidebar-accent text-sidebar-accent-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground' // Active item
+              : 'text-sidebar-foreground hover:bg-muted/30 hover:text-sidebar-foreground' // Non-active item with new hover
           )}
-          isActive={pathname === item.href}
+          isActive={pathname === item.href} // isActive is passed for data-active attribute
           tooltip={{ children: item.label }}
         >
           <item.icon className="mr-2 h-4 w-4" />
