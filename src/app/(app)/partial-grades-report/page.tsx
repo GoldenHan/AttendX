@@ -15,7 +15,7 @@ import type { User, PartialScores, ActivityScore, ExamScore, Group, GradingConfi
 import { DEFAULT_GRADING_CONFIG } from '@/types';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, query, doc, getDoc } from 'firebase/firestore';
-import { Loader2, ClipboardList, NotebookPen, AlertTriangle, Download } from 'lucide-react';
+import { Loader2, ClipboardList, NotebookPen, AlertTriangle, Download, FileText } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -28,7 +28,6 @@ import {
 } from "@/components/ui/tooltip";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
-import * as XLSX from 'xlsx';
 
 const MAX_ACCUMULATED_ACTIVITIES_DISPLAY = 5;
 
@@ -235,139 +234,122 @@ export default function PartialGradesReportPage() {
     }
     return cells;
   };
+  
+  const getScoreForHTML = (scoreValue?: number | null, isTotal: boolean = false, isFinalGrade: boolean = false) => {
+    if (typeof scoreValue === 'number') {
+      if (isFinalGrade || (isTotal && scoreValue % 1 !== 0)) {
+        return scoreValue.toFixed(isFinalGrade ? 2 : 1);
+      }
+      return scoreValue.toFixed(0);
+    }
+    return 'N/A';
+  };
 
-  const handleExportToXLSX = () => {
+  const getScoreCellStyle = (scoreValue?: number | null, isTotal: boolean = false, isFinalGrade: boolean = false) => {
+    let style = 'text-align: center; padding: 4px; border: 1px solid #e2e8f0;'; // 기본 스타일 (tailwind border-gray-300)
+    if (typeof scoreValue !== 'number') {
+      style += 'background-color: #f3f4f6; color: #6b7280;'; // gray-100 text-gray-500
+    } else if (isTotal || isFinalGrade) {
+      style += scoreValue >= gradingConfig.passingGrade
+        ? 'background-color: #d1fae5; color: #065f46;' // green-100 text-green-700
+        : 'background-color: #fee2e2; color: #991b1b;'; // red-100 text-red-700
+    } else {
+      style += 'background-color: #dbeafe; color: #1d4ed8;'; // blue-100 text-blue-700
+    }
+    return style;
+  };
+
+
+  const handleExportToHTML = () => {
     if (isLoading || studentsToDisplayInTable.length === 0) {
       toast({ title: "No data to export", description: "Please filter to display some students or wait for data to load.", variant: "default" });
       return;
     }
-  
-    const worksheet = XLSX.utils.aoa_to_sheet([]); 
-    const merges: XLSX.Range[] = [];
+
     const numPartials = gradingConfig.numberOfPartials;
-    const colsPerPartial = MAX_ACCUMULATED_ACTIVITIES_DISPLAY + 2; 
-    let currentRowIndex = 0;
-  
-    const headerStyle1 = { font: { bold: true }, fill: { fgColor: { rgb: "FFDDEEFF" } }, alignment: { horizontal: "center", vertical: "center" } }; 
-    const headerStyle2 = { font: { bold: true }, fill: { fgColor: { rgb: "FFE0E0E0" } }, alignment: { horizontal: "center", vertical: "center" } }; 
-    const boldStyle = { font: { bold: true }, alignment: { horizontal: "center", vertical: "center" } };
-  
-    const setCell = (r: number, c: number, value: string | number | null, style?: any, type: 's' | 'n' = 's') => {
-      const cellRef = XLSX.utils.encode_cell({ r, c });
-      if (!worksheet[cellRef]) worksheet[cellRef] = {};
-      worksheet[cellRef].v = value === null ? "" : value;
-      worksheet[cellRef].t = type;
-      if (style) {
-        worksheet[cellRef].s = style;
+    let htmlString = `
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Reporte de Notas Parciales</title>
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif; margin: 20px; background-color: #f9fafb; color: #1f2937; }
+          table { border-collapse: collapse; width: 100%; font-size: 0.875rem; box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06); background-color: white; }
+          th, td { border: 1px solid #e5e7eb; padding: 8px 10px; text-align: left; }
+          th { background-color: #f3f4f6; font-weight: 600; }
+          .header-partial-1 { background-color: #fef9c3; color: #713f12; } /* yellow-100 text-yellow-800 */
+          .header-partial-2 { background-color: #dcfce7; color: #14532d; } /* green-100 text-green-800 */
+          .header-partial-3 { background-color: #ffedd5; color: #7c2d12; } /* orange-100 text-orange-800 */
+          .header-partial-4 { background-color: #ede9fe; color: #5b21b6; } /* purple-100 text-purple-800 */
+          .header-final-grade { background-color: #dbeafe; color: #1e3a8a; } /* blue-100 text-blue-800 */
+          .text-center { text-align: center; }
+          .font-bold { font-weight: bold; }
+          .whitespace-nowrap { white-space: nowrap; }
+          .sticky-col { position: sticky; left: 0; background-color: white; z-index: 10; }
+          .sticky-col-action { position: sticky; left: 150px; background-color: white; z-index: 10; } /* Estimate for name column width */
+        </style>
+      </head>
+      <body>
+        <h2>Reporte de Notas Parciales</h2>
+        <p>Configuración: ${numPartials} parciales, Aprobación con ${gradingConfig.passingGrade}pts.</p>
+        <table>
+          <thead>
+            <tr>
+              <th rowspan="2" class="sticky-col">Nombre del Estudiante</th>
+    `;
+
+    for (let i = 1; i <= numPartials; i++) {
+      const partialHeaderClass = `header-partial-${i > 4 ? 4 : i}`; // Cycle colors if more than 4
+      htmlString += `<th colspan="${MAX_ACCUMULATED_ACTIVITIES_DISPLAY + 2}" class="text-center ${partialHeaderClass}">${i}${i === 1 ? 'er' : i === 2 ? 'do' : i === 3 ? 'er' : 'to'} Parcial</th>`;
+    }
+    htmlString += `<th rowspan="2" class="text-center header-final-grade">Nota Final</th></tr><tr>`;
+
+    for (let pNum = 1; pNum <= numPartials; pNum++) {
+      const partialHeaderClass = `header-partial-${pNum > 4 ? 4 : pNum}`;
+      for (let i = 0; i < MAX_ACCUMULATED_ACTIVITIES_DISPLAY; i++) {
+        htmlString += `<th class="text-center text-xs whitespace-nowrap ${partialHeaderClass}">Ac. ${i + 1}</th>`;
       }
-    };
-    
-    let currentCellIndex = 0;
-    setCell(currentRowIndex, currentCellIndex++, "", boldStyle); // Placeholder A1
-    setCell(currentRowIndex, currentCellIndex++, "", boldStyle); // Placeholder B1
-
-    for (let i = 1; i <= numPartials; i++) {
-      const pName = `${i}${i === 1 ? 'er' : i === 2 ? 'do' : i === 3 ? 'er' : 'to'} Parcial`;
-      setCell(currentRowIndex, currentCellIndex, pName, headerStyle1);
-      merges.push({ s: { r: currentRowIndex, c: currentCellIndex }, e: { r: currentRowIndex, c: currentCellIndex + colsPerPartial - 1 } });
-      for (let j = 1; j < colsPerPartial; j++) setCell(currentRowIndex, currentCellIndex + j, "", headerStyle1); 
-      currentCellIndex += colsPerPartial;
+      htmlString += `<th class="text-center text-xs whitespace-nowrap ${partialHeaderClass}">Examen</th>`;
+      htmlString += `<th class="text-center font-bold text-xs whitespace-nowrap ${partialHeaderClass}">Total Parcial</th>`;
     }
-    setCell(currentRowIndex, currentCellIndex, "Nota Final", headerStyle1);
-    currentRowIndex++;
-  
-    currentCellIndex = 0;
-    setCell(currentRowIndex, currentCellIndex++, "Nombres", headerStyle2);
-    setCell(currentRowIndex, currentCellIndex++, "Teléfono", headerStyle2);
-    for (let i = 1; i <= numPartials; i++) {
-      setCell(currentRowIndex, currentCellIndex, "Acumulado", headerStyle2);
-      merges.push({ s: { r: currentRowIndex, c: currentCellIndex }, e: { r: currentRowIndex, c: currentCellIndex + MAX_ACCUMULATED_ACTIVITIES_DISPLAY - 1 } });
-      for (let j = 1; j < MAX_ACCUMULATED_ACTIVITIES_DISPLAY; j++) setCell(currentRowIndex, currentCellIndex + j, "", headerStyle2);
-      currentCellIndex += MAX_ACCUMULATED_ACTIVITIES_DISPLAY;
-      setCell(currentRowIndex, currentCellIndex++, "Examen", headerStyle2);
-      setCell(currentRowIndex, currentCellIndex++, "Nota Parcial", headerStyle2);
-    }
-    setCell(currentRowIndex, currentCellIndex, "NF", headerStyle2);
-    currentRowIndex++;
+    htmlString += `</thead><tbody>`;
 
-    currentCellIndex = 0;
-    setCell(currentRowIndex, currentCellIndex++, "Evaluación", boldStyle);
-    setCell(currentRowIndex, currentCellIndex++, "", boldStyle); 
-    for (let i = 1; i <= numPartials; i++) {
-      for (let j = 1; j <= MAX_ACCUMULATED_ACTIVITIES_DISPLAY; j++) {
-        setCell(currentRowIndex, currentCellIndex++, `Act. ${j}`, boldStyle);
-      }
-      setCell(currentRowIndex, currentCellIndex++, "Examen", boldStyle); 
-      setCell(currentRowIndex, currentCellIndex++, `${i}${i === 1 ? 'st' : i === 2 ? 'nd' : i === 3 ? 'rd' : 'th'}`, boldStyle); 
-    }
-    setCell(currentRowIndex, currentCellIndex++, "", boldStyle); 
-    currentRowIndex++;
-
-    currentCellIndex = 0;
-    setCell(currentRowIndex, currentCellIndex++, "Puntuación", boldStyle);
-    setCell(currentRowIndex, currentCellIndex++, "", boldStyle); 
-    for (let i = 1; i <= numPartials; i++) {
-      for (let j = 1; j <= MAX_ACCUMULATED_ACTIVITIES_DISPLAY; j++) {
-        setCell(currentRowIndex, currentCellIndex++, gradingConfig.maxIndividualActivityScore, boldStyle, 'n');
-      }
-      setCell(currentRowIndex, currentCellIndex++, gradingConfig.maxExamScore, boldStyle, 'n');
-      setCell(currentRowIndex, currentCellIndex++, gradingConfig.maxTotalAccumulatedScore + gradingConfig.maxExamScore, boldStyle, 'n');
-    }
-    setCell(currentRowIndex, currentCellIndex++, 100, boldStyle, 'n'); 
-    
-    const totalHeaderRows = currentRowIndex + 1;
-
-
-    const studentDataRows: (string | number | null)[][] = studentsToDisplayInTable.map(student => {
-      const studentRow: (string | number | null)[] = [student.name, student.phoneNumber || null];
+    studentsToDisplayInTable.forEach(student => {
+      htmlString += `<tr><td class="font-medium whitespace-nowrap sticky-col">${student.name}</td>`;
       for (let i = 1; i <= numPartials; i++) {
         const partialKey = `partial${i}` as keyof User['grades'];
         const partialData = student.grades?.[partialKey];
         
         for (let j = 0; j < MAX_ACCUMULATED_ACTIVITIES_DISPLAY; j++) {
-          studentRow.push(partialData?.accumulatedActivities?.[j]?.score ?? null);
+          const activity = partialData?.accumulatedActivities?.[j];
+          htmlString += `<td style="${getScoreCellStyle(activity?.score)}">${getScoreForHTML(activity?.score)}</td>`;
         }
-        studentRow.push(partialData?.exam?.score ?? null);
+        htmlString += `<td style="${getScoreCellStyle(partialData?.exam?.score)}">${getScoreForHTML(partialData?.exam?.score)}</td>`;
         const partialTotalKey = `calculatedPartial${i}Total` as keyof StudentWithDetailedGrades;
-        studentRow.push((student as any)[partialTotalKey] ?? null);
+        const studentPartialTotal = (student as any)[partialTotalKey];
+        htmlString += `<td style="${getScoreCellStyle(studentPartialTotal, true)}" class="font-bold">${getScoreForHTML(studentPartialTotal, true)}</td>`;
       }
-      studentRow.push(student.calculatedFinalGrade !== null && student.calculatedFinalGrade !== undefined ? parseFloat(student.calculatedFinalGrade.toFixed(2)) : null);
-      return studentRow;
+      htmlString += `<td style="${getScoreCellStyle(student.calculatedFinalGrade, false, true)}" class="font-bold">${getScoreForHTML(student.calculatedFinalGrade, false, true)}</td></tr>`;
     });
-    
-    XLSX.utils.sheet_add_aoa(worksheet, studentDataRows, { origin: {r: totalHeaderRows, c: 0}, cellStyles: false });
 
-    worksheet['!merges'] = merges;
-    
-    const finalTotalCols = 2 + numPartials * (MAX_ACCUMULATED_ACTIVITIES_DISPLAY + 2) + 1;
-    const colWidths = [];
-    for (let C = 0; C < finalTotalCols; ++C) {
-      let max_w = 0;
-      for (let R = 0; R < totalHeaderRows + studentDataRows.length; ++R) {
-        const cell_ref = XLSX.utils.encode_cell({c:C, r:R});
-        if(worksheet[cell_ref] && worksheet[cell_ref].v !== null && worksheet[cell_ref].v !== undefined) {
-          const cell_val_str = String(worksheet[cell_ref].v);
-          if(cell_val_str.length > max_w) max_w = cell_val_str.length;
-        }
-      }
-      colWidths.push({wch: Math.min(Math.max(10, max_w + 2), 50)}); // Min width 10, max 50, add padding
-    }
-    worksheet['!cols'] = colWidths;
-    
-    const endCellRef = XLSX.utils.encode_cell({r: totalHeaderRows + studentDataRows.length -1, c: finalTotalCols -1});
-    worksheet['!ref'] = XLSX.utils.encode_range({s: {r:0, c:0}, e: XLSX.utils.decode_cell(endCellRef)});
+    htmlString += `</tbody></table></body></html>`;
 
-
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Reporte Notas Parciales");
-  
-    const today = new Date().toISOString().split('T')[0];
     try {
-      XLSX.writeFile(workbook, `Reporte_Notas_Parciales_${today}.xlsx`);
-      toast({ title: "Export Successful", description: "Report exported to XLSX with template structure and basic styles." });
+      const blob = new Blob([htmlString], { type: 'text/html' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      const today = new Date().toISOString().split('T')[0];
+      link.download = `Reporte_Notas_Parciales_${today}.html`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(link.href);
+      toast({ title: "Exportación Exitosa", description: "Reporte de notas exportado como archivo HTML." });
     } catch (error) {
-      console.error("Error exporting to XLSX:", error);
-      toast({ title: "Export Failed", description: "Could not generate the XLSX file.", variant: "destructive" });
+      console.error("Error exporting to HTML:", error);
+      toast({ title: "Exportación Fallida", description: "No se pudo generar el archivo HTML.", variant: "destructive" });
     }
   };
   
@@ -394,9 +376,9 @@ export default function PartialGradesReportPage() {
         key={`main-header-p${i}`} 
         colSpan={MAX_ACCUMULATED_ACTIVITIES_DISPLAY + 2} 
         className={`text-center py-2 sticky top-0 z-20 ${
-          i === 1 ? 'bg-yellow-100 dark:bg-yellow-800/50 text-yellow-800 dark:text-yellow-200' :
-          i === 2 ? 'bg-green-100 dark:bg-green-800/50 text-green-800 dark:text-green-200' :
-          i === 3 ? 'bg-orange-100 dark:bg-orange-800/50 text-orange-800 dark:text-orange-200' :
+          i % 4 === 1 ? 'bg-yellow-100 dark:bg-yellow-800/50 text-yellow-800 dark:text-yellow-200' :
+          i % 4 === 2 ? 'bg-green-100 dark:bg-green-800/50 text-green-800 dark:text-green-200' :
+          i % 4 === 3 ? 'bg-orange-100 dark:bg-orange-800/50 text-orange-800 dark:text-orange-200' :
           'bg-purple-100 dark:bg-purple-800/50 text-purple-800 dark:text-purple-200'
         }`}
       >
@@ -410,31 +392,31 @@ export default function PartialGradesReportPage() {
     for (let i = 0; i < MAX_ACCUMULATED_ACTIVITIES_DISPLAY; i++) {
       subPartialHeaders.push(
         <TableHead key={`p${pNum}-acc${i+1}`} className={`text-center text-xs whitespace-nowrap py-1 sticky top-0 z-20 ${
-            pNum === 1 ? 'bg-yellow-100 dark:bg-yellow-800/50 text-yellow-700 dark:text-yellow-300' :
-            pNum === 2 ? 'bg-green-100 dark:bg-green-800/50 text-green-700 dark:text-green-300' :
-            pNum === 3 ? 'bg-orange-100 dark:bg-orange-800/50 text-orange-700 dark:text-orange-300' :
+            pNum % 4 === 1 ? 'bg-yellow-100 dark:bg-yellow-800/50 text-yellow-700 dark:text-yellow-300' :
+            pNum % 4 === 2 ? 'bg-green-100 dark:bg-green-800/50 text-green-700 dark:text-green-300' :
+            pNum % 4 === 3 ? 'bg-orange-100 dark:bg-orange-800/50 text-orange-700 dark:text-orange-300' :
             'bg-purple-100 dark:bg-purple-800/50 text-purple-700 dark:text-purple-300'
           }`}>Ac. {i + 1}</TableHead>
       );
     }
     subPartialHeaders.push(
       <TableHead key={`p${pNum}-exam`} className={`text-center text-xs whitespace-nowrap py-1 sticky top-0 z-20 ${
-          pNum === 1 ? 'bg-yellow-100 dark:bg-yellow-800/50 text-yellow-700 dark:text-yellow-300' :
-          pNum === 2 ? 'bg-green-100 dark:bg-green-800/50 text-green-700 dark:text-green-300' :
-          pNum === 3 ? 'bg-orange-100 dark:bg-orange-800/50 text-orange-700 dark:text-orange-300' :
+          pNum % 4 === 1 ? 'bg-yellow-100 dark:bg-yellow-800/50 text-yellow-700 dark:text-yellow-300' :
+          pNum % 4 === 2 ? 'bg-green-100 dark:bg-green-800/50 text-green-700 dark:text-green-300' :
+          pNum % 4 === 3 ? 'bg-orange-100 dark:bg-orange-800/50 text-orange-700 dark:text-orange-300' :
           'bg-purple-100 dark:bg-purple-800/50 text-purple-700 dark:text-purple-300'
         }`}>Exam</TableHead>
     );
     subPartialHeaders.push(
       <TableHead key={`p${pNum}-total`} className={`text-center font-bold text-xs whitespace-nowrap py-1 sticky top-0 z-20 ${
-         pNum === 1 ? 'bg-yellow-100 dark:bg-yellow-800/50 text-yellow-700 dark:text-yellow-300' :
-         pNum === 2 ? 'bg-green-100 dark:bg-green-800/50 text-green-700 dark:text-green-300' :
-         pNum === 3 ? 'bg-orange-100 dark:bg-orange-800/50 text-orange-700 dark:text-orange-300' :
+         pNum % 4 === 1 ? 'bg-yellow-100 dark:bg-yellow-800/50 text-yellow-700 dark:text-yellow-300' :
+         pNum % 4 === 2 ? 'bg-green-100 dark:bg-green-800/50 text-green-700 dark:text-green-300' :
+         pNum % 4 === 3 ? 'bg-orange-100 dark:bg-orange-800/50 text-orange-700 dark:text-orange-300' :
          'bg-purple-100 dark:bg-purple-800/50 text-purple-700 dark:text-purple-300'
         }`}>Total Parcial</TableHead>
     );
   }
-  const totalColumns = 2 + (currentNumberOfPartials * (MAX_ACCUMULATED_ACTIVITIES_DISPLAY + 2)) + 1;
+  const totalColumns = 1 + (currentNumberOfPartials * (MAX_ACCUMULATED_ACTIVITIES_DISPLAY + 2)) + 1; // Changed 2 to 1 for student name (no phone here)
 
   return (
     <TooltipProvider>
@@ -451,12 +433,12 @@ export default function PartialGradesReportPage() {
             <Button
                 variant="outline"
                 size="sm"
-                onClick={handleExportToXLSX}
+                onClick={handleExportToHTML}
                 disabled={isLoading || studentsToDisplayInTable.length === 0}
                 className="gap-1.5 text-sm"
               >
-                <Download className="size-3.5" />
-                Export to Excel (.xlsx)
+                <FileText className="size-3.5" />
+                Export to HTML
             </Button>
           </div>
            {gradingConfig.numberOfPartials < 1 && (
@@ -518,9 +500,9 @@ export default function PartialGradesReportPage() {
             <TableHeader className="sticky top-0 bg-card z-20">
               <TableRow>
                 <TableHead rowSpan={2} className="align-bottom min-w-[150px] sticky left-0 bg-card z-30">Student Name</TableHead>
-                <TableHead rowSpan={2} className="align-bottom min-w-[80px] sticky left-[150px] bg-card z-30">Actions</TableHead>
+                {/* Action column removed from this view, only student name is sticky */}
                 {partialHeaders}
-                <TableHead rowSpan={2} className="text-center align-bottom min-w-[100px] bg-blue-100 dark:bg-blue-800/50 text-blue-800 dark:text-blue-200 sticky top-0 z-20">Final Grade</TableHead>
+                <TableHead rowSpan={2} className={`text-center align-bottom min-w-[100px] bg-blue-100 dark:bg-blue-800/50 text-blue-800 dark:text-blue-200 sticky top-0 z-20`}>Final Grade</TableHead>
               </TableRow>
               <TableRow>
                 {subPartialHeaders}
@@ -529,17 +511,19 @@ export default function PartialGradesReportPage() {
             <TableBody>
               {studentsToDisplayInTable.length > 0 ? studentsToDisplayInTable.map((student) => (
                 <TableRow key={student.id}>
-                  <TableCell className="font-medium sticky left-0 bg-card z-10 whitespace-nowrap">{student.name}</TableCell>
-                  <TableCell className="sticky left-[150px] bg-card z-10">
-                    <Tooltip>
-                        <TooltipTrigger asChild>
-                            <Button variant="ghost" size="icon" onClick={() => handleOpenEditGrades(student.id)}>
-                                <NotebookPen className="h-4 w-4" />
-                                <span className="sr-only">Edit Grades for {student.name}</span>
-                            </Button>
-                        </TooltipTrigger>
-                        <TooltipContent side="top"><p>Edit Grades for {student.name}</p></TooltipContent>
-                    </Tooltip>
+                  <TableCell className="font-medium sticky left-0 bg-card z-10 whitespace-nowrap">
+                     <div className="flex items-center gap-2">
+                        {student.name}
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <Button variant="ghost" size="icon" className="h-6 w-6 opacity-75 hover:opacity-100" onClick={() => handleOpenEditGrades(student.id)}>
+                                    <NotebookPen className="h-3.5 w-3.5" />
+                                    <span className="sr-only">Edit Grades for {student.name}</span>
+                                </Button>
+                            </TooltipTrigger>
+                            <TooltipContent side="right"><p>Edit Grades</p></TooltipContent>
+                        </Tooltip>
+                    </div>
                   </TableCell>
                   
                   {Array.from({ length: currentNumberOfPartials }).map((_, index) => {
@@ -580,7 +564,4 @@ export default function PartialGradesReportPage() {
     </TooltipProvider>
   );
 }
-
-    
-
     
