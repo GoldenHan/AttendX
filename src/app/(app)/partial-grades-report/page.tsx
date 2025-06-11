@@ -15,7 +15,7 @@ import type { User, PartialScores, ActivityScore, ExamScore, Group, GradingConfi
 import { DEFAULT_GRADING_CONFIG } from '@/types';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, query, doc, getDoc } from 'firebase/firestore';
-import { Loader2, ClipboardList, NotebookPen, AlertTriangle } from 'lucide-react';
+import { Loader2, ClipboardList, NotebookPen, AlertTriangle, Download } from 'lucide-react'; // Added Download
 import { useToast } from '@/hooks/use-toast';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -253,6 +253,78 @@ export default function PartialGradesReportPage() {
     }
     return cells;
   };
+
+  const handleExportToCSV = () => {
+    if (studentsToDisplayInTable.length === 0) {
+      toast({ title: "No Data", description: "There is no data to export.", variant: "default" });
+      return;
+    }
+
+    const headers: string[] = ["Student Name"];
+    const numPartials = Math.max(1, gradingConfig.numberOfPartials);
+
+    for (let p = 1; p <= numPartials; p++) {
+      for (let a = 1; a <= MAX_ACCUMULATED_ACTIVITIES_DISPLAY; a++) {
+        headers.push(`P${p} Activity ${a} Name`);
+        headers.push(`P${p} Activity ${a} Score`);
+      }
+      headers.push(`P${p} Exam Name`);
+      headers.push(`P${p} Exam Score`);
+      headers.push(`P${p} Partial Total`);
+    }
+    headers.push("Final Grade");
+
+    const rows = studentsToDisplayInTable.map(student => {
+      const row: (string | number | null | undefined)[] = [student.name];
+
+      for (let p = 1; p <= numPartials; p++) {
+        const partialKey = `partial${p}` as keyof NonNullable<User['grades']>;
+        const partialData = student.grades?.[partialKey];
+        
+        for (let a = 0; a < MAX_ACCUMULATED_ACTIVITIES_DISPLAY; a++) {
+          const activity = partialData?.accumulatedActivities?.[a];
+          row.push(activity?.name || ''); 
+          row.push(activity?.score ?? ''); 
+        }
+        
+        row.push(partialData?.exam?.name || ''); 
+        row.push(partialData?.exam?.score ?? ''); 
+        
+        const partialTotalKey = `calculatedPartial${p}Total` as keyof StudentWithDetailedGrades;
+        row.push((student as any)[partialTotalKey] ?? ''); 
+      }
+      row.push(student.calculatedFinalGrade?.toFixed(2) ?? ''); 
+      return row;
+    });
+
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.map(cell => {
+        const cellString = String(cell ?? '');
+        if (cellString.includes(',') || cellString.includes('"') || cellString.includes('\n')) {
+          return `"${cellString.replace(/"/g, '""')}"`;
+        }
+        return cellString;
+      }).join(','))
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    if (link.download !== undefined) {
+      const url = URL.createObjectURL(blob);
+      link.setAttribute("href", url);
+      const dateStr = new Date().toISOString().split('T')[0];
+      link.setAttribute("download", `partial_grades_report_${dateStr}.csv`);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      toast({ title: "Export Successful", description: "Report downloaded as CSV." });
+    } else {
+      toast({ title: "Export Failed", description: "Your browser doesn't support this feature.", variant: "destructive" });
+    }
+  };
   
   if (isLoading) {
     return (
@@ -323,11 +395,24 @@ export default function PartialGradesReportPage() {
     <TooltipProvider>
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2"><ClipboardList className="h-6 w-6 text-primary" /> Partial Grades Report</CardTitle>
-          <CardDescription>
-            View partial grades for students. Filter by group and/or individual student.
-            Configuration: {currentNumberOfPartials} partials, passing with {gradingConfig.passingGrade}pts.
-          </CardDescription>
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+            <div>
+              <CardTitle className="flex items-center gap-2"><ClipboardList className="h-6 w-6 text-primary" /> Partial Grades Report</CardTitle>
+              <CardDescription>
+                View partial grades for students. Filter by group and/or individual student.
+                Configuration: {currentNumberOfPartials} partials, passing with {gradingConfig.passingGrade}pts.
+              </CardDescription>
+            </div>
+            <Button 
+              onClick={handleExportToCSV} 
+              disabled={isLoading || studentsToDisplayInTable.length === 0}
+              variant="outline"
+              size="sm"
+            >
+              <Download className="mr-2 h-4 w-4" />
+              Export to CSV
+            </Button>
+          </div>
            {gradingConfig.numberOfPartials < 1 && (
             <div className="mt-2 p-3 border border-red-500/50 bg-red-50 dark:bg-red-900/30 rounded-md text-sm text-red-700 dark:text-red-300 flex items-start gap-2">
                 <AlertTriangle className="h-5 w-5 mt-0.5 shrink-0"/>
@@ -449,4 +534,3 @@ export default function PartialGradesReportPage() {
     </TooltipProvider>
   );
 }
-
