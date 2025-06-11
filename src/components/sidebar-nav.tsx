@@ -23,7 +23,8 @@ import {
   ClipboardCheck,
   Briefcase,
   GraduationCap,
-  UserCheck, // Added for Session Attendance
+  UserCheck,
+  ClipboardList, // Added for Partial Grades Report
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import type { User } from '@/types';
@@ -49,6 +50,7 @@ const managementNavItems: NavItem[] = [
    { href: '/group-management', label: 'Groups', icon: FolderKanban, roles: ['admin', 'teacher'] },
    { href: '/grades-management', label: 'Grades Management', icon: ClipboardCheck, roles: ['admin', 'teacher'] },
    { href: '/teacher-session-attendance', label: 'Session Attendance', icon: UserCheck, roles: ['admin', 'teacher'] },
+   { href: '/partial-grades-report', label: 'Partial Grades Report', icon: ClipboardList, roles: ['admin', 'teacher'] }, // New Item
 ];
 
 const adminNavItems: NavItem[] = [
