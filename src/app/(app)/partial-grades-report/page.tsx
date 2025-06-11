@@ -89,12 +89,13 @@ export default function PartialGradesReportPage() {
   useEffect(() => {
     const fetchGradingConfig = async () => {
       setIsLoadingGradingConfig(true);
+      console.log("[PartialGradesReportPage] Fetching grading config...");
       try {
         const configDocRef = doc(db, 'appConfiguration', 'currentGradingConfig');
         const docSnap = await getDoc(configDocRef);
         if (docSnap.exists()) {
           const loadedConfig = docSnap.data() as GradingConfiguration;
-          const validatedConfig: GradingConfiguration = {
+           const validatedConfig: GradingConfiguration = {
             id: loadedConfig.id || "currentGradingConfig",
             numberOfPartials: [1, 2, 3, 4].includes(loadedConfig.numberOfPartials) ? loadedConfig.numberOfPartials : DEFAULT_GRADING_CONFIG.numberOfPartials,
             passingGrade: typeof loadedConfig.passingGrade === 'number' ? loadedConfig.passingGrade : DEFAULT_GRADING_CONFIG.passingGrade,
@@ -102,9 +103,12 @@ export default function PartialGradesReportPage() {
             maxTotalAccumulatedScore: typeof loadedConfig.maxTotalAccumulatedScore === 'number' ? loadedConfig.maxTotalAccumulatedScore : DEFAULT_GRADING_CONFIG.maxTotalAccumulatedScore,
             maxExamScore: typeof loadedConfig.maxExamScore === 'number' ? loadedConfig.maxExamScore : DEFAULT_GRADING_CONFIG.maxExamScore,
           };
+          console.log("[PartialGradesReportPage] Loaded config from Firestore:", loadedConfig);
           setGradingConfig(validatedConfig);
+          console.log("[PartialGradesReportPage] Validated and set gradingConfig:", validatedConfig);
         } else {
           setGradingConfig(DEFAULT_GRADING_CONFIG);
+          console.log("[PartialGradesReportPage] No config found, using default:", DEFAULT_GRADING_CONFIG);
         }
       } catch (error) {
         console.error("Error fetching grading configuration:", error);
@@ -118,7 +122,11 @@ export default function PartialGradesReportPage() {
   }, [toast]);
 
   const fetchStudentAndGroupData = useCallback(async () => {
-    if (isLoadingGradingConfig) return;
+    if (isLoadingGradingConfig) {
+        console.log("[PartialGradesReportPage] fetchStudentAndGroupData skipped, gradingConfig still loading.");
+        return;
+    }
+    console.log("[PartialGradesReportPage] fetchStudentAndGroupData executing with gradingConfig:", gradingConfig);
 
     setIsLoadingStudents(true);
     setIsLoadingGroups(true);
@@ -131,11 +139,11 @@ export default function PartialGradesReportPage() {
         const partialTotalsArray: (number | null)[] = [];
 
         for (let i = 1; i <= gradingConfig.numberOfPartials; i++) {
-          const partialKey = \`partial\${i}\` as keyof NonNullable<User['grades']>;
+          const partialKey = `partial${i}` as keyof NonNullable<User['grades']>;
           const partialData = student.grades?.[partialKey];
-          const accTotalKey = \`calculatedAccumulatedTotalP\${i}\` as keyof StudentWithDetailedGrades;
+          const accTotalKey = `calculatedAccumulatedTotalP${i}` as keyof StudentWithDetailedGrades;
           (studentCalculatedGrades as any)[accTotalKey] = calculateAccumulatedTotal(partialData?.accumulatedActivities, gradingConfig);
-          const partialTotalKey = \`calculatedPartial\${i}Total\` as keyof StudentWithDetailedGrades;
+          const partialTotalKey = `calculatedPartial${i}Total` as keyof StudentWithDetailedGrades;
           const currentPartialTotal = calculatePartialTotal(partialData, gradingConfig);
           (studentCalculatedGrades as any)[partialTotalKey] = currentPartialTotal;
           if (typeof currentPartialTotal === 'number') {
@@ -169,6 +177,7 @@ export default function PartialGradesReportPage() {
   }, [toast, gradingConfig, isLoadingGradingConfig]);
 
   useEffect(() => {
+    console.log("[PartialGradesReportPage] useEffect for fetchStudentAndGroupData triggered. isLoadingGradingConfig:", isLoadingGradingConfig);
     if (!isLoadingGradingConfig) {
         fetchStudentAndGroupData();
     }
@@ -332,7 +341,7 @@ export default function PartialGradesReportPage() {
                 value={selectedGroupId}
                 onValueChange={(value) => {
                   setSelectedGroupId(value);
-                  setSelectedStudentId('all'); // Reset student filter when group changes
+                  setSelectedStudentId('all'); 
                 }}
                 disabled={isLoadingGroups}
               >
@@ -404,14 +413,14 @@ export default function PartialGradesReportPage() {
                   
                   {Array.from({ length: currentNumberOfPartials }).map((_, index) => {
                     const pNum = index + 1;
-                    const partialKeyFirestore = \`partial\${pNum}\` as keyof NonNullable<User['grades']>;
+                    const partialKeyFirestore = `partial${pNum}` as keyof NonNullable<User['grades']>;
                     const partialData = student.grades?.[partialKeyFirestore];
-                    const calculatedPartialTotalKey = \`calculatedPartial\${pNum}Total\` as keyof StudentWithDetailedGrades;
+                    const calculatedPartialTotalKey = `calculatedPartial${pNum}Total` as keyof StudentWithDetailedGrades;
                     const studentPartialTotal = (student as any)[calculatedPartialTotalKey];
 
                     return (
-                      <React.Fragment key={`student-\${student.id}-p\${pNum}\`}>
-                        {renderAccumulatedActivitiesScores(partialData?.accumulatedActivities, \`p\${pNum}\`)}
+                      <React.Fragment key={`student-${student.id}-p${pNum}`}>
+                        {renderAccumulatedActivitiesScores(partialData?.accumulatedActivities, `p${pNum}`)}
                         <TableCell className="text-center">
                           {getScoreDisplay(partialData?.exam?.score, partialData?.exam?.name, "Exam")}
                         </TableCell>
@@ -440,3 +449,4 @@ export default function PartialGradesReportPage() {
     </TooltipProvider>
   );
 }
+
