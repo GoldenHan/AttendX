@@ -81,7 +81,7 @@ const partialScoresObjectSchema = (config: GradingConfiguration) => z.object({
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: `La suma de las calificaciones de las actividades de acumulación no puede exceder ${config.maxTotalAccumulatedScore}pts. Actualmente es ${totalAccumulated.toFixed(2)}pts.`,
-        path: ['accumulatedActivities'], 
+        path: ['accumulatedActivities'],
       });
     }
 });
@@ -92,19 +92,18 @@ const generateGradeEntryFormSchema = (config: GradingConfiguration) => {
     for (let i = 1; i <= config.numberOfPartials; i++) {
         partials[`partial${i}`] = partialScoresObjectSchema(config);
     }
-     // Add remaining partials up to 4, but they might not be used if numberOfPartials is less
     for (let i = config.numberOfPartials + 1; i <= 4; i++) {
-        partials[`partial${i}`] = partialScoresObjectSchema(config).optional(); // Or handle differently if they shouldn't exist in schema
+        partials[`partial${i}`] = partialScoresObjectSchema(config).optional();
     }
     return z.object(partials);
 };
 
 
-type GradeEntryFormValues = { // Static type for up to 4 partials for simplicity with RHF
+type GradeEntryFormValues = {
   partial1: z.infer<ReturnType<typeof partialScoresObjectSchema>>;
   partial2: z.infer<ReturnType<typeof partialScoresObjectSchema>>;
   partial3: z.infer<ReturnType<typeof partialScoresObjectSchema>>;
-  partial4?: z.infer<ReturnType<typeof partialScoresObjectSchema>>; // Optional for schema, UI controls presence
+  partial4?: z.infer<ReturnType<typeof partialScoresObjectSchema>>;
 };
 
 
@@ -112,26 +111,6 @@ const getDefaultPartialData = (): z.infer<ReturnType<typeof partialScoresObjectS
   accumulatedActivities: [],
   exam: { name: null, score: null },
 });
-
-const mapPartialToSave = (partialInput: GradeEntryFormValues['partial1'] | undefined): PartialScoresType => {
-    const activities = partialInput?.accumulatedActivities?.map(act => ({
-        id: act.id || Math.random().toString(36).substring(2,9),
-        name: act.name ?? null,
-        score: act.score ?? null,
-    })) || [];
-
-    let examToSave: ExamScoreType | null = null;
-    if (partialInput?.exam) {
-        examToSave = {
-            name: partialInput.exam.name ?? null,
-            score: partialInput.exam.score ?? null,
-        };
-    }
-    return {
-        accumulatedActivities: activities,
-        exam: examToSave,
-    };
-};
 
 
 export default function GradesManagementPage() {
@@ -142,12 +121,12 @@ export default function GradesManagementPage() {
   const [allStudents, setAllStudents] = useState<User[]>([]);
   const [allGroups, setAllGroups] = useState<GroupType[]>([]);
   const [selectedStudent, setSelectedStudent] = useState<User | null>(null);
-  
+
   const [gradingConfig, setGradingConfig] = useState<GradingConfiguration>(DEFAULT_GRADING_CONFIG);
   const [isLoadingGradingConfig, setIsLoadingGradingConfig] = useState(true);
-  const [isLoadingData, setIsLoadingData] = useState(true); // For students/groups
+  const [isLoadingData, setIsLoadingData] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  
+
   const [selectedGroupIdForFilter, setSelectedGroupIdForFilter] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error_saving'>('idle');
@@ -163,7 +142,7 @@ export default function GradesManagementPage() {
       partial3: getDefaultPartialData(),
       partial4: getDefaultPartialData(),
     },
-    mode: "onChange", 
+    mode: "onChange",
   });
 
   const { control, watch, setValue, handleSubmit, formState, getValues, reset } = gradeForm;
@@ -172,10 +151,9 @@ export default function GradesManagementPage() {
   const p2FieldArray = useFieldArray({ control, name: "partial2.accumulatedActivities" });
   const p3FieldArray = useFieldArray({ control, name: "partial3.accumulatedActivities" });
   const p4FieldArray = useFieldArray({ control, name: "partial4.accumulatedActivities" });
-  
+
   const partialFieldArrays = [p1FieldArray, p2FieldArray, p3FieldArray, p4FieldArray];
 
-  // Fetch Grading Configuration
   useEffect(() => {
     const fetchGradingConfig = async () => {
       setIsLoadingGradingConfig(true);
@@ -185,7 +163,6 @@ export default function GradesManagementPage() {
         const docSnap = await getDoc(configDocRef);
         if (docSnap.exists()) {
           const loadedConfig = docSnap.data() as GradingConfiguration;
-          // Validate loaded config
           const validatedConfig: GradingConfiguration = {
             id: loadedConfig.id || "currentGradingConfig",
             numberOfPartials: [1, 2, 3, 4].includes(loadedConfig.numberOfPartials) ? loadedConfig.numberOfPartials : DEFAULT_GRADING_CONFIG.numberOfPartials,
@@ -246,57 +223,34 @@ export default function GradesManagementPage() {
   useEffect(() => {
     fetchInitialData();
   }, [fetchInitialData]);
-  
-  const mapActivities = (activities: ActivityScoreType[] | undefined | null) => 
-    activities?.map(a => ({...a, id: a.id || Math.random().toString(36).substr(2, 9)})) || [];
 
-  useEffect(() => {
-    debouncedSave.cancel(); 
-    if (selectedStudent && gradingConfig) { 
-      const studentGrades = selectedStudent.grades || {};
-      const defaultValuesForForm: GradeEntryFormValues = {
-        partial1: { ...getDefaultPartialData(), ...studentGrades.partial1, accumulatedActivities: mapActivities(studentGrades.partial1?.accumulatedActivities) },
-        partial2: { ...getDefaultPartialData(), ...studentGrades.partial2, accumulatedActivities: mapActivities(studentGrades.partial2?.accumulatedActivities) },
-        partial3: { ...getDefaultPartialData(), ...studentGrades.partial3, accumulatedActivities: mapActivities(studentGrades.partial3?.accumulatedActivities) },
-        partial4: { ...getDefaultPartialData(), ...studentGrades.partial4, accumulatedActivities: mapActivities(studentGrades.partial4?.accumulatedActivities) },
-      };
-      reset(defaultValuesForForm);
-    } else {
-      reset({ 
-        partial1: getDefaultPartialData(),
-        partial2: getDefaultPartialData(),
-        partial3: getDefaultPartialData(),
-        partial4: getDefaultPartialData(),
-      });
-    }
-  }, [selectedStudent, reset, gradingConfig, debouncedSave]);
+  const mapActivities = useCallback((activities: ActivityScoreType[] | undefined | null) =>
+    activities?.map(a => ({...a, id: a.id || Math.random().toString(36).substr(2, 9)})) || [], []);
 
-  const filteredStudentsList = useMemo(() => {
-    let studentsToDisplay = allStudents;
-    if (selectedGroupIdForFilter !== 'all') {
-      const group = allGroups.find(g => g.id === selectedGroupIdForFilter);
-      if (group && Array.isArray(group.studentIds)) {
-        studentsToDisplay = studentsToDisplay.filter(student => group.studentIds.includes(student.id));
-      } else if (group) { 
-        studentsToDisplay = [];
-      }
-    }
-    if (searchTerm.trim() !== '') {
-      studentsToDisplay = studentsToDisplay.filter(student =>
-        student.name.toLowerCase().includes(searchTerm.toLowerCase())
-      );
-    }
-    return studentsToDisplay;
-  }, [allStudents, allGroups, selectedGroupIdForFilter, searchTerm]);
+  const mapPartialToSave = useCallback((partialInput: GradeEntryFormValues['partial1'] | undefined): PartialScoresType => {
+    const activities = partialInput?.accumulatedActivities?.map(act => ({
+        id: act.id || Math.random().toString(36).substring(2,9),
+        name: act.name ?? null,
+        score: act.score ?? null,
+    })) || [];
 
-  const handleSelectStudentForGrading = useCallback((student: User) => {
-    setSelectedStudent(student);
-    router.push(`/grades-management?studentId=${student.id}`, { scroll: false });
-  }, [router]);
+    let examToSave: ExamScoreType | null = null;
+    if (partialInput?.exam) {
+        examToSave = {
+            name: partialInput.exam.name ?? null,
+            score: partialInput.exam.score ?? null,
+        };
+    }
+    return {
+        accumulatedActivities: activities,
+        exam: examToSave,
+    };
+  }, []);
+
 
   const debouncedSave = useCallback(
     debounce(async (currentData: GradeEntryFormValues, studentId: string) => {
-      if (isSubmitting || isLoadingGradingConfig) return; 
+      if (isSubmitting || isLoadingGradingConfig) return;
       setAutoSaveStatus('saving');
       try {
         const studentRef = doc(db, "students", studentId);
@@ -315,50 +269,101 @@ export default function GradesManagementPage() {
         setTimeout(() => setAutoSaveStatus('idle'), 5000);
       }
     }, DEBOUNCE_DELAY),
-    [isSubmitting, toast, gradingConfig, isLoadingGradingConfig] 
+    [isSubmitting, toast, gradingConfig, isLoadingGradingConfig, mapPartialToSave]
   );
 
-  const watchedFormValues = watch(); 
+  useEffect(() => {
+    if (debouncedSave && typeof debouncedSave.cancel === 'function') {
+        debouncedSave.cancel();
+    }
+    if (selectedStudent && gradingConfig) {
+      const studentGrades = selectedStudent.grades || {};
+      const defaultValuesForForm: GradeEntryFormValues = {
+        partial1: { ...getDefaultPartialData(), ...studentGrades.partial1, accumulatedActivities: mapActivities(studentGrades.partial1?.accumulatedActivities) },
+        partial2: { ...getDefaultPartialData(), ...studentGrades.partial2, accumulatedActivities: mapActivities(studentGrades.partial2?.accumulatedActivities) },
+        partial3: { ...getDefaultPartialData(), ...studentGrades.partial3, accumulatedActivities: mapActivities(studentGrades.partial3?.accumulatedActivities) },
+        partial4: { ...getDefaultPartialData(), ...studentGrades.partial4, accumulatedActivities: mapActivities(studentGrades.partial4?.accumulatedActivities) },
+      };
+      reset(defaultValuesForForm);
+    } else {
+      reset({
+        partial1: getDefaultPartialData(),
+        partial2: getDefaultPartialData(),
+        partial3: getDefaultPartialData(),
+        partial4: getDefaultPartialData(),
+      });
+    }
+  }, [selectedStudent, reset, gradingConfig, debouncedSave, mapActivities]);
+
+  const filteredStudentsList = useMemo(() => {
+    let studentsToDisplay = allStudents;
+    if (selectedGroupIdForFilter !== 'all') {
+      const group = allGroups.find(g => g.id === selectedGroupIdForFilter);
+      if (group && Array.isArray(group.studentIds)) {
+        studentsToDisplay = studentsToDisplay.filter(student => group.studentIds.includes(student.id));
+      } else if (group) {
+        studentsToDisplay = [];
+      }
+    }
+    if (searchTerm.trim() !== '') {
+      studentsToDisplay = studentsToDisplay.filter(student =>
+        student.name.toLowerCase().includes(searchTerm.toLowerCase())
+      );
+    }
+    return studentsToDisplay;
+  }, [allStudents, allGroups, selectedGroupIdForFilter, searchTerm]);
+
+  const handleSelectStudentForGrading = useCallback((student: User) => {
+    setSelectedStudent(student);
+    router.push(`/grades-management?studentId=${student.id}`, { scroll: false });
+  }, [router]);
+
+
+  const watchedFormValues = watch();
 
   useEffect(() => {
-    if (formState.isDirty && selectedStudent && !isSubmitting && !isLoadingGradingConfig) {
+    if (formState.isDirty && selectedStudent && !isSubmitting && !isLoadingGradingConfig && debouncedSave) {
       const currentValues = getValues();
       debouncedSave(currentValues, selectedStudent.id);
     }
     return () => {
-      debouncedSave.cancel();
+      if (debouncedSave && typeof debouncedSave.cancel === 'function') {
+        debouncedSave.cancel();
+      }
     };
   }, [watchedFormValues, selectedStudent, formState.isDirty, isSubmitting, debouncedSave, getValues, isLoadingGradingConfig]);
 
 
   const onSubmitGrades = async (data: GradeEntryFormValues) => {
-    if (!selectedStudent || isLoadingGradingConfig) { 
+    if (!selectedStudent || isLoadingGradingConfig) {
       toast({ title: "Error", description: isLoadingGradingConfig ? "Configuración de calificación aún cargando." : "Ningún estudiante seleccionado.", variant: "destructive" });
       return;
     }
     setIsSubmitting(true);
-    debouncedSave.cancel(); 
+    if (debouncedSave && typeof debouncedSave.cancel === 'function') {
+      debouncedSave.cancel();
+    }
     setAutoSaveStatus('saving');
     try {
       const studentRef = doc(db, "students", selectedStudent.id);
       const gradesToSave: { [key: string]: PartialScoresType } = {};
       for (let i = 1; i <= gradingConfig.numberOfPartials; i++) {
-          const partialKey = `partial${i}` as keyof GradeEntryFormValues; // e.g. partial1, partial2
+          const partialKey = `partial${i}` as keyof GradeEntryFormValues;
           gradesToSave[partialKey] = mapPartialToSave(data[partialKey]);
       }
-      
+
       await updateDoc(studentRef, { grades: gradesToSave });
-      
+
       toast({ title: "Calificaciones Actualizadas", description: `Calificaciones para ${selectedStudent.name} guardadas exitosamente.` });
       setAutoSaveStatus('saved');
       setTimeout(() => setAutoSaveStatus('idle'), 3000);
-            
+
       const updatedStudentDoc = await getDoc(studentRef);
       if(updatedStudentDoc.exists()){
         const updatedStudentData = { id: updatedStudentDoc.id, ...updatedStudentDoc.data() } as User;
-        setSelectedStudent(updatedStudentData); 
+        setSelectedStudent(updatedStudentData);
         setAllStudents(prev => prev.map(s => s.id === updatedStudentData.id ? updatedStudentData : s));
-        reset(data); 
+        reset(data);
       }
 
     } catch (error: any) {
@@ -369,15 +374,15 @@ export default function GradesManagementPage() {
       setIsSubmitting(false);
     }
   };
-  
+
   const renderGradeInputFieldsForPartial = (
     partialKey: "partial1" | "partial2" | "partial3" | "partial4",
-    fieldArrayHelpers: UseFieldArrayReturn<GradeEntryFormValues, any, "id"> // Use any for dynamic field name
+    fieldArrayHelpers: UseFieldArrayReturn<GradeEntryFormValues, any, "id">
   ) => {
     const { fields, append, remove } = fieldArrayHelpers;
     const accumulatedActivitiesValues = watch(`${partialKey}.accumulatedActivities`);
     const currentTotalAccumulated = accumulatedActivitiesValues?.reduce((sum, act) => sum + (act.score || 0), 0) || 0;
-    
+
     const examScoreValue = watch(`${partialKey}.exam.score`);
     const currentExamScore = typeof examScoreValue === 'number' ? examScoreValue : 0;
     const currentPartialTotal = currentTotalAccumulated + currentExamScore;
@@ -440,7 +445,7 @@ export default function GradesManagementPage() {
             (Puntos restantes para acumulado: {pointsRemainingForAccumulated.toFixed(2)})
           </div>
         </div>
-        
+
         <div className="space-y-3 rounded-md border p-4 shadow-sm bg-card mt-4">
            <h4 className="text-md font-semibold text-card-foreground">Examen (Máx. {gradingConfig.maxExamScore} pts)</h4>
             <FormField
@@ -480,7 +485,7 @@ export default function GradesManagementPage() {
   };
 
   const renderAutoSaveStatus = () => {
-    if (isSubmitting && autoSaveStatus !== 'saving') return null; 
+    if (isSubmitting && autoSaveStatus !== 'saving') return null;
     switch (autoSaveStatus) {
       case 'saving':
         return <span className="text-xs text-muted-foreground ml-2 flex items-center"><Loader2 className="h-3 w-3 animate-spin mr-1" />Guardando automáticamente...</span>;
@@ -544,8 +549,8 @@ export default function GradesManagementPage() {
                 value={selectedGroupIdForFilter}
                 onValueChange={(value) => {
                   setSelectedGroupIdForFilter(value);
-                  setSelectedStudent(null); 
-                  router.push('/grades-management', { scroll: false }); 
+                  setSelectedStudent(null);
+                  router.push('/grades-management', { scroll: false });
                 }}
                 disabled={isLoadingData}
               >
@@ -573,7 +578,7 @@ export default function GradesManagementPage() {
                   value={searchTerm}
                   onChange={(e) => {
                     setSearchTerm(e.target.value);
-                    setSelectedStudent(null); 
+                    setSelectedStudent(null);
                     router.push('/grades-management', { scroll: false });
                   }}
                   className="pl-8 w-full"
@@ -629,7 +634,7 @@ export default function GradesManagementPage() {
            )}
         </CardContent>
       </Card>
-      
+
       <Form {...gradeForm}>
         <Card>
           <CardHeader>
@@ -656,7 +661,7 @@ export default function GradesManagementPage() {
                 {Array.from({ length: Math.max(1, gradingConfig.numberOfPartials) }, (_, i) => i + 1).map((pNum) => {
                   const partialKey = `partial${pNum}` as "partial1" | "partial2" | "partial3" | "partial4";
                   const fieldArrayHelper = partialFieldArrays[pNum-1];
-                  if (!fieldArrayHelper) return null; // Should not happen with Math.max(1,...)
+                  if (!fieldArrayHelper) return null;
                   return (
                     <TabsContent key={`tab-content-p${pNum}`} value={partialKey} className="border-x border-b p-4 rounded-b-md">
                       {renderGradeInputFieldsForPartial(partialKey, fieldArrayHelper)}
@@ -667,7 +672,7 @@ export default function GradesManagementPage() {
               <div className="flex items-center">
                 <Button type="submit" disabled={isSubmitting || !selectedStudent || !formState.isDirty || isLoadingGradingConfig} className="sm:w-auto">
                     {(isSubmitting || isLoadingGradingConfig) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    <Save className="mr-2 h-4 w-4" /> 
+                    <Save className="mr-2 h-4 w-4" />
                     {selectedStudent ? `Guardar Calificaciones para ${selectedStudent.name}` : 'Guardar Calificaciones'}
                 </Button>
                 {renderAutoSaveStatus()}
@@ -685,4 +690,3 @@ export default function GradesManagementPage() {
     </div>
   );
 }
-
