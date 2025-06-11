@@ -14,8 +14,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import type { User, PartialScores, ActivityScore, ExamScore, Group, GradingConfiguration } from '@/types';
 import { DEFAULT_GRADING_CONFIG } from '@/types';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, query, where, doc, getDoc } from 'firebase/firestore';
-import { Loader2, ClipboardCheck, NotebookPen, Search } from 'lucide-react';
+import { collection, getDocs, query, doc, getDoc } from 'firebase/firestore';
+import { Loader2, ClipboardCheck, NotebookPen, Search, AlertTriangle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -42,11 +42,10 @@ interface StudentWithDetailedGrades extends User {
   calculatedFinalGrade?: number | null;
 }
 
-const MAX_ACCUMULATED_ACTIVITIES_DISPLAY = 5; // How many activity columns to show per partial (can be less than actual data)
+const MAX_ACCUMULATED_ACTIVITIES_DISPLAY = 5; 
 
-const calculateAccumulatedTotal = (activities: ActivityScore[] | undefined, config: GradingConfiguration): number | null => {
+const calculateAccumulatedTotal = (activities: ActivityScore[] | undefined | null, config: GradingConfiguration): number | null => {
   if (!activities || activities.length === 0) return null;
-
   let total = 0;
   let hasAnyNumericScore = false;
   activities.forEach(act => {
@@ -55,26 +54,20 @@ const calculateAccumulatedTotal = (activities: ActivityScore[] | undefined, conf
       hasAnyNumericScore = true;
     }
   });
-  
   if (!hasAnyNumericScore) return null; 
-
   return Math.min(total, config.maxTotalAccumulatedScore);
 };
 
 
-const calculatePartialTotal = (partialScores: PartialScores | undefined, config: GradingConfiguration): number | null => {
+const calculatePartialTotal = (partialScores: PartialScores | undefined | null, config: GradingConfiguration): number | null => {
   if (!partialScores) return null;
-
   const accumulatedTotal = calculateAccumulatedTotal(partialScores.accumulatedActivities, config);
   const examScore = partialScores.exam?.score;
-
   if (accumulatedTotal === null && (examScore === null || examScore === undefined)) {
       return null;
   }
-  
   const currentAccumulated = accumulatedTotal ?? 0;
   const currentExam = examScore ?? 0;
-  
   return Math.min(currentAccumulated + currentExam, config.maxTotalAccumulatedScore + config.maxExamScore);
 };
 
@@ -82,7 +75,7 @@ const calculatePartialTotal = (partialScores: PartialScores | undefined, config:
 export default function StudentGradesPage() {
   const [allStudents, setAllStudents] = useState<StudentWithDetailedGrades[]>([]);
   const [allGroups, setAllGroups] = useState<Group[]>([]);
-  const [selectedGroupId, setSelectedGroupId] = useState<string>(''); 
+  const [selectedGroupId, setSelectedGroupId] = useState<string>('all'); 
   const [searchTerm, setSearchTerm] = useState<string>('');
   
   const [gradingConfig, setGradingConfig] = useState<GradingConfiguration>(DEFAULT_GRADING_CONFIG);
@@ -98,19 +91,31 @@ export default function StudentGradesPage() {
   useEffect(() => {
     const fetchGradingConfig = async () => {
       setIsLoadingGradingConfig(true);
+      console.log("[StudentGradesPage] Fetching grading config...");
       try {
         const configDocRef = doc(db, 'appConfiguration', 'currentGradingConfig');
         const docSnap = await getDoc(configDocRef);
         if (docSnap.exists()) {
-          setGradingConfig(docSnap.data() as GradingConfiguration);
+          const loadedConfig = docSnap.data() as GradingConfiguration;
+          const validatedConfig: GradingConfiguration = {
+            id: loadedConfig.id || "currentGradingConfig",
+            numberOfPartials: [1, 2, 3, 4].includes(loadedConfig.numberOfPartials) ? loadedConfig.numberOfPartials : DEFAULT_GRADING_CONFIG.numberOfPartials,
+            passingGrade: typeof loadedConfig.passingGrade === 'number' ? loadedConfig.passingGrade : DEFAULT_GRADING_CONFIG.passingGrade,
+            maxIndividualActivityScore: typeof loadedConfig.maxIndividualActivityScore === 'number' ? loadedConfig.maxIndividualActivityScore : DEFAULT_GRADING_CONFIG.maxIndividualActivityScore,
+            maxTotalAccumulatedScore: typeof loadedConfig.maxTotalAccumulatedScore === 'number' ? loadedConfig.maxTotalAccumulatedScore : DEFAULT_GRADING_CONFIG.maxTotalAccumulatedScore,
+            maxExamScore: typeof loadedConfig.maxExamScore === 'number' ? loadedConfig.maxExamScore : DEFAULT_GRADING_CONFIG.maxExamScore,
+          };
+          setGradingConfig(validatedConfig);
+          console.log("[StudentGradesPage] Loaded grading config from Firestore:", loadedConfig);
+          console.log("[StudentGradesPage] Validated and setting gradingConfig:", validatedConfig);
         } else {
           setGradingConfig(DEFAULT_GRADING_CONFIG);
-          // toast({ title: "Default Config", description: "Using default grading config. Set in App Settings."});
+          console.log("[StudentGradesPage] No grading config found, using default:", DEFAULT_GRADING_CONFIG);
         }
       } catch (error) {
         console.error("Error fetching grading configuration:", error);
         setGradingConfig(DEFAULT_GRADING_CONFIG);
-        toast({ title: "Error Loading Config", description: "Could not load grading settings.", variant: "destructive" });
+        toast({ title: "Error Loading Config", description: "Could not load grading settings. Using defaults.", variant: "destructive" });
       } finally {
         setIsLoadingGradingConfig(false);
       }
@@ -120,10 +125,14 @@ export default function StudentGradesPage() {
 
 
   const fetchData = useCallback(async () => {
-    if (isLoadingGradingConfig) return; // Wait for gradingConfig to be loaded
+    if (isLoadingGradingConfig) {
+      console.log("[StudentGradesPage] fetchData skipped, gradingConfig still loading.");
+      return;
+    }
+    console.log("[StudentGradesPage] fetchData executing with gradingConfig:", gradingConfig);
 
     setIsLoadingStudents(true);
-    setIsLoadingGroups(true); // Reset loading state for groups as well
+    setIsLoadingGroups(true);
     try {
       const studentQuery = query(collection(db, 'students')); 
       const studentsSnapshot = await getDocs(studentQuery);
@@ -147,15 +156,18 @@ export default function StudentGradesPage() {
           if (typeof currentPartialTotal === 'number') {
             partialTotalsArray.push(currentPartialTotal);
           } else {
-            partialTotalsArray.push(null); // Ensure consistent array length for final grade calc
+             partialTotalsArray.push(null); 
           }
         }
         
-        if (partialTotalsArray.length === gradingConfig.numberOfPartials && partialTotalsArray.every(t => typeof t === 'number')) {
-          studentCalculatedGrades.calculatedFinalGrade = (partialTotalsArray.reduce((sum, current) => sum + (current as number), 0) / gradingConfig.numberOfPartials);
+        // Calculate final grade only if all *configured* partials have numeric scores
+        const relevantPartialTotals = partialTotalsArray.slice(0, gradingConfig.numberOfPartials);
+        if (relevantPartialTotals.length === gradingConfig.numberOfPartials && relevantPartialTotals.every(t => typeof t === 'number')) {
+            studentCalculatedGrades.calculatedFinalGrade = (relevantPartialTotals.reduce((sum, current) => sum + (current as number), 0) / gradingConfig.numberOfPartials);
         } else {
-          studentCalculatedGrades.calculatedFinalGrade = null;
+            studentCalculatedGrades.calculatedFinalGrade = null;
         }
+
 
         return { 
           ...student, 
@@ -178,11 +190,14 @@ export default function StudentGradesPage() {
   }, [toast, gradingConfig, isLoadingGradingConfig]);
 
   useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+     console.log("[StudentGradesPage] useEffect for fetchData triggered. isLoadingGradingConfig:", isLoadingGradingConfig, "gradingConfig.numberOfPartials:", gradingConfig?.numberOfPartials);
+    if (!isLoadingGradingConfig) {
+        fetchData();
+    }
+  }, [fetchData, isLoadingGradingConfig, gradingConfig.numberOfPartials]); // Re-fetch if numberOfPartials changes
 
   const studentsToDisplay = useMemo(() => {
-    if (isLoadingGradingConfig || isLoadingStudents || isLoadingGroups) return [];
+    if (isLoading) return [];
 
     let filtered = allStudents;
 
@@ -201,7 +216,7 @@ export default function StudentGradesPage() {
       );
     }
     return filtered;
-  }, [allStudents, allGroups, selectedGroupId, searchTerm, isLoadingGradingConfig, isLoadingStudents, isLoadingGroups]);
+  }, [allStudents, allGroups, selectedGroupId, searchTerm, isLoading]);
 
 
   const handleOpenEditGrades = (studentId: string) => {
@@ -246,7 +261,7 @@ export default function StudentGradesPage() {
     return badgeElement;
   };
 
-  const renderAccumulatedActivitiesScores = (activities?: ActivityScore[], partialKey?: string) => {
+  const renderAccumulatedActivitiesScores = (activities?: ActivityScore[] | null, partialKey?: string) => {
     const cells = [];
     for (let i = 0; i < MAX_ACCUMULATED_ACTIVITIES_DISPLAY; i++) {
       const activity = activities?.[i];
@@ -270,14 +285,17 @@ export default function StudentGradesPage() {
         </CardHeader>
         <CardContent className="flex items-center justify-center py-10">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
-          <p className="ml-2">Loading student grades and groups...</p>
+          <p className="ml-2">Cargando...</p>
         </CardContent>
       </Card>
     );
   }
 
+  const currentNumberOfPartials = Math.max(1, gradingConfig.numberOfPartials); // Ensure at least 1 for loop bounds
+  console.log(`[StudentGradesPage] Rendering table with ${currentNumberOfPartials} partials configured.`);
+
   const partialHeaders = [];
-  for (let i = 1; i <= gradingConfig.numberOfPartials; i++) {
+  for (let i = 1; i <= currentNumberOfPartials; i++) {
     partialHeaders.push(
       <TableHead 
         key={`main-header-p${i}`} 
@@ -286,7 +304,7 @@ export default function StudentGradesPage() {
           i === 1 ? 'bg-yellow-100 dark:bg-yellow-800/50 text-yellow-800 dark:text-yellow-200' :
           i === 2 ? 'bg-green-100 dark:bg-green-800/50 text-green-800 dark:text-green-200' :
           i === 3 ? 'bg-orange-100 dark:bg-orange-800/50 text-orange-800 dark:text-orange-200' :
-          'bg-purple-100 dark:bg-purple-800/50 text-purple-800 dark:text-purple-200' // For 4th partial
+          'bg-purple-100 dark:bg-purple-800/50 text-purple-800 dark:text-purple-200'
         }`}
       >
         {i}{i === 1 ? 'st' : i === 2 ? 'nd' : i === 3 ? 'rd' : 'th'} Partial
@@ -295,7 +313,7 @@ export default function StudentGradesPage() {
   }
 
   const subPartialHeaders = [];
-   for (let pNum = 1; pNum <= gradingConfig.numberOfPartials; pNum++) {
+   for (let pNum = 1; pNum <= currentNumberOfPartials; pNum++) {
     for (let i = 0; i < MAX_ACCUMULATED_ACTIVITIES_DISPLAY; i++) {
       subPartialHeaders.push(
         <TableHead key={`p${pNum}-acc${i+1}`} className={`text-center text-xs whitespace-nowrap py-1 sticky top-0 z-20 ${
@@ -324,7 +342,7 @@ export default function StudentGradesPage() {
     );
   }
 
-  const totalColumns = 2 + (gradingConfig.numberOfPartials * (MAX_ACCUMULATED_ACTIVITIES_DISPLAY + 2)) + 1;
+  const totalColumns = 2 + (currentNumberOfPartials * (MAX_ACCUMULATED_ACTIVITIES_DISPLAY + 2)) + 1;
 
 
   return (
@@ -333,11 +351,16 @@ export default function StudentGradesPage() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2"><ClipboardCheck className="h-6 w-6 text-primary" /> Student Grades</CardTitle>
            <CardDescription>
-            Filter by group or search by student name. Displaying {gradingConfig.numberOfPartials} partials.
-            Max {MAX_ACCUMULATED_ACTIVITIES_DISPLAY} accumulated activities shown (total {gradingConfig.maxTotalAccumulatedScore}pts) and 1 exam ({gradingConfig.maxExamScore}pts) per partial.
-            Partial totals (max {gradingConfig.maxTotalAccumulatedScore + gradingConfig.maxExamScore}pts) and final grade (average of partials) below {gradingConfig.passingGrade}pts are highlighted.
-            Custom activity names in tooltip. Click <NotebookPen className="inline-block h-4 w-4" /> to manage grades.
+            Configuración actual: {currentNumberOfPartials} parciales, aprobación con {gradingConfig.passingGrade}pts.
+            Máx. {MAX_ACCUMULATED_ACTIVITIES_DISPLAY} act. acumuladas (total {gradingConfig.maxTotalAccumulatedScore}pts), examen {gradingConfig.maxExamScore}pts por parcial.
+            Click <NotebookPen className="inline-block h-4 w-4" /> para gestionar.
           </CardDescription>
+           {gradingConfig.numberOfPartials < 1 && (
+            <div className="mt-2 p-3 border border-red-500/50 bg-red-50 dark:bg-red-900/30 rounded-md text-sm text-red-700 dark:text-red-300 flex items-start gap-2">
+                <AlertTriangle className="h-5 w-5 mt-0.5 shrink-0"/>
+                <p>Advertencia: El número de parciales configurado es {gradingConfig.numberOfPartials}. Se mostrará al menos 1 parcial. Verifica la configuración en "App Settings".</p>
+            </div>
+          )}
            <div className="mt-4 flex flex-col sm:flex-row gap-4">
             <div className="flex-1 min-w-[200px]">
               <Label htmlFor="group-filter-grades">Filter by Group</Label>
@@ -400,12 +423,14 @@ export default function StudentGradesPage() {
                     </Button>
                   </TableCell>
                   
-                  {Array.from({ length: gradingConfig.numberOfPartials }).map((_, index) => {
+                  {Array.from({ length: currentNumberOfPartials }).map((_, index) => {
                     const pNum = index + 1;
-                    const partialKey = `partial${pNum}` as keyof NonNullable<User['grades']>;
-                    const partialData = student.grades?.[partialKey];
-                    const calculatedPartialTotalKey = `calculatedPartial${pNum}Total` as keyof StudentWithDetailedGrades;
+                    const partialKeyFirestore = `partial${pNum}` as keyof NonNullable<User['grades']>; // e.g. 'partial1'
+                    const partialData = student.grades?.[partialKeyFirestore];
                     
+                    const calculatedPartialTotalKey = `calculatedPartial${pNum}Total` as keyof StudentWithDetailedGrades; // e.g. 'calculatedPartial1Total'
+                    const studentPartialTotal = (student as any)[calculatedPartialTotalKey];
+
                     return (
                       <React.Fragment key={`student-${student.id}-p${pNum}`}>
                         {renderAccumulatedActivitiesScores(partialData?.accumulatedActivities, `p${pNum}`)}
@@ -413,7 +438,7 @@ export default function StudentGradesPage() {
                           {getScoreDisplay(partialData?.exam?.score, partialData?.exam?.name, "Exam")}
                         </TableCell>
                         <TableCell className="text-center font-semibold">
-                          {getScoreDisplay((student as any)[calculatedPartialTotalKey], null, null, true)}
+                          {getScoreDisplay(studentPartialTotal, null, null, true)}
                         </TableCell>
                       </React.Fragment>
                     );
@@ -444,4 +469,5 @@ export default function StudentGradesPage() {
       
 
     
+
 

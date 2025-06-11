@@ -8,11 +8,12 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Loader2, Save, UserCircle, ClipboardCheck, Search, Users, PlusCircle, Trash2 } from 'lucide-react';
+import { Loader2, Save, UserCircle, ClipboardCheck, Search, Users, PlusCircle, Trash2, AlertTriangle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { db } from '@/lib/firebase';
-import { collection, doc, getDocs, getDoc, updateDoc, query, where } from 'firebase/firestore';
-import type { User, PartialScores as PartialScoresType, ActivityScore as ActivityScoreType, ExamScore as ExamScoreType, Group as GroupType } from '@/types';
+import { collection, doc, getDocs, getDoc, updateDoc, query } from 'firebase/firestore';
+import type { User, PartialScores as PartialScoresType, ActivityScore as ActivityScoreType, ExamScore as ExamScoreType, Group as GroupType, GradingConfiguration } from '@/types';
+import { DEFAULT_GRADING_CONFIG } from '@/types';
 import { useForm, useFieldArray, Controller, UseFieldArrayReturn } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -26,11 +27,7 @@ import {
 } from '@/components/ui/form';
 import { Label } from '@/components/ui/label';
 
-const MAX_ACCUMULATED_ACTIVITIES = 5;
-const MAX_INDIVIDUAL_ACTIVITY_SCORE = 50; // Max score for a single accumulated activity
-const MAX_ACCUMULATED_TOTAL_SCORE = 50; // Max total for all accumulated activities combined
-const MAX_EXAM_SCORE = 50;
-const PASSING_GRADE = 70;
+const MAX_ACCUMULATED_ACTIVITIES = 5; // Max activities per partial UI-wise
 const DEBOUNCE_DELAY = 2500;
 
 // Helper debounce function
@@ -57,69 +54,79 @@ const parseOptionalFloat = (val: unknown): number | null | undefined => {
   return isNaN(num) ? undefined : num;
 };
 
-const activityScoreSchema = z.object({
+const activityScoreSchema = (config: GradingConfiguration) => z.object({
   id: z.string().optional(),
   name: z.string().max(50, "Nombre de actividad demasiado largo").optional().nullable(),
   score: z.preprocess(
     parseOptionalFloat,
-    z.number({invalid_type_error: "La calificación debe ser un número."}).min(0, "Mínimo 0").max(MAX_INDIVIDUAL_ACTIVITY_SCORE, `Máximo ${MAX_INDIVIDUAL_ACTIVITY_SCORE}`).optional().nullable()
+    z.number({invalid_type_error: "La calificación debe ser un número."}).min(0, "Mínimo 0").max(config.maxIndividualActivityScore, `Máximo ${config.maxIndividualActivityScore}`).optional().nullable()
   ),
 });
 
-const examScoreSchema = z.object({
+const examScoreSchema = (config: GradingConfiguration) => z.object({
   name: z.string().max(50, "Nombre de examen demasiado largo").optional().nullable(),
   score: z.preprocess(
     parseOptionalFloat,
-    z.number({invalid_type_error: "La calificación debe ser un número."}).min(0, "Mínimo 0").max(MAX_EXAM_SCORE, `Máximo ${MAX_EXAM_SCORE}`).optional().nullable()
+    z.number({invalid_type_error: "La calificación debe ser un número."}).min(0, "Mínimo 0").max(config.maxExamScore, `Máximo ${config.maxExamScore}`).optional().nullable()
   ),
 });
 
-const partialScoresObjectSchema = z.object({
-  accumulatedActivities: z.array(activityScoreSchema)
-    .max(MAX_ACCUMULATED_ACTIVITIES, `No se pueden exceder ${MAX_ACCUMULATED_ACTIVITIES} actividades de acumulación.`)
-    .refine(activities => {
-      const total = activities.reduce((sum, act) => sum + (act.score || 0), 0);
-      return total <= MAX_ACCUMULATED_TOTAL_SCORE;
-    }, {
-      message: `La suma de las calificaciones de las actividades de acumulación no puede exceder ${MAX_ACCUMULATED_TOTAL_SCORE}pts.`,
-      path: ['root'], 
-    }),
-  exam: examScoreSchema.nullable(),
+const partialScoresObjectSchema = (config: GradingConfiguration) => z.object({
+  accumulatedActivities: z.array(activityScoreSchema(config))
+    .max(MAX_ACCUMULATED_ACTIVITIES, `No se pueden exceder ${MAX_ACCUMULATED_ACTIVITIES} actividades de acumulación.`),
+  exam: examScoreSchema(config).nullable(),
+}).superRefine((data, ctx) => {
+    const totalAccumulated = data.accumulatedActivities.reduce((sum, act) => sum + (act.score || 0), 0);
+    if (totalAccumulated > config.maxTotalAccumulatedScore) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `La suma de las calificaciones de las actividades de acumulación no puede exceder ${config.maxTotalAccumulatedScore}pts. Actualmente es ${totalAccumulated.toFixed(2)}pts.`,
+        path: ['accumulatedActivities'], 
+      });
+    }
 });
 
-const gradeEntryFormSchema = z.object({
-  partial1: partialScoresObjectSchema,
-  partial2: partialScoresObjectSchema,
-  partial3: partialScoresObjectSchema,
-});
 
-type GradeEntryFormValues = z.infer<typeof gradeEntryFormSchema>;
+const generateGradeEntryFormSchema = (config: GradingConfiguration) => {
+    const partials: Record<string, any> = {};
+    for (let i = 1; i <= config.numberOfPartials; i++) {
+        partials[`partial${i}`] = partialScoresObjectSchema(config);
+    }
+     // Add remaining partials up to 4, but they might not be used if numberOfPartials is less
+    for (let i = config.numberOfPartials + 1; i <= 4; i++) {
+        partials[`partial${i}`] = partialScoresObjectSchema(config).optional(); // Or handle differently if they shouldn't exist in schema
+    }
+    return z.object(partials);
+};
 
-const getDefaultPartialData = (): z.infer<typeof partialScoresObjectSchema> => ({
+
+type GradeEntryFormValues = { // Static type for up to 4 partials for simplicity with RHF
+  partial1: z.infer<ReturnType<typeof partialScoresObjectSchema>>;
+  partial2: z.infer<ReturnType<typeof partialScoresObjectSchema>>;
+  partial3: z.infer<ReturnType<typeof partialScoresObjectSchema>>;
+  partial4?: z.infer<ReturnType<typeof partialScoresObjectSchema>>; // Optional for schema, UI controls presence
+};
+
+
+const getDefaultPartialData = (): z.infer<ReturnType<typeof partialScoresObjectSchema>> => ({
   accumulatedActivities: [],
   exam: { name: null, score: null },
 });
 
-// Helper function to sanitize partial data before saving to Firestore
 const mapPartialToSave = (partialInput: GradeEntryFormValues['partial1'] | undefined): PartialScoresType => {
     const activities = partialInput?.accumulatedActivities?.map(act => ({
-        id: act.id || Math.random().toString(36).substring(2,9), // RHF id
+        id: act.id || Math.random().toString(36).substring(2,9),
         name: act.name ?? null,
         score: act.score ?? null,
     })) || [];
 
     let examToSave: ExamScoreType | null = null;
-    if (partialInput?.exam === null) { // if exam object itself is null
-        examToSave = null;
-    } else if (partialInput?.exam) { // if exam object exists
+    if (partialInput?.exam) {
         examToSave = {
             name: partialInput.exam.name ?? null,
             score: partialInput.exam.score ?? null,
         };
-    } else { // if partialInput.exam is undefined (e.g. not in form data initially)
-        examToSave = { name: null, score: null }; // Default to an object with nulls, or just null if preferred
     }
-
     return {
         accumulatedActivities: activities,
         exam: examToSave,
@@ -135,21 +142,28 @@ export default function GradesManagementPage() {
   const [allStudents, setAllStudents] = useState<User[]>([]);
   const [allGroups, setAllGroups] = useState<GroupType[]>([]);
   const [selectedStudent, setSelectedStudent] = useState<User | null>(null);
-  const [isLoadingData, setIsLoadingData] = useState(true);
+  
+  const [gradingConfig, setGradingConfig] = useState<GradingConfiguration>(DEFAULT_GRADING_CONFIG);
+  const [isLoadingGradingConfig, setIsLoadingGradingConfig] = useState(true);
+  const [isLoadingData, setIsLoadingData] = useState(true); // For students/groups
   const [isSubmitting, setIsSubmitting] = useState(false);
   
   const [selectedGroupIdForFilter, setSelectedGroupIdForFilter] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error_saving'>('idle');
 
+
+  const currentFormSchema = useMemo(() => generateGradeEntryFormSchema(gradingConfig), [gradingConfig]);
+
   const gradeForm = useForm<GradeEntryFormValues>({
-    resolver: zodResolver(gradeEntryFormSchema),
+    resolver: zodResolver(currentFormSchema),
     defaultValues: {
       partial1: getDefaultPartialData(),
       partial2: getDefaultPartialData(),
       partial3: getDefaultPartialData(),
+      partial4: getDefaultPartialData(),
     },
-    mode: "onChange", // Important for isDirty and watching values
+    mode: "onChange", 
   });
 
   const { control, watch, setValue, handleSubmit, formState, getValues, reset } = gradeForm;
@@ -157,12 +171,54 @@ export default function GradesManagementPage() {
   const p1FieldArray = useFieldArray({ control, name: "partial1.accumulatedActivities" });
   const p2FieldArray = useFieldArray({ control, name: "partial2.accumulatedActivities" });
   const p3FieldArray = useFieldArray({ control, name: "partial3.accumulatedActivities" });
+  const p4FieldArray = useFieldArray({ control, name: "partial4.accumulatedActivities" });
+  
+  const partialFieldArrays = [p1FieldArray, p2FieldArray, p3FieldArray, p4FieldArray];
+
+  // Fetch Grading Configuration
+  useEffect(() => {
+    const fetchGradingConfig = async () => {
+      setIsLoadingGradingConfig(true);
+      console.log("[GradesManagementPage] Fetching grading config...");
+      try {
+        const configDocRef = doc(db, 'appConfiguration', 'currentGradingConfig');
+        const docSnap = await getDoc(configDocRef);
+        if (docSnap.exists()) {
+          const loadedConfig = docSnap.data() as GradingConfiguration;
+          // Validate loaded config
+          const validatedConfig: GradingConfiguration = {
+            id: loadedConfig.id || "currentGradingConfig",
+            numberOfPartials: [1, 2, 3, 4].includes(loadedConfig.numberOfPartials) ? loadedConfig.numberOfPartials : DEFAULT_GRADING_CONFIG.numberOfPartials,
+            passingGrade: typeof loadedConfig.passingGrade === 'number' ? loadedConfig.passingGrade : DEFAULT_GRADING_CONFIG.passingGrade,
+            maxIndividualActivityScore: typeof loadedConfig.maxIndividualActivityScore === 'number' ? loadedConfig.maxIndividualActivityScore : DEFAULT_GRADING_CONFIG.maxIndividualActivityScore,
+            maxTotalAccumulatedScore: typeof loadedConfig.maxTotalAccumulatedScore === 'number' ? loadedConfig.maxTotalAccumulatedScore : DEFAULT_GRADING_CONFIG.maxTotalAccumulatedScore,
+            maxExamScore: typeof loadedConfig.maxExamScore === 'number' ? loadedConfig.maxExamScore : DEFAULT_GRADING_CONFIG.maxExamScore,
+          };
+          setGradingConfig(validatedConfig);
+          console.log("[GradesManagementPage] Loaded grading config from Firestore:", loadedConfig);
+          console.log("[GradesManagementPage] Validated and setting gradingConfig:", validatedConfig);
+        } else {
+          setGradingConfig(DEFAULT_GRADING_CONFIG);
+          console.log("[GradesManagementPage] No grading config found in Firestore, using default:", DEFAULT_GRADING_CONFIG);
+          toast({ title: "Default Config", description: "Using default grading configuration. Please set in App Settings if needed.", variant: "default" });
+        }
+      } catch (error) {
+        console.error("Error fetching grading configuration:", error);
+        setGradingConfig(DEFAULT_GRADING_CONFIG);
+        toast({ title: "Error Loading Config", description: "Could not load grading settings. Using defaults.", variant: "destructive" });
+      } finally {
+        setIsLoadingGradingConfig(false);
+      }
+    };
+    fetchGradingConfig();
+  }, [toast]);
 
 
   const fetchInitialData = useCallback(async () => {
+    if (isLoadingGradingConfig) return;
     setIsLoadingData(true);
     try {
-      const studentQuery = query(collection(db, 'students')); // Corrected: Query 'students' collection
+      const studentQuery = query(collection(db, 'students'));
       const studentsSnapshot = await getDocs(studentQuery);
       const studentList = studentsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as User));
       setAllStudents(studentList);
@@ -185,31 +241,35 @@ export default function GradesManagementPage() {
       toast({ title: 'Error', description: 'No se pudieron cargar estudiantes o grupos.', variant: 'destructive' });
     }
     setIsLoadingData(false);
-  }, [searchParams, toast, router]);
+  }, [searchParams, toast, router, isLoadingGradingConfig]);
 
   useEffect(() => {
     fetchInitialData();
   }, [fetchInitialData]);
   
-  useEffect(() => {
-    if (selectedStudent) {
-      const studentGrades = selectedStudent.grades;
-      const mapActivities = (activities: ActivityScoreType[] | undefined) => 
-        activities?.map(a => ({...a, id: a.id || Math.random().toString(36).substr(2, 9)})) || [];
+  const mapActivities = (activities: ActivityScoreType[] | undefined | null) => 
+    activities?.map(a => ({...a, id: a.id || Math.random().toString(36).substr(2, 9)})) || [];
 
-      reset({
-        partial1: { ...getDefaultPartialData(), ...studentGrades?.partial1, accumulatedActivities: mapActivities(studentGrades?.partial1?.accumulatedActivities) },
-        partial2: { ...getDefaultPartialData(), ...studentGrades?.partial2, accumulatedActivities: mapActivities(studentGrades?.partial2?.accumulatedActivities) },
-        partial3: { ...getDefaultPartialData(), ...studentGrades?.partial3, accumulatedActivities: mapActivities(studentGrades?.partial3?.accumulatedActivities) },
-      });
+  useEffect(() => {
+    debouncedSave.cancel(); 
+    if (selectedStudent && gradingConfig) { 
+      const studentGrades = selectedStudent.grades || {};
+      const defaultValuesForForm: GradeEntryFormValues = {
+        partial1: { ...getDefaultPartialData(), ...studentGrades.partial1, accumulatedActivities: mapActivities(studentGrades.partial1?.accumulatedActivities) },
+        partial2: { ...getDefaultPartialData(), ...studentGrades.partial2, accumulatedActivities: mapActivities(studentGrades.partial2?.accumulatedActivities) },
+        partial3: { ...getDefaultPartialData(), ...studentGrades.partial3, accumulatedActivities: mapActivities(studentGrades.partial3?.accumulatedActivities) },
+        partial4: { ...getDefaultPartialData(), ...studentGrades.partial4, accumulatedActivities: mapActivities(studentGrades.partial4?.accumulatedActivities) },
+      };
+      reset(defaultValuesForForm);
     } else {
       reset({ 
         partial1: getDefaultPartialData(),
         partial2: getDefaultPartialData(),
         partial3: getDefaultPartialData(),
+        partial4: getDefaultPartialData(),
       });
     }
-  }, [selectedStudent, reset]);
+  }, [selectedStudent, reset, gradingConfig, debouncedSave]);
 
   const filteredStudentsList = useMemo(() => {
     let studentsToDisplay = allStudents;
@@ -217,7 +277,7 @@ export default function GradesManagementPage() {
       const group = allGroups.find(g => g.id === selectedGroupIdForFilter);
       if (group && Array.isArray(group.studentIds)) {
         studentsToDisplay = studentsToDisplay.filter(student => group.studentIds.includes(student.id));
-      } else if (group) { // Group selected but might have no studentIds array or is empty
+      } else if (group) { 
         studentsToDisplay = [];
       }
     }
@@ -231,22 +291,20 @@ export default function GradesManagementPage() {
 
   const handleSelectStudentForGrading = useCallback((student: User) => {
     setSelectedStudent(student);
-    // Update URL without causing a full page reload if just query param changes
     router.push(`/grades-management?studentId=${student.id}`, { scroll: false });
   }, [router]);
 
-  // Debounced save function
   const debouncedSave = useCallback(
     debounce(async (currentData: GradeEntryFormValues, studentId: string) => {
-      if (isSubmitting) return; 
+      if (isSubmitting || isLoadingGradingConfig) return; 
       setAutoSaveStatus('saving');
       try {
-        const studentRef = doc(db, "students", studentId); // Corrected: Use 'students' collection for studentRef
-        const gradesToSave = {
-          partial1: mapPartialToSave(currentData.partial1),
-          partial2: mapPartialToSave(currentData.partial2),
-          partial3: mapPartialToSave(currentData.partial3),
-        };
+        const studentRef = doc(db, "students", studentId);
+        const gradesToSave: { [key: string]: PartialScoresType } = {};
+        for (let i = 1; i <= gradingConfig.numberOfPartials; i++) {
+            const partialKey = `partial${i}` as keyof GradeEntryFormValues;
+            gradesToSave[partialKey] = mapPartialToSave(currentData[partialKey]);
+        }
         await updateDoc(studentRef, { grades: gradesToSave });
         setAutoSaveStatus('saved');
         setTimeout(() => setAutoSaveStatus('idle'), 3000);
@@ -257,37 +315,37 @@ export default function GradesManagementPage() {
         setTimeout(() => setAutoSaveStatus('idle'), 5000);
       }
     }, DEBOUNCE_DELAY),
-    [isSubmitting, toast] 
+    [isSubmitting, toast, gradingConfig, isLoadingGradingConfig] 
   );
 
   const watchedFormValues = watch(); 
 
   useEffect(() => {
-    if (formState.isDirty && selectedStudent && !isSubmitting) {
+    if (formState.isDirty && selectedStudent && !isSubmitting && !isLoadingGradingConfig) {
       const currentValues = getValues();
       debouncedSave(currentValues, selectedStudent.id);
     }
     return () => {
       debouncedSave.cancel();
     };
-  }, [watchedFormValues, selectedStudent, formState.isDirty, isSubmitting, debouncedSave, getValues]);
+  }, [watchedFormValues, selectedStudent, formState.isDirty, isSubmitting, debouncedSave, getValues, isLoadingGradingConfig]);
 
 
   const onSubmitGrades = async (data: GradeEntryFormValues) => {
-    if (!selectedStudent) { 
-      toast({ title: "Error", description: "Ningún estudiante seleccionado.", variant: "destructive" });
+    if (!selectedStudent || isLoadingGradingConfig) { 
+      toast({ title: "Error", description: isLoadingGradingConfig ? "Configuración de calificación aún cargando." : "Ningún estudiante seleccionado.", variant: "destructive" });
       return;
     }
     setIsSubmitting(true);
     debouncedSave.cancel(); 
     setAutoSaveStatus('saving');
     try {
-      const studentRef = doc(db, "students", selectedStudent.id); // Corrected: Use 'students' collection
-      const gradesToSave = {
-        partial1: mapPartialToSave(data.partial1),
-        partial2: mapPartialToSave(data.partial2),
-        partial3: mapPartialToSave(data.partial3),
-      };
+      const studentRef = doc(db, "students", selectedStudent.id);
+      const gradesToSave: { [key: string]: PartialScoresType } = {};
+      for (let i = 1; i <= gradingConfig.numberOfPartials; i++) {
+          const partialKey = `partial${i}` as keyof GradeEntryFormValues; // e.g. partial1, partial2
+          gradesToSave[partialKey] = mapPartialToSave(data[partialKey]);
+      }
       
       await updateDoc(studentRef, { grades: gradesToSave });
       
@@ -312,10 +370,9 @@ export default function GradesManagementPage() {
     }
   };
   
-
   const renderGradeInputFieldsForPartial = (
-    partialKey: "partial1" | "partial2" | "partial3",
-    fieldArrayHelpers: UseFieldArrayReturn<GradeEntryFormValues, `partial1.accumulatedActivities` | `partial2.accumulatedActivities` | `partial3.accumulatedActivities`, "id">
+    partialKey: "partial1" | "partial2" | "partial3" | "partial4",
+    fieldArrayHelpers: UseFieldArrayReturn<GradeEntryFormValues, any, "id"> // Use any for dynamic field name
   ) => {
     const { fields, append, remove } = fieldArrayHelpers;
     const accumulatedActivitiesValues = watch(`${partialKey}.accumulatedActivities`);
@@ -325,13 +382,13 @@ export default function GradesManagementPage() {
     const currentExamScore = typeof examScoreValue === 'number' ? examScoreValue : 0;
     const currentPartialTotal = currentTotalAccumulated + currentExamScore;
 
-    const pointsRemainingForAccumulated = MAX_ACCUMULATED_TOTAL_SCORE - currentTotalAccumulated;
-    const fieldsDisabled = isSubmitting || !selectedStudent;
+    const pointsRemainingForAccumulated = gradingConfig.maxTotalAccumulatedScore - currentTotalAccumulated;
+    const fieldsDisabled = isSubmitting || !selectedStudent || isLoadingGradingConfig;
 
     return (
       <div className="space-y-6 p-1">
         <div>
-          <h4 className="text-md font-semibold mb-2 text-card-foreground">Actividades de Acumulación (Máx. {MAX_ACCUMULATED_TOTAL_SCORE} pts total)</h4>
+          <h4 className="text-md font-semibold mb-2 text-card-foreground">Actividades de Acumulación (Máx. {gradingConfig.maxTotalAccumulatedScore} pts total)</h4>
           {fields.map((field, index) => (
             <Card key={field.id} className="mb-3 p-3 shadow-sm">
               <div className="flex justify-between items-center mb-2">
@@ -358,9 +415,9 @@ export default function GradesManagementPage() {
                 name={`${partialKey}.accumulatedActivities.${index}.score`}
                 render={({ field: scoreField }) => (
                   <FormItem>
-                    <FormLabel className="text-xs text-muted-foreground">Calificación (Max {MAX_INDIVIDUAL_ACTIVITY_SCORE})</FormLabel>
+                    <FormLabel className="text-xs text-muted-foreground">Calificación (Max {gradingConfig.maxIndividualActivityScore})</FormLabel>
                     <FormControl>
-                      <Input type="number" placeholder={`0-${MAX_INDIVIDUAL_ACTIVITY_SCORE}`} {...scoreField} value={scoreField.value === null ? '' : scoreField.value ?? ''} onChange={e => scoreField.onChange(parseOptionalFloat(e.target.value))} disabled={fieldsDisabled} />
+                      <Input type="number" placeholder={`0-${gradingConfig.maxIndividualActivityScore}`} {...scoreField} value={scoreField.value === null ? '' : scoreField.value ?? ''} onChange={e => scoreField.onChange(parseOptionalFloat(e.target.value))} disabled={fieldsDisabled} />
                     </FormControl>
                     <FormMessage className="text-xs"/>
                   </FormItem>
@@ -373,19 +430,19 @@ export default function GradesManagementPage() {
               <PlusCircle className="h-4 w-4 mr-1" /> Añadir Actividad de Acumulación
             </Button>
           )}
-           {formState.errors[partialKey]?.accumulatedActivities?.root && (
+           {formState.errors[partialKey]?.accumulatedActivities && (
              <p className="text-sm font-medium text-destructive mt-1">
-                {formState.errors[partialKey]?.accumulatedActivities?.root?.message}
+                {(formState.errors[partialKey]?.accumulatedActivities as any)?.message || (formState.errors[partialKey]?.accumulatedActivities as any)?.root?.message}
             </p>
            )}
           <div className="mt-3 text-sm text-muted-foreground">
-            Total Acumulado Actual: <span className="font-bold">{currentTotalAccumulated.toFixed(2)} / {MAX_ACCUMULATED_TOTAL_SCORE}</span><br/>
+            Total Acumulado Actual: <span className="font-bold">{currentTotalAccumulated.toFixed(2)} / {gradingConfig.maxTotalAccumulatedScore}</span><br/>
             (Puntos restantes para acumulado: {pointsRemainingForAccumulated.toFixed(2)})
           </div>
         </div>
         
         <div className="space-y-3 rounded-md border p-4 shadow-sm bg-card mt-4">
-           <h4 className="text-md font-semibold text-card-foreground">Examen (Máx. {MAX_EXAM_SCORE} pts)</h4>
+           <h4 className="text-md font-semibold text-card-foreground">Examen (Máx. {gradingConfig.maxExamScore} pts)</h4>
             <FormField
               control={control}
               name={`${partialKey}.exam.name`}
@@ -404,18 +461,18 @@ export default function GradesManagementPage() {
               name={`${partialKey}.exam.score`}
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel className="text-sm text-muted-foreground">Calificación del Examen (Max {MAX_EXAM_SCORE})</FormLabel>
+                  <FormLabel className="text-sm text-muted-foreground">Calificación del Examen (Max {gradingConfig.maxExamScore})</FormLabel>
                   <FormControl>
-                    <Input type="number" step="0.1" placeholder={`0-${MAX_EXAM_SCORE}`} {...field} value={field.value === null ? '' : field.value ?? ''} onChange={e => field.onChange(parseOptionalFloat(e.target.value))} disabled={fieldsDisabled} />
+                    <Input type="number" step="0.1" placeholder={`0-${gradingConfig.maxExamScore}`} {...field} value={field.value === null ? '' : field.value ?? ''} onChange={e => field.onChange(parseOptionalFloat(e.target.value))} disabled={fieldsDisabled} />
                   </FormControl>
                   <FormMessage className="text-xs"/>
                 </FormItem>
               )}
             />
         </div>
-        <div className={`mt-4 p-3 rounded-md text-center ${currentPartialTotal >= PASSING_GRADE ? 'bg-green-100 dark:bg-green-800/50' : 'bg-red-100 dark:bg-red-800/50'}`}>
-            <p className={`text-lg font-semibold ${currentPartialTotal >= PASSING_GRADE ? 'text-green-700 dark:text-green-300' : 'text-red-700 dark:text-red-300'}`}>
-                Nota Total del Parcial: {currentPartialTotal.toFixed(2)} / 100
+        <div className={`mt-4 p-3 rounded-md text-center ${currentPartialTotal >= gradingConfig.passingGrade ? 'bg-green-100 dark:bg-green-800/50' : 'bg-red-100 dark:bg-red-800/50'}`}>
+            <p className={`text-lg font-semibold ${currentPartialTotal >= gradingConfig.passingGrade ? 'text-green-700 dark:text-green-300' : 'text-red-700 dark:text-red-300'}`}>
+                Nota Total del Parcial: {currentPartialTotal.toFixed(2)} / {gradingConfig.maxTotalAccumulatedScore + gradingConfig.maxExamScore}
             </p>
         </div>
       </div>
@@ -439,7 +496,7 @@ export default function GradesManagementPage() {
     }
   };
 
-  if (isLoadingData && !allStudents.length && !allGroups.length) {
+  if (isLoadingGradingConfig || (isLoadingData && !allStudents.length && !allGroups.length)) {
     return (
         <Card>
             <CardHeader>
@@ -447,7 +504,7 @@ export default function GradesManagementPage() {
                 <ClipboardCheck className="h-6 w-6 text-primary" /> Grades Management
                 </CardTitle>
                  <CardDescription>
-                    Máximo {MAX_ACCUMULATED_ACTIVITIES} actividades de acumulación (total {MAX_ACCUMULATED_TOTAL_SCORE}pts) y 1 examen ({MAX_EXAM_SCORE}pts) por parcial. Nota parcial total 100pts. Aprobación con {PASSING_GRADE}pts.
+                    Cargando configuración y datos...
                 </CardDescription>
             </CardHeader>
             <CardContent className="flex items-center justify-center py-10">
@@ -468,8 +525,16 @@ export default function GradesManagementPage() {
           </CardTitle>
           <CardDescription>
             Filtra estudiantes por grupo o busca por nombre. Selecciona un estudiante para editar sus calificaciones.
-            Máximo {MAX_ACCUMULATED_ACTIVITIES} actividades de acumulación (total {MAX_ACCUMULATED_TOTAL_SCORE}pts) y 1 examen ({MAX_EXAM_SCORE}pts) por parcial. Nota parcial total 100pts. Aprobación con {PASSING_GRADE}pts.
+            Configuración actual: {gradingConfig.numberOfPartials} parciales, aprobación con {gradingConfig.passingGrade}pts.
+            Máx. {MAX_ACCUMULATED_ACTIVITIES} actividades de acumulación (total {gradingConfig.maxTotalAccumulatedScore}pts) y 1 examen ({gradingConfig.maxExamScore}pts) por parcial.
+            Nota parcial total {gradingConfig.maxTotalAccumulatedScore + gradingConfig.maxExamScore}pts.
           </CardDescription>
+           {gradingConfig.numberOfPartials < 1 && (
+            <div className="mt-2 p-3 border border-red-500/50 bg-red-50 dark:bg-red-900/30 rounded-md text-sm text-red-700 dark:text-red-300 flex items-start gap-2">
+                <AlertTriangle className="h-5 w-5 mt-0.5 shrink-0"/>
+                <p>La configuración de número de parciales es inválida ({gradingConfig.numberOfPartials}). Por favor, ajústala en "App Settings". Se usará 1 parcial por defecto para la UI.</p>
+            </div>
+          )}
         </CardHeader>
         <CardContent className="space-y-4">
          <div className="flex flex-col sm:flex-row gap-4">
@@ -571,41 +636,44 @@ export default function GradesManagementPage() {
             <CardTitle>
               {selectedStudent ? `Editando Calificaciones para: ${selectedStudent.name}` : 'Selecciona un Estudiante para Editar Calificaciones'}
             </CardTitle>
-            <CardDescription>
-              {selectedStudent 
-                ? `Ingresa nombres de actividades (opcional) y calificaciones. Máx. ${MAX_ACCUMULATED_ACTIVITIES} actividades acumuladas (total ${MAX_ACCUMULATED_TOTAL_SCORE}pts), examen ${MAX_EXAM_SCORE}pts. Nota parcial total 100pts. Aprobación con ${PASSING_GRADE}pts.`
-                : 'Una vez que selecciones un estudiante, podrás editar sus calificaciones aquí.'
+             <CardDescription>
+              {selectedStudent && !isLoadingGradingConfig
+                ? `Configuración: ${gradingConfig.numberOfPartials} parciales. Acum. máx ${gradingConfig.maxTotalAccumulatedScore}pts, Examen máx ${gradingConfig.maxExamScore}pts. Aprobación ${gradingConfig.passingGrade}pts.`
+                : isLoadingGradingConfig ? 'Cargando configuración de calificación...' : 'Una vez que selecciones un estudiante, podrás editar sus calificaciones aquí.'
               }
             </CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit(onSubmitGrades)} className="space-y-6">
               <Tabs defaultValue="partial1" className="w-full">
-                <TabsList className="grid w-full grid-cols-3">
-                  <TabsTrigger value="partial1" disabled={!selectedStudent || isSubmitting}>1er Parcial</TabsTrigger>
-                  <TabsTrigger value="partial2" disabled={!selectedStudent || isSubmitting}>2do Parcial</TabsTrigger>
-                  <TabsTrigger value="partial3" disabled={!selectedStudent || isSubmitting}>3er Parcial</TabsTrigger>
+                <TabsList className={`grid w-full grid-cols-${Math.max(1, gradingConfig.numberOfPartials)}`}>
+                  {Array.from({ length: Math.max(1, gradingConfig.numberOfPartials) }, (_, i) => i + 1).map((pNum) => (
+                    <TabsTrigger key={`tab-trigger-p${pNum}`} value={`partial${pNum}`} disabled={!selectedStudent || isSubmitting || isLoadingGradingConfig}>
+                      {pNum}{pNum === 1 ? 'st' : pNum === 2 ? 'nd' : pNum === 3 ? 'rd' : 'th'} Partial
+                    </TabsTrigger>
+                  ))}
                 </TabsList>
-                <TabsContent value="partial1" className="border-x border-b p-4 rounded-b-md">
-                  {renderGradeInputFieldsForPartial("partial1", p1FieldArray)}
-                </TabsContent>
-                <TabsContent value="partial2" className="border-x border-b p-4 rounded-b-md">
-                  {renderGradeInputFieldsForPartial("partial2", p2FieldArray)}
-                </TabsContent>
-                <TabsContent value="partial3" className="border-x border-b p-4 rounded-b-md">
-                  {renderGradeInputFieldsForPartial("partial3", p3FieldArray)}
-                </TabsContent>
+                {Array.from({ length: Math.max(1, gradingConfig.numberOfPartials) }, (_, i) => i + 1).map((pNum) => {
+                  const partialKey = `partial${pNum}` as "partial1" | "partial2" | "partial3" | "partial4";
+                  const fieldArrayHelper = partialFieldArrays[pNum-1];
+                  if (!fieldArrayHelper) return null; // Should not happen with Math.max(1,...)
+                  return (
+                    <TabsContent key={`tab-content-p${pNum}`} value={partialKey} className="border-x border-b p-4 rounded-b-md">
+                      {renderGradeInputFieldsForPartial(partialKey, fieldArrayHelper)}
+                    </TabsContent>
+                  );
+                })}
               </Tabs>
               <div className="flex items-center">
-                <Button type="submit" disabled={isSubmitting || !selectedStudent || !formState.isDirty} className="sm:w-auto">
-                    {isSubmitting && autoSaveStatus === 'saving' && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                <Button type="submit" disabled={isSubmitting || !selectedStudent || !formState.isDirty || isLoadingGradingConfig} className="sm:w-auto">
+                    {(isSubmitting || isLoadingGradingConfig) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                     <Save className="mr-2 h-4 w-4" /> 
                     {selectedStudent ? `Guardar Calificaciones para ${selectedStudent.name}` : 'Guardar Calificaciones'}
                 </Button>
                 {renderAutoSaveStatus()}
               </div>
 
-              {!selectedStudent && !isLoadingData && (
+              {!selectedStudent && !isLoadingData && !isLoadingGradingConfig && (
                 <p className="text-muted-foreground text-center py-6">
                   Por favor, selecciona un estudiante usando los filtros de arriba para gestionar sus calificaciones.
                 </p>
