@@ -21,8 +21,9 @@ export default function DashboardPage() {
     const fetchDashboardData = async () => {
       setIsLoading(true);
       try {
-        const usersSnapshot = await getDocs(query(collection(db, 'users'), where('role', '==', 'student')));
-        setTotalStudents(usersSnapshot.size);
+        // Fetch from 'students' collection directly for total students
+        const studentsSnapshot = await getDocs(collection(db, 'students'));
+        setTotalStudents(studentsSnapshot.size);
 
         const groupsSnapshot = await getDocs(collection(db, 'groups')); // Fetch from 'groups' collection
         setTotalGroups(groupsSnapshot.size); // Set totalGroups
