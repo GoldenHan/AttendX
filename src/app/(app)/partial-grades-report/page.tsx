@@ -242,43 +242,40 @@ export default function PartialGradesReportPage() {
       return;
     }
   
-    const worksheet = XLSX.utils.aoa_to_sheet([]); // Start with an empty sheet data array
+    const worksheet = XLSX.utils.aoa_to_sheet([]); 
     const merges: XLSX.Range[] = [];
     const numPartials = gradingConfig.numberOfPartials;
-    const colsPerPartial = MAX_ACCUMULATED_ACTIVITIES_DISPLAY + 2; // Activities + Exam + Partial Total
+    const colsPerPartial = MAX_ACCUMULATED_ACTIVITIES_DISPLAY + 2; 
     let currentRowIndex = 0;
   
-    // Define basic styles
-    const headerStyle1 = { font: { bold: true }, fill: { fgColor: { rgb: "FFDDEEFF" } }, alignment: { horizontal: "center" } }; // Light Blue
-    const headerStyle2 = { font: { bold: true }, fill: { fgColor: { rgb: "FFE0E0E0" } }, alignment: { horizontal: "center" } }; // Light Gray
-    const boldStyle = { font: { bold: true }, alignment: { horizontal: "center" } };
-    const centerAlignStyle = { alignment: { horizontal: "center" } };
+    const headerStyle1 = { font: { bold: true }, fill: { fgColor: { rgb: "FFDDEEFF" } }, alignment: { horizontal: "center", vertical: "center" } }; 
+    const headerStyle2 = { font: { bold: true }, fill: { fgColor: { rgb: "FFE0E0E0" } }, alignment: { horizontal: "center", vertical: "center" } }; 
+    const boldStyle = { font: { bold: true }, alignment: { horizontal: "center", vertical: "center" } };
   
-    // Helper to set cell value and style
-    const setCell = (r: number, c: number, value: string | number | null, style?: any, type: 's' | 'n' | 'd' = 's') => {
+    const setCell = (r: number, c: number, value: string | number | null, style?: any, type: 's' | 'n' = 's') => {
       const cellRef = XLSX.utils.encode_cell({ r, c });
-      worksheet[cellRef] = { v: value === null ? "" : value, t: type };
+      if (!worksheet[cellRef]) worksheet[cellRef] = {};
+      worksheet[cellRef].v = value === null ? "" : value;
+      worksheet[cellRef].t = type;
       if (style) {
         worksheet[cellRef].s = style;
       }
     };
     
-    // Row 1: Merged Partial Names
-    let currentCellIndex = 2;
-    setCell(currentRowIndex, 0, "", boldStyle);
-    setCell(currentRowIndex, 1, "", boldStyle);
+    let currentCellIndex = 0;
+    setCell(currentRowIndex, currentCellIndex++, "", boldStyle); // Placeholder A1
+    setCell(currentRowIndex, currentCellIndex++, "", boldStyle); // Placeholder B1
 
     for (let i = 1; i <= numPartials; i++) {
       const pName = `${i}${i === 1 ? 'er' : i === 2 ? 'do' : i === 3 ? 'er' : 'to'} Parcial`;
       setCell(currentRowIndex, currentCellIndex, pName, headerStyle1);
       merges.push({ s: { r: currentRowIndex, c: currentCellIndex }, e: { r: currentRowIndex, c: currentCellIndex + colsPerPartial - 1 } });
-      for (let j = 1; j < colsPerPartial; j++) setCell(currentRowIndex, currentCellIndex + j, "", headerStyle1); // Fill merged cells
+      for (let j = 1; j < colsPerPartial; j++) setCell(currentRowIndex, currentCellIndex + j, "", headerStyle1); 
       currentCellIndex += colsPerPartial;
     }
     setCell(currentRowIndex, currentCellIndex, "Nota Final", headerStyle1);
     currentRowIndex++;
   
-    // Row 2: Main Data Headers
     currentCellIndex = 0;
     setCell(currentRowIndex, currentCellIndex++, "Nombres", headerStyle2);
     setCell(currentRowIndex, currentCellIndex++, "Teléfono", headerStyle2);
@@ -293,24 +290,22 @@ export default function PartialGradesReportPage() {
     setCell(currentRowIndex, currentCellIndex, "NF", headerStyle2);
     currentRowIndex++;
 
-    // Row 3: Sub-headers (Evaluación, Activity Labels)
     currentCellIndex = 0;
     setCell(currentRowIndex, currentCellIndex++, "Evaluación", boldStyle);
-    setCell(currentRowIndex, currentCellIndex++, "", boldStyle); // Teléfono is blank
+    setCell(currentRowIndex, currentCellIndex++, "", boldStyle); 
     for (let i = 1; i <= numPartials; i++) {
       for (let j = 1; j <= MAX_ACCUMULATED_ACTIVITIES_DISPLAY; j++) {
         setCell(currentRowIndex, currentCellIndex++, `Act. ${j}`, boldStyle);
       }
-      setCell(currentRowIndex, currentCellIndex++, "", boldStyle); // For Examen (empty text, just bold border implied)
-      setCell(currentRowIndex, currentCellIndex++, `${i}${i === 1 ? 'st' : i === 2 ? 'nd' : i === 3 ? 'rd' : 'th'}`, boldStyle); // For Nota Parcial
+      setCell(currentRowIndex, currentCellIndex++, "Examen", boldStyle); 
+      setCell(currentRowIndex, currentCellIndex++, `${i}${i === 1 ? 'st' : i === 2 ? 'nd' : i === 3 ? 'rd' : 'th'}`, boldStyle); 
     }
-    setCell(currentRowIndex, currentCellIndex++, "", boldStyle); // For NF
+    setCell(currentRowIndex, currentCellIndex++, "", boldStyle); 
     currentRowIndex++;
 
-    // Row 4: Puntuación (Max Scores)
     currentCellIndex = 0;
     setCell(currentRowIndex, currentCellIndex++, "Puntuación", boldStyle);
-    setCell(currentRowIndex, currentCellIndex++, "", boldStyle); // Teléfono is blank
+    setCell(currentRowIndex, currentCellIndex++, "", boldStyle); 
     for (let i = 1; i <= numPartials; i++) {
       for (let j = 1; j <= MAX_ACCUMULATED_ACTIVITIES_DISPLAY; j++) {
         setCell(currentRowIndex, currentCellIndex++, gradingConfig.maxIndividualActivityScore, boldStyle, 'n');
@@ -318,10 +313,11 @@ export default function PartialGradesReportPage() {
       setCell(currentRowIndex, currentCellIndex++, gradingConfig.maxExamScore, boldStyle, 'n');
       setCell(currentRowIndex, currentCellIndex++, gradingConfig.maxTotalAccumulatedScore + gradingConfig.maxExamScore, boldStyle, 'n');
     }
-    setCell(currentRowIndex, currentCellIndex++, 100, boldStyle, 'n'); // Max Final Grade
-    currentRowIndex++;
+    setCell(currentRowIndex, currentCellIndex++, 100, boldStyle, 'n'); 
+    
+    const totalHeaderRows = currentRowIndex + 1;
 
-    // Student Data Rows
+
     const studentDataRows: (string | number | null)[][] = studentsToDisplayInTable.map(student => {
       const studentRow: (string | number | null)[] = [student.name, student.phoneNumber || null];
       for (let i = 1; i <= numPartials; i++) {
@@ -339,30 +335,27 @@ export default function PartialGradesReportPage() {
       return studentRow;
     });
     
-    // Add student data starting from the determined currentRowIndex
-    XLSX.utils.sheet_add_aoa(worksheet, studentDataRows, { origin: XLSX.utils.encode_cell({r: currentRowIndex, c: 0}), cellStyles: false });
+    XLSX.utils.sheet_add_aoa(worksheet, studentDataRows, { origin: {r: totalHeaderRows, c: 0}, cellStyles: false });
 
     worksheet['!merges'] = merges;
     
-    // Auto-fit columns (basic attempt, might not be perfect for all content)
+    const finalTotalCols = 2 + numPartials * (MAX_ACCUMULATED_ACTIVITIES_DISPLAY + 2) + 1;
     const colWidths = [];
-    const firstDataRowLength = (worksheetData[0]?.length || 2 + numPartials * (MAX_ACCUMULATED_ACTIVITIES_DISPLAY + 2) + 1);
-    for (let C = 0; C < firstDataRowLength; ++C) {
+    for (let C = 0; C < finalTotalCols; ++C) {
       let max_w = 0;
-      for (let R = 0; R < currentRowIndex + studentDataRows.length; ++R) {
+      for (let R = 0; R < totalHeaderRows + studentDataRows.length; ++R) {
         const cell_ref = XLSX.utils.encode_cell({c:C, r:R});
-        if(worksheet[cell_ref]) {
-          const cell_val_str = String(worksheet[cell_ref].v || '');
+        if(worksheet[cell_ref] && worksheet[cell_ref].v !== null && worksheet[cell_ref].v !== undefined) {
+          const cell_val_str = String(worksheet[cell_ref].v);
           if(cell_val_str.length > max_w) max_w = cell_val_str.length;
         }
       }
-      colWidths.push({wch: Math.max(10, max_w + 2)}); // Min width 10, add padding
+      colWidths.push({wch: Math.min(Math.max(10, max_w + 2), 50)}); // Min width 10, max 50, add padding
     }
     worksheet['!cols'] = colWidths;
     
-    // Set range of worksheet
-    const endCell = XLSX.utils.encode_cell({r: currentRowIndex + studentDataRows.length -1, c: (2 + numPartials * colsPerPartial)});
-    worksheet['!ref'] = XLSX.utils.encode_range({s: {r:0, c:0}, e: XLSX.utils.decode_cell(endCell)});
+    const endCellRef = XLSX.utils.encode_cell({r: totalHeaderRows + studentDataRows.length -1, c: finalTotalCols -1});
+    worksheet['!ref'] = XLSX.utils.encode_range({s: {r:0, c:0}, e: XLSX.utils.decode_cell(endCellRef)});
 
 
     const workbook = XLSX.utils.book_new();
@@ -587,5 +580,7 @@ export default function PartialGradesReportPage() {
     </TooltipProvider>
   );
 }
+
+    
 
     
