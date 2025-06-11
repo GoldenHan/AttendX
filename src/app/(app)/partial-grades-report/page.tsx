@@ -241,66 +241,89 @@ export default function PartialGradesReportPage() {
       toast({ title: "No data to export", description: "Please filter to display some students or wait for data to load.", variant: "default" });
       return;
     }
-
-    const worksheetData: (string | number | null)[][] = [];
+  
+    const worksheet = XLSX.utils.aoa_to_sheet([]); // Start with an empty sheet data array
     const merges: XLSX.Range[] = [];
     const numPartials = gradingConfig.numberOfPartials;
     const colsPerPartial = MAX_ACCUMULATED_ACTIVITIES_DISPLAY + 2; // Activities + Exam + Partial Total
-
+    let currentRowIndex = 0;
+  
+    // Define basic styles
+    const headerStyle1 = { font: { bold: true }, fill: { fgColor: { rgb: "FFDDEEFF" } }, alignment: { horizontal: "center" } }; // Light Blue
+    const headerStyle2 = { font: { bold: true }, fill: { fgColor: { rgb: "FFE0E0E0" } }, alignment: { horizontal: "center" } }; // Light Gray
+    const boldStyle = { font: { bold: true }, alignment: { horizontal: "center" } };
+    const centerAlignStyle = { alignment: { horizontal: "center" } };
+  
+    // Helper to set cell value and style
+    const setCell = (r: number, c: number, value: string | number | null, style?: any, type: 's' | 'n' | 'd' = 's') => {
+      const cellRef = XLSX.utils.encode_cell({ r, c });
+      worksheet[cellRef] = { v: value === null ? "" : value, t: type };
+      if (style) {
+        worksheet[cellRef].s = style;
+      }
+    };
+    
     // Row 1: Merged Partial Names
-    const headerRow1: (string | number | null)[] = ["", ""]; // Nombres, Teléfono
     let currentCellIndex = 2;
+    setCell(currentRowIndex, 0, "", boldStyle);
+    setCell(currentRowIndex, 1, "", boldStyle);
+
     for (let i = 1; i <= numPartials; i++) {
       const pName = `${i}${i === 1 ? 'er' : i === 2 ? 'do' : i === 3 ? 'er' : 'to'} Parcial`;
-      headerRow1.push(pName);
-      merges.push({ s: { r: 0, c: currentCellIndex }, e: { r: 0, c: currentCellIndex + colsPerPartial - 1 } });
-      for (let j = 1; j < colsPerPartial; j++) headerRow1.push(""); // Empty cells for merge
+      setCell(currentRowIndex, currentCellIndex, pName, headerStyle1);
+      merges.push({ s: { r: currentRowIndex, c: currentCellIndex }, e: { r: currentRowIndex, c: currentCellIndex + colsPerPartial - 1 } });
+      for (let j = 1; j < colsPerPartial; j++) setCell(currentRowIndex, currentCellIndex + j, "", headerStyle1); // Fill merged cells
       currentCellIndex += colsPerPartial;
     }
-    headerRow1.push("Nota Final");
-    worksheetData.push(headerRow1);
-
+    setCell(currentRowIndex, currentCellIndex, "Nota Final", headerStyle1);
+    currentRowIndex++;
+  
     // Row 2: Main Data Headers
-    const headerRow2: (string | number | null)[] = ["Nombres", "Teléfono"];
-    currentCellIndex = 2;
+    currentCellIndex = 0;
+    setCell(currentRowIndex, currentCellIndex++, "Nombres", headerStyle2);
+    setCell(currentRowIndex, currentCellIndex++, "Teléfono", headerStyle2);
     for (let i = 1; i <= numPartials; i++) {
-      headerRow2.push("Acumulado");
-      merges.push({ s: { r: 1, c: currentCellIndex }, e: { r: 1, c: currentCellIndex + MAX_ACCUMULATED_ACTIVITIES_DISPLAY - 1 } });
-      for (let j = 1; j < MAX_ACCUMULATED_ACTIVITIES_DISPLAY; j++) headerRow2.push("");
-      headerRow2.push("Examen");
-      headerRow2.push("Nota Parcial");
-      currentCellIndex += colsPerPartial;
+      setCell(currentRowIndex, currentCellIndex, "Acumulado", headerStyle2);
+      merges.push({ s: { r: currentRowIndex, c: currentCellIndex }, e: { r: currentRowIndex, c: currentCellIndex + MAX_ACCUMULATED_ACTIVITIES_DISPLAY - 1 } });
+      for (let j = 1; j < MAX_ACCUMULATED_ACTIVITIES_DISPLAY; j++) setCell(currentRowIndex, currentCellIndex + j, "", headerStyle2);
+      currentCellIndex += MAX_ACCUMULATED_ACTIVITIES_DISPLAY;
+      setCell(currentRowIndex, currentCellIndex++, "Examen", headerStyle2);
+      setCell(currentRowIndex, currentCellIndex++, "Nota Parcial", headerStyle2);
     }
-    headerRow2.push("NF");
-    worksheetData.push(headerRow2);
+    setCell(currentRowIndex, currentCellIndex, "NF", headerStyle2);
+    currentRowIndex++;
 
     // Row 3: Sub-headers (Evaluación, Activity Labels)
-    const headerRow3: (string | number | null)[] = ["Evaluación", ""]; // Teléfono is blank
+    currentCellIndex = 0;
+    setCell(currentRowIndex, currentCellIndex++, "Evaluación", boldStyle);
+    setCell(currentRowIndex, currentCellIndex++, "", boldStyle); // Teléfono is blank
     for (let i = 1; i <= numPartials; i++) {
       for (let j = 1; j <= MAX_ACCUMULATED_ACTIVITIES_DISPLAY; j++) {
-        headerRow3.push(`Act. ${j}`);
+        setCell(currentRowIndex, currentCellIndex++, `Act. ${j}`, boldStyle);
       }
-      headerRow3.push(""); // For Examen
-      headerRow3.push(`${i}${i === 1 ? 'st' : i === 2 ? 'nd' : i === 3 ? 'rd' : 'th'}`); // For Nota Parcial
+      setCell(currentRowIndex, currentCellIndex++, "", boldStyle); // For Examen (empty text, just bold border implied)
+      setCell(currentRowIndex, currentCellIndex++, `${i}${i === 1 ? 'st' : i === 2 ? 'nd' : i === 3 ? 'rd' : 'th'}`, boldStyle); // For Nota Parcial
     }
-    headerRow3.push(""); // For NF
-    worksheetData.push(headerRow3);
+    setCell(currentRowIndex, currentCellIndex++, "", boldStyle); // For NF
+    currentRowIndex++;
 
     // Row 4: Puntuación (Max Scores)
-    const headerRow4: (string | number | null)[] = ["Puntuación", ""]; // Teléfono is blank
+    currentCellIndex = 0;
+    setCell(currentRowIndex, currentCellIndex++, "Puntuación", boldStyle);
+    setCell(currentRowIndex, currentCellIndex++, "", boldStyle); // Teléfono is blank
     for (let i = 1; i <= numPartials; i++) {
       for (let j = 1; j <= MAX_ACCUMULATED_ACTIVITIES_DISPLAY; j++) {
-        headerRow4.push(gradingConfig.maxIndividualActivityScore);
+        setCell(currentRowIndex, currentCellIndex++, gradingConfig.maxIndividualActivityScore, boldStyle, 'n');
       }
-      headerRow4.push(gradingConfig.maxExamScore);
-      headerRow4.push(gradingConfig.maxTotalAccumulatedScore + gradingConfig.maxExamScore);
+      setCell(currentRowIndex, currentCellIndex++, gradingConfig.maxExamScore, boldStyle, 'n');
+      setCell(currentRowIndex, currentCellIndex++, gradingConfig.maxTotalAccumulatedScore + gradingConfig.maxExamScore, boldStyle, 'n');
     }
-    headerRow4.push(100); // Max Final Grade
-    worksheetData.push(headerRow4);
+    setCell(currentRowIndex, currentCellIndex++, 100, boldStyle, 'n'); // Max Final Grade
+    currentRowIndex++;
 
     // Student Data Rows
-    studentsToDisplayInTable.forEach(student => {
-      const studentRow: (string | number | null)[] = [student.name, student.phoneNumber || ""];
+    const studentDataRows: (string | number | null)[][] = studentsToDisplayInTable.map(student => {
+      const studentRow: (string | number | null)[] = [student.name, student.phoneNumber || null];
       for (let i = 1; i <= numPartials; i++) {
         const partialKey = `partial${i}` as keyof User['grades'];
         const partialData = student.grades?.[partialKey];
@@ -312,20 +335,43 @@ export default function PartialGradesReportPage() {
         const partialTotalKey = `calculatedPartial${i}Total` as keyof StudentWithDetailedGrades;
         studentRow.push((student as any)[partialTotalKey] ?? null);
       }
-      studentRow.push(student.calculatedFinalGrade ?? null);
-      worksheetData.push(studentRow);
+      studentRow.push(student.calculatedFinalGrade !== null && student.calculatedFinalGrade !== undefined ? parseFloat(student.calculatedFinalGrade.toFixed(2)) : null);
+      return studentRow;
     });
+    
+    // Add student data starting from the determined currentRowIndex
+    XLSX.utils.sheet_add_aoa(worksheet, studentDataRows, { origin: XLSX.utils.encode_cell({r: currentRowIndex, c: 0}), cellStyles: false });
 
-    const worksheet = XLSX.utils.aoa_to_sheet(worksheetData);
     worksheet['!merges'] = merges;
     
+    // Auto-fit columns (basic attempt, might not be perfect for all content)
+    const colWidths = [];
+    const firstDataRowLength = (worksheetData[0]?.length || 2 + numPartials * (MAX_ACCUMULATED_ACTIVITIES_DISPLAY + 2) + 1);
+    for (let C = 0; C < firstDataRowLength; ++C) {
+      let max_w = 0;
+      for (let R = 0; R < currentRowIndex + studentDataRows.length; ++R) {
+        const cell_ref = XLSX.utils.encode_cell({c:C, r:R});
+        if(worksheet[cell_ref]) {
+          const cell_val_str = String(worksheet[cell_ref].v || '');
+          if(cell_val_str.length > max_w) max_w = cell_val_str.length;
+        }
+      }
+      colWidths.push({wch: Math.max(10, max_w + 2)}); // Min width 10, add padding
+    }
+    worksheet['!cols'] = colWidths;
+    
+    // Set range of worksheet
+    const endCell = XLSX.utils.encode_cell({r: currentRowIndex + studentDataRows.length -1, c: (2 + numPartials * colsPerPartial)});
+    worksheet['!ref'] = XLSX.utils.encode_range({s: {r:0, c:0}, e: XLSX.utils.decode_cell(endCell)});
+
+
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Reporte Notas Parciales");
-
+  
     const today = new Date().toISOString().split('T')[0];
     try {
       XLSX.writeFile(workbook, `Reporte_Notas_Parciales_${today}.xlsx`);
-      toast({ title: "Export Successful", description: "Report exported to XLSX with custom template." });
+      toast({ title: "Export Successful", description: "Report exported to XLSX with template structure and basic styles." });
     } catch (error) {
       console.error("Error exporting to XLSX:", error);
       toast({ title: "Export Failed", description: "Could not generate the XLSX file.", variant: "destructive" });
