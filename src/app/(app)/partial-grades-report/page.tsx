@@ -11,7 +11,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import type { User, PartialScores, ActivityScore, ExamScore, Group, GradingConfiguration, StudentWithDetailedGrades } from '@/types'; // StudentWithDetailedGrades added
+import type { User, PartialScores, ActivityScore, ExamScore, Group, GradingConfiguration, StudentWithDetailedGrades } from '@/types';
 import { DEFAULT_GRADING_CONFIG } from '@/types';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, query, doc, getDoc } from 'firebase/firestore';
@@ -28,9 +28,7 @@ import {
 } from "@/components/ui/tooltip";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
-import * as XLSX from 'xlsx'; // Added for Excel export
-
-// StudentWithDetailedGrades moved to types/index.ts and imported
+import * as XLSX from 'xlsx';
 
 const MAX_ACCUMULATED_ACTIVITIES_DISPLAY = 5;
 
@@ -80,7 +78,6 @@ export default function PartialGradesReportPage() {
   useEffect(() => {
     const fetchGradingConfig = async () => {
       setIsLoadingGradingConfig(true);
-      console.log("[PartialGradesReportPage] Fetching grading config...");
       try {
         const configDocRef = doc(db, 'appConfiguration', 'currentGradingConfig');
         const docSnap = await getDoc(configDocRef);
@@ -94,12 +91,9 @@ export default function PartialGradesReportPage() {
             maxTotalAccumulatedScore: typeof loadedConfig.maxTotalAccumulatedScore === 'number' ? loadedConfig.maxTotalAccumulatedScore : DEFAULT_GRADING_CONFIG.maxTotalAccumulatedScore,
             maxExamScore: typeof loadedConfig.maxExamScore === 'number' ? loadedConfig.maxExamScore : DEFAULT_GRADING_CONFIG.maxExamScore,
           };
-          console.log("[PartialGradesReportPage] Loaded config from Firestore:", loadedConfig);
           setGradingConfig(validatedConfig);
-          console.log("[PartialGradesReportPage] Validated and set gradingConfig:", validatedConfig);
         } else {
           setGradingConfig(DEFAULT_GRADING_CONFIG);
-          console.log("[PartialGradesReportPage] No config found, using default:", DEFAULT_GRADING_CONFIG);
         }
       } catch (error) {
         console.error("Error fetching grading configuration:", error);
@@ -114,10 +108,8 @@ export default function PartialGradesReportPage() {
 
   const fetchStudentAndGroupData = useCallback(async () => {
     if (isLoadingGradingConfig) {
-        console.log("[PartialGradesReportPage] fetchStudentAndGroupData skipped, gradingConfig still loading.");
         return;
     }
-    console.log("[PartialGradesReportPage] fetchStudentAndGroupData executing with gradingConfig:", gradingConfig);
 
     setIsLoadingStudents(true);
     setIsLoadingGroups(true);
@@ -168,7 +160,6 @@ export default function PartialGradesReportPage() {
   }, [toast, gradingConfig, isLoadingGradingConfig]);
 
   useEffect(() => {
-    console.log("[PartialGradesReportPage] useEffect for fetchStudentAndGroupData triggered. isLoadingGradingConfig:", isLoadingGradingConfig);
     if (!isLoadingGradingConfig) {
         fetchStudentAndGroupData();
     }
@@ -238,7 +229,7 @@ export default function PartialGradesReportPage() {
       const activity = activities?.[i];
       cells.push(
         <TableCell key={`${partialKey}-acc-${i}`} className="text-center">
-          {getScoreDisplay(activity?.score, activity?.name, `Ac. ${i + 1}`)}
+          {getScoreDisplay(activity?.score, activity?.name, `Act. ${i + 1}`)}
         </TableCell>
       );
     }
@@ -251,38 +242,90 @@ export default function PartialGradesReportPage() {
       return;
     }
 
-    const headers: string[] = ["Student Name"];
-    for (let i = 1; i <= gradingConfig.numberOfPartials; i++) {
-      headers.push(`Partial ${i} - Accumulated`);
-      headers.push(`Partial ${i} - Exam`);
-      headers.push(`Partial ${i} - Total`);
-    }
-    headers.push("Final Grade");
+    const worksheetData: (string | number | null)[][] = [];
+    const merges: XLSX.Range[] = [];
+    const numPartials = gradingConfig.numberOfPartials;
+    const colsPerPartial = MAX_ACCUMULATED_ACTIVITIES_DISPLAY + 2; // Activities + Exam + Partial Total
 
-    const dataForSheet = studentsToDisplayInTable.map(student => {
-      const row: (string | number | null)[] = [student.name];
-      for (let i = 1; i <= gradingConfig.numberOfPartials; i++) {
-        const accKey = `calculatedAccumulatedTotalP${i}` as keyof StudentWithDetailedGrades;
-        const examScore = student.grades?.[`partial${i}` as keyof User['grades']]?.exam?.score;
-        const partialTotalKey = `calculatedPartial${i}Total` as keyof StudentWithDetailedGrades;
-        
-        row.push((student as any)[accKey] ?? null);
-        row.push(examScore ?? null);
-        row.push((student as any)[partialTotalKey] ?? null);
+    // Row 1: Merged Partial Names
+    const headerRow1: (string | number | null)[] = ["", ""]; // Nombres, Teléfono
+    let currentCellIndex = 2;
+    for (let i = 1; i <= numPartials; i++) {
+      const pName = `${i}${i === 1 ? 'er' : i === 2 ? 'do' : i === 3 ? 'er' : 'to'} Parcial`;
+      headerRow1.push(pName);
+      merges.push({ s: { r: 0, c: currentCellIndex }, e: { r: 0, c: currentCellIndex + colsPerPartial - 1 } });
+      for (let j = 1; j < colsPerPartial; j++) headerRow1.push(""); // Empty cells for merge
+      currentCellIndex += colsPerPartial;
+    }
+    headerRow1.push("Nota Final");
+    worksheetData.push(headerRow1);
+
+    // Row 2: Main Data Headers
+    const headerRow2: (string | number | null)[] = ["Nombres", "Teléfono"];
+    currentCellIndex = 2;
+    for (let i = 1; i <= numPartials; i++) {
+      headerRow2.push("Acumulado");
+      merges.push({ s: { r: 1, c: currentCellIndex }, e: { r: 1, c: currentCellIndex + MAX_ACCUMULATED_ACTIVITIES_DISPLAY - 1 } });
+      for (let j = 1; j < MAX_ACCUMULATED_ACTIVITIES_DISPLAY; j++) headerRow2.push("");
+      headerRow2.push("Examen");
+      headerRow2.push("Nota Parcial");
+      currentCellIndex += colsPerPartial;
+    }
+    headerRow2.push("NF");
+    worksheetData.push(headerRow2);
+
+    // Row 3: Sub-headers (Evaluación, Activity Labels)
+    const headerRow3: (string | number | null)[] = ["Evaluación", ""]; // Teléfono is blank
+    for (let i = 1; i <= numPartials; i++) {
+      for (let j = 1; j <= MAX_ACCUMULATED_ACTIVITIES_DISPLAY; j++) {
+        headerRow3.push(`Act. ${j}`);
       }
-      row.push(student.calculatedFinalGrade ?? null);
-      return row;
+      headerRow3.push(""); // For Examen
+      headerRow3.push(`${i}${i === 1 ? 'st' : i === 2 ? 'nd' : i === 3 ? 'rd' : 'th'}`); // For Nota Parcial
+    }
+    headerRow3.push(""); // For NF
+    worksheetData.push(headerRow3);
+
+    // Row 4: Puntuación (Max Scores)
+    const headerRow4: (string | number | null)[] = ["Puntuación", ""]; // Teléfono is blank
+    for (let i = 1; i <= numPartials; i++) {
+      for (let j = 1; j <= MAX_ACCUMULATED_ACTIVITIES_DISPLAY; j++) {
+        headerRow4.push(gradingConfig.maxIndividualActivityScore);
+      }
+      headerRow4.push(gradingConfig.maxExamScore);
+      headerRow4.push(gradingConfig.maxTotalAccumulatedScore + gradingConfig.maxExamScore);
+    }
+    headerRow4.push(100); // Max Final Grade
+    worksheetData.push(headerRow4);
+
+    // Student Data Rows
+    studentsToDisplayInTable.forEach(student => {
+      const studentRow: (string | number | null)[] = [student.name, student.phoneNumber || ""];
+      for (let i = 1; i <= numPartials; i++) {
+        const partialKey = `partial${i}` as keyof User['grades'];
+        const partialData = student.grades?.[partialKey];
+        
+        for (let j = 0; j < MAX_ACCUMULATED_ACTIVITIES_DISPLAY; j++) {
+          studentRow.push(partialData?.accumulatedActivities?.[j]?.score ?? null);
+        }
+        studentRow.push(partialData?.exam?.score ?? null);
+        const partialTotalKey = `calculatedPartial${i}Total` as keyof StudentWithDetailedGrades;
+        studentRow.push((student as any)[partialTotalKey] ?? null);
+      }
+      studentRow.push(student.calculatedFinalGrade ?? null);
+      worksheetData.push(studentRow);
     });
 
-    const worksheetData = [headers, ...dataForSheet];
     const worksheet = XLSX.utils.aoa_to_sheet(worksheetData);
+    worksheet['!merges'] = merges;
+    
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Partial Grades");
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Reporte Notas Parciales");
 
     const today = new Date().toISOString().split('T')[0];
     try {
-      XLSX.writeFile(workbook, `partial_grades_report_${today}.xlsx`);
-      toast({ title: "Export Successful", description: "Report exported to XLSX." });
+      XLSX.writeFile(workbook, `Reporte_Notas_Parciales_${today}.xlsx`);
+      toast({ title: "Export Successful", description: "Report exported to XLSX with custom template." });
     } catch (error) {
       console.error("Error exporting to XLSX:", error);
       toast({ title: "Export Failed", description: "Could not generate the XLSX file.", variant: "destructive" });
@@ -498,3 +541,5 @@ export default function PartialGradesReportPage() {
     </TooltipProvider>
   );
 }
+
+    
