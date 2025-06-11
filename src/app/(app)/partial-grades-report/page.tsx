@@ -11,11 +11,11 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import type { User, PartialScores, ActivityScore, ExamScore, Group, GradingConfiguration } from '@/types';
+import type { User, PartialScores, ActivityScore, ExamScore, Group, GradingConfiguration, StudentWithDetailedGrades } from '@/types'; // StudentWithDetailedGrades added
 import { DEFAULT_GRADING_CONFIG } from '@/types';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, query, doc, getDoc } from 'firebase/firestore';
-import { Loader2, ClipboardList, NotebookPen, AlertTriangle } from 'lucide-react'; // Removed Download
+import { Loader2, ClipboardList, NotebookPen, AlertTriangle, Download } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -28,18 +28,9 @@ import {
 } from "@/components/ui/tooltip";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
+import * as XLSX from 'xlsx'; // Added for Excel export
 
-interface StudentWithDetailedGrades extends User {
-  calculatedAccumulatedTotalP1?: number | null;
-  calculatedAccumulatedTotalP2?: number | null;
-  calculatedAccumulatedTotalP3?: number | null;
-  calculatedAccumulatedTotalP4?: number | null;
-  calculatedPartial1Total?: number | null;
-  calculatedPartial2Total?: number | null;
-  calculatedPartial3Total?: number | null;
-  calculatedPartial4Total?: number | null;
-  calculatedFinalGrade?: number | null;
-}
+// StudentWithDetailedGrades moved to types/index.ts and imported
 
 const MAX_ACCUMULATED_ACTIVITIES_DISPLAY = 5;
 
@@ -253,6 +244,50 @@ export default function PartialGradesReportPage() {
     }
     return cells;
   };
+
+  const handleExportToXLSX = () => {
+    if (isLoading || studentsToDisplayInTable.length === 0) {
+      toast({ title: "No data to export", description: "Please filter to display some students or wait for data to load.", variant: "default" });
+      return;
+    }
+
+    const headers: string[] = ["Student Name"];
+    for (let i = 1; i <= gradingConfig.numberOfPartials; i++) {
+      headers.push(`Partial ${i} - Accumulated`);
+      headers.push(`Partial ${i} - Exam`);
+      headers.push(`Partial ${i} - Total`);
+    }
+    headers.push("Final Grade");
+
+    const dataForSheet = studentsToDisplayInTable.map(student => {
+      const row: (string | number | null)[] = [student.name];
+      for (let i = 1; i <= gradingConfig.numberOfPartials; i++) {
+        const accKey = `calculatedAccumulatedTotalP${i}` as keyof StudentWithDetailedGrades;
+        const examScore = student.grades?.[`partial${i}` as keyof User['grades']]?.exam?.score;
+        const partialTotalKey = `calculatedPartial${i}Total` as keyof StudentWithDetailedGrades;
+        
+        row.push((student as any)[accKey] ?? null);
+        row.push(examScore ?? null);
+        row.push((student as any)[partialTotalKey] ?? null);
+      }
+      row.push(student.calculatedFinalGrade ?? null);
+      return row;
+    });
+
+    const worksheetData = [headers, ...dataForSheet];
+    const worksheet = XLSX.utils.aoa_to_sheet(worksheetData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Partial Grades");
+
+    const today = new Date().toISOString().split('T')[0];
+    try {
+      XLSX.writeFile(workbook, `partial_grades_report_${today}.xlsx`);
+      toast({ title: "Export Successful", description: "Report exported to XLSX." });
+    } catch (error) {
+      console.error("Error exporting to XLSX:", error);
+      toast({ title: "Export Failed", description: "Could not generate the XLSX file.", variant: "destructive" });
+    }
+  };
   
   if (isLoading) {
     return (
@@ -331,7 +366,16 @@ export default function PartialGradesReportPage() {
                 Configuration: {currentNumberOfPartials} partials, passing with {gradingConfig.passingGrade}pts.
               </CardDescription>
             </div>
-            {/* CSV Export Button Removed */}
+            <Button
+                variant="outline"
+                size="sm"
+                onClick={handleExportToXLSX}
+                disabled={isLoading || studentsToDisplayInTable.length === 0}
+                className="gap-1.5 text-sm"
+              >
+                <Download className="size-3.5" />
+                Export to Excel (.xlsx)
+            </Button>
           </div>
            {gradingConfig.numberOfPartials < 1 && (
             <div className="mt-2 p-3 border border-red-500/50 bg-red-50 dark:bg-red-900/30 rounded-md text-sm text-red-700 dark:text-red-300 flex items-start gap-2">
@@ -409,7 +453,7 @@ export default function PartialGradesReportPage() {
                         <TooltipTrigger asChild>
                             <Button variant="ghost" size="icon" onClick={() => handleOpenEditGrades(student.id)}>
                                 <NotebookPen className="h-4 w-4" />
-                                <span className="sr-only">Edit Grades</span>
+                                <span className="sr-only">Edit Grades for {student.name}</span>
                             </Button>
                         </TooltipTrigger>
                         <TooltipContent side="top"><p>Edit Grades for {student.name}</p></TooltipContent>
@@ -454,4 +498,3 @@ export default function PartialGradesReportPage() {
     </TooltipProvider>
   );
 }
-

@@ -91,3 +91,16 @@ export const DEFAULT_GRADING_CONFIG: GradingConfiguration = {
   maxTotalAccumulatedScore: 50,  // Sum of activities cannot exceed 50
   maxExamScore: 50,
 };
+
+// Extended User type for grades report pages
+export interface StudentWithDetailedGrades extends User {
+  calculatedAccumulatedTotalP1?: number | null;
+  calculatedAccumulatedTotalP2?: number | null;
+  calculatedAccumulatedTotalP3?: number | null;
+  calculatedAccumulatedTotalP4?: number | null;
+  calculatedPartial1Total?: number | null;
+  calculatedPartial2Total?: number | null;
+  calculatedPartial3Total?: number | null;
+  calculatedPartial4Total?: number | null;
+  calculatedFinalGrade?: number | null;
+}
