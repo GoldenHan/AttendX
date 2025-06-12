@@ -12,27 +12,32 @@ import {
 } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import type { User, AttendanceRecord as AttendanceRecordType } from '@/types';
+import type { User, AttendanceRecord as AttendanceRecordType, Group } from '@/types'; // Added Group
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import { Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { Label } from '@/components/ui/label';
 
 interface UserAttendanceStats {
   userId: string;
   userName: string;
-  totalSessionsWithRecord: number; // Renamed for clarity
+  totalSessionsWithRecord: number;
   present: number;
   absent: number;
   late: number;
-  attendanceRate: number; // (present + late) / totalSessionsWithRecord
+  attendanceRate: number;
 }
 
 export default function AttendanceReportsPage() {
+  const [selectedGroupId, setSelectedGroupId] = useState<string | 'all'>('all');
   const [selectedUserId, setSelectedUserId] = useState<string | 'all'>('all');
+  
   const [allStudents, setAllStudents] = useState<User[]>([]);
+  const [allGroups, setAllGroups] = useState<Group[]>([]);
   const [allAttendanceRecords, setAllAttendanceRecords] = useState<AttendanceRecordType[]>([]);
+  
   const [isLoading, setIsLoading] = useState(true);
   const { toast } = useToast();
 
@@ -40,12 +45,18 @@ export default function AttendanceReportsPage() {
     const fetchData = async () => {
       setIsLoading(true);
       try {
-        const studentQuery = query(collection(db, 'users'), where('role', '==', 'student'));
-        const usersSnapshot = await getDocs(studentQuery);
-        setAllStudents(usersSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as User)));
+        const studentQuery = query(collection(db, 'students')); // Fetch from 'students' collection
+        
+        const [studentsSnapshot, attendanceSnapshot, groupsSnapshot] = await Promise.all([
+          getDocs(studentQuery),
+          getDocs(collection(db, 'attendanceRecords')),
+          getDocs(collection(db, 'groups')),
+        ]);
 
-        const attendanceSnapshot = await getDocs(collection(db, 'attendanceRecords'));
+        setAllStudents(studentsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as User)));
         setAllAttendanceRecords(attendanceSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AttendanceRecordType)));
+        setAllGroups(groupsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Group)));
+
       } catch (error) {
         console.error("Error fetching report data:", error);
         toast({ title: 'Error fetching data', description: 'Could not load data for reports.', variant: 'destructive' });
@@ -78,9 +89,32 @@ export default function AttendanceReportsPage() {
     });
   }, [allStudents, allAttendanceRecords, isLoading]);
 
-  const displayedStats = selectedUserId === 'all' 
-    ? userAttendanceStats 
-    : userAttendanceStats.filter(stat => stat.userId === selectedUserId);
+  const studentsForFilterDropdown = useMemo(() => {
+    if (selectedGroupId === 'all') {
+      return allStudents;
+    }
+    const group = allGroups.find(g => g.id === selectedGroupId);
+    if (group?.studentIds) {
+      return allStudents.filter(s => group.studentIds.includes(s.id));
+    }
+    return [];
+  }, [allStudents, allGroups, selectedGroupId]);
+
+  const displayedStats = useMemo(() => {
+    let statsToDisplay = userAttendanceStats;
+
+    if (selectedGroupId !== 'all') {
+      const group = allGroups.find(g => g.id === selectedGroupId);
+      const studentIdsInGroup = group?.studentIds || [];
+      statsToDisplay = statsToDisplay.filter(stat => studentIdsInGroup.includes(stat.userId));
+    }
+
+    if (selectedUserId !== 'all') {
+      statsToDisplay = statsToDisplay.filter(stat => stat.userId === selectedUserId);
+    }
+    return statsToDisplay;
+  }, [userAttendanceStats, selectedGroupId, selectedUserId, allGroups]);
+
 
   const chartData = displayedStats.map(stat => ({
     name: stat.userName.split(' ')[0], 
@@ -94,7 +128,7 @@ export default function AttendanceReportsPage() {
       <Card>
         <CardHeader>
           <CardTitle>Attendance Reports</CardTitle>
-          <CardDescription>View attendance statistics for students.</CardDescription>
+          <CardDescription>View attendance statistics for students, filterable by group.</CardDescription>
         </CardHeader>
         <CardContent className="flex items-center justify-center py-10">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -109,21 +143,51 @@ export default function AttendanceReportsPage() {
       <Card>
         <CardHeader>
           <CardTitle>Attendance Reports</CardTitle>
-          <CardDescription>View attendance statistics for students.</CardDescription>
+          <CardDescription>View attendance statistics for students. Filter by group and then by student.</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="mb-4">
-            <Select value={selectedUserId} onValueChange={setSelectedUserId}>
-              <SelectTrigger className="w-[280px]">
-                <SelectValue placeholder="Select a student or all" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Students</SelectItem>
-                {allStudents.map(student => (
-                  <SelectItem key={student.id} value={student.id}>{student.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <div className="mb-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <Label htmlFor="group-filter">Filter by Group</Label>
+              <Select 
+                value={selectedGroupId} 
+                onValueChange={(value) => {
+                  setSelectedGroupId(value);
+                  setSelectedUserId('all'); // Reset student filter when group changes
+                }}
+              >
+                <SelectTrigger id="group-filter" className="w-full md:w-[280px]">
+                  <SelectValue placeholder="Select a group" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Groups</SelectItem>
+                  {allGroups.map(group => (
+                    <SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label htmlFor="student-filter">Filter by Student</Label>
+              <Select 
+                value={selectedUserId} 
+                onValueChange={setSelectedUserId}
+                disabled={studentsForFilterDropdown.length === 0 && selectedGroupId !== 'all'}
+              >
+                <SelectTrigger id="student-filter" className="w-full md:w-[280px]">
+                  <SelectValue placeholder="Select a student" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">
+                    {selectedGroupId === 'all' ? 'All Students (Global)' : 
+                     studentsForFilterDropdown.length > 0 ? 'All Students in Group' : 'No students in group'}
+                  </SelectItem>
+                  {studentsForFilterDropdown.map(student => (
+                    <SelectItem key={student.id} value={student.id}>{student.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
           <Table>
@@ -149,8 +213,11 @@ export default function AttendanceReportsPage() {
                 </TableRow>
               )) : (
                  <TableRow>
-                    <TableCell colSpan={6} className="text-center">
-                    {selectedUserId === 'all' ? 'No student data available.' : 'No data for selected student.'}
+                    <TableCell colSpan={6} className="text-center h-24">
+                    {selectedGroupId !== 'all' && studentsForFilterDropdown.length === 0 
+                        ? 'No students found in the selected group.'
+                        : 'No attendance data available for the current selection.'
+                    }
                     </TableCell>
                 </TableRow>
               )}
@@ -163,7 +230,7 @@ export default function AttendanceReportsPage() {
         <Card>
           <CardHeader>
             <CardTitle>Attendance Overview Chart</CardTitle>
-            <CardDescription>Visual representation of student attendance.</CardDescription>
+            <CardDescription>Visual representation of student attendance based on current filters.</CardDescription>
           </CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={400}>
