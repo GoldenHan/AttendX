@@ -13,10 +13,10 @@ import {
 } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Loader2, Pencil, Trash2, UserPlus, Search, GraduationCap, NotebookPen } from 'lucide-react';
+import { Loader2, Pencil, Trash2, UserPlus, Search, GraduationCap, NotebookPen, FolderOpen } from 'lucide-react';
 import type { User, Group, PartialScores } from '@/types';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, deleteDoc, doc, updateDoc, query, where, addDoc, writeBatch } from 'firebase/firestore';
+import { collection, getDocs, deleteDoc, doc, updateDoc, query, where, addDoc, writeBatch, arrayUnion, arrayRemove } from 'firebase/firestore';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -24,7 +24,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogDescription as DialogPrimitiveDescription, // Aliased to avoid conflict
+  DialogDescription as DialogPrimitiveDescription,
   DialogFooter,
   DialogTrigger,
   DialogClose,
@@ -38,7 +38,7 @@ import * as z from 'zod';
 import {
   Form,
   FormControl,
-  FormDescription, // Ensured this is imported
+  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -51,7 +51,7 @@ const studentFormSchema = z.object({
   email: z.string().email({ message: "Invalid email address." }).optional().or(z.literal('')), 
   phoneNumber: z.string().optional().or(z.literal('')),
   photoUrl: z.string().url({ message: "Please enter a valid URL for photo." }).optional().or(z.literal('')),
-  level: z.enum(['Beginner', 'Intermediate', 'Advanced', 'Other']).optional(),
+  level: z.enum(['Beginner', 'Intermediate', 'Advanced', 'Other'], {required_error: "Level is required."}),
   notes: z.string().optional(),
   age: z.preprocess(
     (val) => (val === "" || val === undefined || val === null ? undefined : Number(val)),
@@ -59,6 +59,7 @@ const studentFormSchema = z.object({
   ),
   gender: z.enum(['male', 'female', 'other']).optional(),
   preferredShift: z.enum(['Saturday', 'Sunday']).optional(),
+  assignedGroupId: z.string().optional(),
 });
 
 type StudentFormValues = z.infer<typeof studentFormSchema>;
@@ -68,6 +69,7 @@ const defaultPartialScore = (): PartialScores => ({
   exam: { name: null, score: null }
 });
 
+const UNASSIGN_STUDENT_FROM_GROUP_KEY = "##NO_GROUP##";
 
 export default function StudentManagementPage() {
   const router = useRouter(); 
@@ -101,13 +103,13 @@ export default function StudentManagementPage() {
       age: undefined,
       gender: undefined,
       preferredShift: undefined,
+      assignedGroupId: undefined,
     },
   });
 
   const fetchData = async () => {
     setIsLoading(true);
     try {
-      // Fetch from 'students' collection
       const studentsQuery = query(collection(db, 'students')); 
       const studentsSnapshot = await getDocs(studentsQuery);
       const fetchedStudents = studentsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data(), role: 'student' } as User));
@@ -119,7 +121,7 @@ export default function StudentManagementPage() {
     } catch (error) {
       console.error("Error fetching data:", error);
       toast({ title: 'Error fetching data', description: 'Could not load students or groups.', variant: 'destructive' });
-      setAllStudents([]); // Ensure students list is empty on error
+      setAllStudents([]);
       setGroups([]);
     } finally {
       setIsLoading(false);
@@ -156,12 +158,14 @@ export default function StudentManagementPage() {
     studentForm.reset({
       name: '', email: '', phoneNumber: '', photoUrl: '',
       level: undefined, notes: '', age: undefined, gender: undefined, preferredShift: undefined,
+      assignedGroupId: undefined,
     });
     setIsStudentFormDialogOpen(true);
   };
   
   const handleOpenEditDialog = (studentToEdit: User) => {
     setEditingStudent(studentToEdit);
+    const currentGroup = groups.find(g => Array.isArray(g.studentIds) && g.studentIds.includes(studentToEdit.id));
     studentForm.reset({
       name: studentToEdit.name,
       email: studentToEdit.email || '',
@@ -172,6 +176,7 @@ export default function StudentManagementPage() {
       age: studentToEdit.age ?? undefined, 
       gender: studentToEdit.gender || undefined,
       preferredShift: studentToEdit.preferredShift || undefined,
+      assignedGroupId: currentGroup?.id || undefined,
     });
     setIsStudentFormDialogOpen(true);
   };
@@ -179,7 +184,7 @@ export default function StudentManagementPage() {
   const handleStudentFormSubmit = async (data: StudentFormValues) => {
     setIsSubmitting(true);
         
-    const studentDetails: Omit<User, 'id' | 'uid' | 'role' | 'grades'> = {
+    const studentDetailsToSave: Partial<Omit<User, 'id' | 'uid' | 'role' | 'grades' | 'gradesByLevel'>> = {
         name: data.name,
         email: data.email || undefined,
         phoneNumber: data.phoneNumber || undefined,
@@ -192,56 +197,68 @@ export default function StudentManagementPage() {
     };
 
     const finalStudentDetails = Object.fromEntries(
-        Object.entries(studentDetails).filter(([_, v]) => v !== undefined)
+        Object.entries(studentDetailsToSave).filter(([_, v]) => v !== undefined)
     );
 
+    const newAssignedGroupId = data.assignedGroupId === UNASSIGN_STUDENT_FROM_GROUP_KEY ? null : data.assignedGroupId || null;
+
     if (editingStudent) { 
-      try {
-        const studentRef = doc(db, "students", editingStudent.id);
-        await updateDoc(studentRef, finalStudentDetails);
-        toast({ title: 'Student Updated', description: `${data.name}'s record updated successfully.` });
-        studentForm.reset();
-        setEditingStudent(null);
-        setIsStudentFormDialogOpen(false);
-        await fetchData();
-      } catch (error: any) {
-        toast({ 
-          title: 'Update Student Failed', 
-          description: `An error occurred: ${error.message || 'Please try again.'}`, 
-          variant: 'destructive' 
-        });
-        console.error("Firestore update error:", error);
+      const studentRef = doc(db, "students", editingStudent.id);
+      const batch = writeBatch(db);
+      batch.update(studentRef, finalStudentDetails);
+
+      const previousGroup = groups.find(g => Array.isArray(g.studentIds) && g.studentIds.includes(editingStudent.id));
+      const previousGroupId = previousGroup?.id || null;
+
+      if (newAssignedGroupId !== previousGroupId) {
+        if (previousGroupId) {
+          const prevGroupRef = doc(db, 'groups', previousGroupId);
+          batch.update(prevGroupRef, { studentIds: arrayRemove(editingStudent.id) });
+        }
+        if (newAssignedGroupId) {
+          const newGroupRef = doc(db, 'groups', newAssignedGroupId);
+          batch.update(newGroupRef, { studentIds: arrayUnion(editingStudent.id) });
+        }
       }
-    } else { 
       try {
-        const newStudentDocData: Omit<User, 'id'> & { grades: User['grades'] } = {
+        await batch.commit();
+        toast({ title: 'Student Updated', description: `${data.name}'s record and group assignment updated successfully.` });
+      } catch (error: any) {
+         toast({ title: 'Update Student Failed', description: `An error occurred: ${error.message || 'Please try again.'}`, variant: 'destructive' });
+         console.error("Firestore batch update error:", error);
+      }
+
+    } else { // Creating new student
+      try {
+        const newStudentData: Omit<User, 'id' | 'grades'> = {
           ...finalStudentDetails,
-          role: 'student' as 'student', // Explicitly set role
-          grades: { 
-            partial1: defaultPartialScore(),
-            partial2: defaultPartialScore(),
-            partial3: defaultPartialScore(),
-          },
+          role: 'student' as 'student',
+          gradesByLevel: { // Initialize for the assigned level
+            [data.level!]: { // data.level should be defined due to schema validation
+              partial1: defaultPartialScore(),
+              partial2: defaultPartialScore(),
+              partial3: defaultPartialScore(),
+              partial4: defaultPartialScore(),
+            }
+          }
         };
         
-        await addDoc(collection(db, 'students'), newStudentDocData);
-
-        toast({
-          title: 'Student Record Added',
-          description: `${data.name}'s record added to Firestore. Auth accounts must be managed separately.`,
-        });
-        studentForm.reset();
-        setIsStudentFormDialogOpen(false);
-        await fetchData();
+        const newStudentRef = await addDoc(collection(db, 'students'), newStudentData);
+        
+        if (newAssignedGroupId) {
+          const groupRef = doc(db, 'groups', newAssignedGroupId);
+          await updateDoc(groupRef, { studentIds: arrayUnion(newStudentRef.id) });
+        }
+        toast({ title: 'Student Record Added', description: `${data.name}'s record added successfully. Group assignment updated.` });
       } catch (error: any) {
-        console.error("Error adding student to Firestore:", error);
-        toast({
-          title: 'Error Adding Student Record',
-          description: error.message || 'An unexpected error occurred.',
-          variant: 'destructive',
-        });
+        console.error("Error adding student:", error);
+        toast({ title: 'Error Adding Student Record', description: error.message || 'An unexpected error occurred.', variant: 'destructive'});
       }
     }
+    studentForm.reset();
+    setEditingStudent(null);
+    setIsStudentFormDialogOpen(false);
+    await fetchData();
     setIsSubmitting(false);
   };
 
@@ -276,16 +293,13 @@ export default function StudentManagementPage() {
       const studentRef = doc(db, 'students', studentToDelete.id);
       batch.delete(studentRef);
 
-      // Remove student from any groups they are in
-      const groupsToUpdate = groups.filter(g => Array.isArray(g.studentIds) && g.studentIds.includes(studentToDelete.id));
-      groupsToUpdate.forEach(group => {
-        const groupRef = doc(db, 'groups', group.id);
-        const updatedStudentIds = group.studentIds.filter(id => id !== studentToDelete.id);
-        batch.update(groupRef, { studentIds: updatedStudentIds });
-      });
+      const groupWithStudent = groups.find(g => Array.isArray(g.studentIds) && g.studentIds.includes(studentToDelete.id));
+      if (groupWithStudent) {
+        const groupRef = doc(db, 'groups', groupWithStudent.id);
+        batch.update(groupRef, { studentIds: arrayRemove(studentToDelete.id) });
+      }
 
       await batch.commit();
-
       toast({ title: 'Student Record Deleted', description: `${studentToDelete.name}'s Firestore record and group memberships removed.` });
       
       setStudentToDelete(null);
@@ -308,9 +322,9 @@ export default function StudentManagementPage() {
       toast({ title: 'Delete Failed', description: errorMessage, variant: 'destructive' });
       
       if (reAuthErrorCodes.includes(error.code) || error.code === 'auth/too-many-requests' || error.code === 'auth/requires-recent-login') {
-         setIsDeleteStudentDialogOpen(true); // Keep dialog open for re-auth error
+         setIsDeleteStudentDialogOpen(true);
       } else {
-         setIsDeleteStudentDialogOpen(false); // Close for other errors
+         setIsDeleteStudentDialogOpen(false);
          setDeleteAdminPassword(''); 
       }
     } finally {
@@ -320,6 +334,11 @@ export default function StudentManagementPage() {
 
   const handleGoToManageGrades = (studentId: string) => {
     router.push(`/grades-management?studentId=${studentId}`);
+  };
+
+  const getStudentGroupName = (studentId: string): string => {
+    const group = groups.find(g => Array.isArray(g.studentIds) && g.studentIds.includes(studentId));
+    return group ? group.name : "Unassigned";
   };
 
 
@@ -345,7 +364,7 @@ export default function StudentManagementPage() {
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div>
                 <CardTitle className="flex items-center gap-2"><GraduationCap className="h-6 w-6 text-primary" /> Student Management</CardTitle>
-                <CardDescription>Manage student records. Filter by group or search by name/shift. Student login accounts must be created separately via Firebase Console if needed.</CardDescription>
+                <CardDescription>Manage student records. Assign to groups, filter by group, or search by name/shift.</CardDescription>
             </div>
             <Dialog open={isStudentFormDialogOpen} onOpenChange={(isOpen) => {
                 setIsStudentFormDialogOpen(isOpen);
@@ -354,6 +373,7 @@ export default function StudentManagementPage() {
                 studentForm.reset({
                     name: '', email: '', phoneNumber: '', photoUrl: '',
                     level: undefined, notes: '', age: undefined, gender: undefined, preferredShift: undefined,
+                    assignedGroupId: undefined,
                 });
                 }
             }}>
@@ -366,8 +386,8 @@ export default function StudentManagementPage() {
                 <DialogContent className="sm:max-w-md">
                 <DialogHeader>
                     <DialogTitle>{editingStudent ? 'Edit Student Record' : 'Add New Student Record'}</DialogTitle>
-                    <DialogPrimitiveDescription> {/* Uses aliased import */}
-                    {editingStudent ? 'Update student details in Firestore.' : 'Fill in student details to add to Firestore. Auth accounts are managed separately.'}
+                    <DialogPrimitiveDescription>
+                    {editingStudent ? 'Update student details and group assignment in Firestore.' : 'Fill in student details and optionally assign to a group.'}
                     </DialogPrimitiveDescription>
                 </DialogHeader>
                 <Form {...studentForm}>
@@ -383,6 +403,49 @@ export default function StudentManagementPage() {
                         </FormItem>
                         )}
                     />
+                    <FormField
+                        control={studentForm.control}
+                        name="level"
+                        render={({ field }) => (
+                        <FormItem>
+                            <FormLabel>Level</FormLabel>
+                            <Select onValueChange={field.onChange} value={field.value || undefined} defaultValue={field.value || undefined}>
+                            <FormControl><SelectTrigger><SelectValue placeholder="Select student's level" /></SelectTrigger></FormControl>
+                            <SelectContent>
+                                <SelectItem value="Beginner">Beginner</SelectItem>
+                                <SelectItem value="Intermediate">Intermediate</SelectItem>
+                                <SelectItem value="Advanced">Advanced</SelectItem>
+                                <SelectItem value="Other">Other</SelectItem>
+                            </SelectContent>
+                            </Select>
+                            <FormMessage />
+                        </FormItem>
+                        )}
+                    />
+                     <FormField
+                        control={studentForm.control}
+                        name="assignedGroupId"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Assign to Group (Optional)</FormLabel>
+                            <Select
+                              onValueChange={(value) => field.onChange(value === UNASSIGN_STUDENT_FROM_GROUP_KEY ? undefined : value)}
+                              value={field.value || UNASSIGN_STUDENT_FROM_GROUP_KEY}
+                            >
+                              <FormControl><SelectTrigger><SelectValue placeholder="Select a group or unassign" /></SelectTrigger></FormControl>
+                              <SelectContent>
+                                <SelectItem value={UNASSIGN_STUDENT_FROM_GROUP_KEY}>Unassigned</SelectItem>
+                                {groups.map((group) => (
+                                  <SelectItem key={group.id} value={group.id}>
+                                    {group.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
                     <FormField
                         control={studentForm.control}
                         name="email"
@@ -413,25 +476,6 @@ export default function StudentManagementPage() {
                         <FormItem>
                             <FormLabel>Photo URL (Optional)</FormLabel>
                             <FormControl><Input type="url" placeholder="https://placehold.co/100x100.png" {...field} /></FormControl>
-                            <FormMessage />
-                        </FormItem>
-                        )}
-                    />
-                    <FormField
-                        control={studentForm.control}
-                        name="level"
-                        render={({ field }) => (
-                        <FormItem>
-                            <FormLabel>Level (Optional)</FormLabel>
-                            <Select onValueChange={field.onChange} value={field.value || undefined}>
-                            <FormControl><SelectTrigger><SelectValue placeholder="Select student's level" /></SelectTrigger></FormControl>
-                            <SelectContent>
-                                <SelectItem value="Beginner">Beginner</SelectItem>
-                                <SelectItem value="Intermediate">Intermediate</SelectItem>
-                                <SelectItem value="Advanced">Advanced</SelectItem>
-                                <SelectItem value="Other">Other</SelectItem>
-                            </SelectContent>
-                            </Select>
                             <FormMessage />
                         </FormItem>
                         )}
@@ -549,9 +593,10 @@ export default function StudentManagementPage() {
           <TableHeader>
             <TableRow>
               <TableHead>Name</TableHead>
+              <TableHead>Level</TableHead>
+              <TableHead>Assigned Group</TableHead>
               <TableHead>Email</TableHead>
               <TableHead>Phone</TableHead>
-              <TableHead>Level</TableHead>
               <TableHead>Age</TableHead>
               <TableHead>Gender</TableHead>
               <TableHead>Shift</TableHead>
@@ -562,22 +607,27 @@ export default function StudentManagementPage() {
             {(!isLoading && filteredStudents.length > 0) ? filteredStudents.map((student) => (
               <TableRow key={student.id}>
                 <TableCell>{student.name}</TableCell>
+                <TableCell>{student.level || 'N/A'}</TableCell>
+                <TableCell>
+                     <span className={`px-2 py-1 text-xs font-medium rounded-full ${getStudentGroupName(student.id) === "Unassigned" ? "bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300" : "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300"}`}>
+                        {getStudentGroupName(student.id)}
+                    </span>
+                </TableCell>
                 <TableCell>{student.email || 'N/A'}</TableCell>
                 <TableCell>{student.phoneNumber || 'N/A'}</TableCell>
-                <TableCell>{student.level || 'N/A'}</TableCell>
                 <TableCell>{student.age ?? 'N/A'}</TableCell>
                 <TableCell>{student.gender ? student.gender.charAt(0).toUpperCase() + student.gender.slice(1) : 'N/A'}</TableCell>
                 <TableCell>{student.preferredShift || 'N/A'}</TableCell>
                 <TableCell className="space-x-1">
-                  <Button variant="ghost" size="icon" onClick={() => handleGoToManageGrades(student.id)}>
+                  <Button variant="ghost" size="icon" onClick={() => handleGoToManageGrades(student.id)} title="Manage Grades">
                     <NotebookPen className="h-4 w-4" />
                     <span className="sr-only">Manage Grades</span>
                   </Button>
-                  <Button variant="ghost" size="icon" onClick={() => handleOpenEditDialog(student)}>
+                  <Button variant="ghost" size="icon" onClick={() => handleOpenEditDialog(student)} title="Edit Student">
                     <Pencil className="h-4 w-4" />
                     <span className="sr-only">Edit Student</span>
                   </Button>
-                  <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => handleOpenDeleteDialog(student)}>
+                  <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => handleOpenDeleteDialog(student)} title="Delete Student">
                     <Trash2 className="h-4 w-4" />
                     <span className="sr-only">Delete Student</span>
                   </Button>
@@ -586,18 +636,11 @@ export default function StudentManagementPage() {
             )) : (
               !isLoading && (
                 <TableRow>
-                  <TableCell colSpan={8} className="text-center py-10">
+                  <TableCell colSpan={9} className="text-center py-10">
                     {allStudents.length === 0 && selectedGroupIdForFilter === 'all' && !searchTerm ? (
                       <div>
-                        <p className="text-lg font-semibold">No student records found in the 'students' collection.</p>
-                        <p className="text-muted-foreground mt-2">
-                          This could be because:
-                        </p>
-                        <ul className="list-disc list-inside text-muted-foreground mt-1 text-left mx-auto max-w-lg sm:max-w-xl md:max-w-2xl">
-                          <li>The 'students' collection in your Firestore database is currently empty.</li>
-                          <li>Your Firestore security rules are preventing the application from reading this collection. Please check your rules in the Firebase Console.</li>
-                          <li>If you recently refactored your data (e.g., from a single 'users' collection), student data needs to be present in the 'students' collection.</li>
-                        </ul>
+                        <p className="text-lg font-semibold">No student records found.</p>
+                        <p className="text-muted-foreground mt-2">Add new student records to see them here.</p>
                         <Button className="mt-6" onClick={handleOpenAddDialog}>
                           <UserPlus className="mr-2 h-4 w-4" /> Add First Student Record
                         </Button>
@@ -625,10 +668,10 @@ export default function StudentManagementPage() {
         <DialogContent className="sm:max-w-md">
             <DialogHeader>
                 <DialogTitle>Delete Student Record</DialogTitle>
-                <DialogPrimitiveDescription> {/* Uses aliased import */}
+                <DialogPrimitiveDescription>
                     Are you sure you want to delete the Firestore record for {studentToDelete?.name}?
                     This action cannot be undone. Enter your admin password to confirm.
-                    Note: This action does NOT delete the Firebase Authentication account if one exists.
+                    The student will also be removed from any assigned group.
                 </DialogPrimitiveDescription>
             </DialogHeader>
             <div className="space-y-4 py-4">
