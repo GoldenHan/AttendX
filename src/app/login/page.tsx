@@ -35,8 +35,8 @@ export default function LoginPage() {
         description: 'Welcome back!',
       });
     } catch (error: any) {
-      console.error("Login Page Error:", error); // Log the full error for debugging
-      let errorMessage = 'Failed to sign in. Please check your credentials or try again later.'; // Default generic message
+      console.error("Login Page Error:", error); 
+      let errorMessage = 'Failed to sign in. Please check your credentials or try again later.'; 
 
       switch (error.code) {
         case 'auth/user-not-found':
@@ -68,11 +68,14 @@ export default function LoginPage() {
         case 'auth/app-not-authorized':
             errorMessage = 'System configuration error. Please contact support. (App Not Authorized for domain)';
             break;
+        case 'auth/visibility-check-was-unavailable':
+            errorMessage = 'Could not verify app visibility. This might be a temporary issue or due to browser settings/extensions. Please try again. If it persists, try disabling browser extensions or check privacy settings.';
+            break;
         default:
-          // Keep the generic message for unhandled codes, or use error.message if it's user-friendly
-          // For now, stick to our defined messages to avoid showing overly technical Firebase messages.
-          // If error.message is preferred for unknown errors, it can be conditionally used here.
-          console.warn("Unhandled Firebase Auth error code during login:", error.code);
+          console.warn("Unhandled Firebase Auth error code during login:", error.code, error.message);
+          if (error.message && typeof error.message === 'string' && !error.message.includes('INTERNAL ASSERTION FAILED')) {
+            errorMessage = error.message; // Use Firebase's message if it's potentially user-friendly
+          }
           break;
       }
 

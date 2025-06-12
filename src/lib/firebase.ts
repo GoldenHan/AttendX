@@ -13,15 +13,36 @@ const firebaseConfig = {
 };
 
 // Log the config to help debug API key issues.
-// Check your server console for this output.
+// This will appear in your browser's console and server console (during build/dev).
 console.log("Firebase Config being used:", firebaseConfig);
 
 if (!firebaseConfig.apiKey) {
-  console.error("Firebase API Key is missing. Make sure NEXT_PUBLIC_FIREBASE_API_KEY is set in your .env file and the server is restarted.");
+  console.error("Firebase API Key is missing or empty. Make sure NEXT_PUBLIC_FIREBASE_API_KEY is set correctly in your environment variables.");
+}
+if (!firebaseConfig.authDomain) {
+  console.error("Firebase Auth Domain is missing or empty. Make sure NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN is set correctly.");
+}
+if (!firebaseConfig.projectId) {
+  console.error("Firebase Project ID is missing or empty. Make sure NEXT_PUBLIC_FIREBASE_PROJECT_ID is set correctly.");
 }
 
+
 // Initialize Firebase
-const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+let app;
+if (!getApps().length) {
+  try {
+    app = initializeApp(firebaseConfig);
+    console.log("Firebase app initialized successfully.");
+  } catch (e) {
+    console.error("Error initializing Firebase app:", e);
+    // Potentially throw the error or handle it to prevent the app from crashing if unrecoverable
+    // For now, we'll let it proceed so db and auth might still fail gracefully if app is undefined
+  }
+} else {
+  app = getApp();
+  console.log("Existing Firebase app retrieved.");
+}
+
 const db = getFirestore(app);
 const auth = getAuth(app);
 
