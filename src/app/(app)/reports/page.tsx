@@ -12,10 +12,10 @@ import {
 } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import type { User, AttendanceRecord as AttendanceRecordType, Group } from '@/types'; // Added Group
+import type { User, AttendanceRecord as AttendanceRecordType, Group, Session } from '@/types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import { collection, getDocs, query } from 'firebase/firestore'; // Removed 'where' as it's not used for initial fetch
 import { Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Label } from '@/components/ui/label';
@@ -33,10 +33,12 @@ interface UserAttendanceStats {
 export default function AttendanceReportsPage() {
   const [selectedGroupId, setSelectedGroupId] = useState<string | 'all'>('all');
   const [selectedUserId, setSelectedUserId] = useState<string | 'all'>('all');
+  const [reportType, setReportType] = useState<'overall' | 'currentMonth'>('overall');
   
   const [allStudents, setAllStudents] = useState<User[]>([]);
   const [allGroups, setAllGroups] = useState<Group[]>([]);
   const [allAttendanceRecords, setAllAttendanceRecords] = useState<AttendanceRecordType[]>([]);
+  const [allSessions, setAllSessions] = useState<Session[]>([]);
   
   const [isLoading, setIsLoading] = useState(true);
   const { toast } = useToast();
@@ -45,17 +47,19 @@ export default function AttendanceReportsPage() {
     const fetchData = async () => {
       setIsLoading(true);
       try {
-        const studentQuery = query(collection(db, 'students')); // Fetch from 'students' collection
+        const studentQuery = query(collection(db, 'students'));
         
-        const [studentsSnapshot, attendanceSnapshot, groupsSnapshot] = await Promise.all([
+        const [studentsSnapshot, attendanceSnapshot, groupsSnapshot, sessionsSnapshot] = await Promise.all([
           getDocs(studentQuery),
           getDocs(collection(db, 'attendanceRecords')),
           getDocs(collection(db, 'groups')),
+          getDocs(collection(db, 'sessions')),
         ]);
 
         setAllStudents(studentsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as User)));
         setAllAttendanceRecords(attendanceSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AttendanceRecordType)));
         setAllGroups(groupsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Group)));
+        setAllSessions(sessionsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Session)));
 
       } catch (error) {
         console.error("Error fetching report data:", error);
@@ -68,14 +72,34 @@ export default function AttendanceReportsPage() {
 
   const userAttendanceStats = useMemo((): UserAttendanceStats[] => {
     if (isLoading) return [];
+
+    let relevantRecords = allAttendanceRecords;
+
+    if (reportType === 'currentMonth') {
+      const now = new Date();
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+
+      const currentMonthSessionIds = new Set<string>();
+      allSessions.forEach(session => {
+        const sessionDateParts = session.date.split('-').map(Number);
+        const sessionDate = new Date(sessionDateParts[0], sessionDateParts[1] - 1, sessionDateParts[2]);
+        if (sessionDate >= startOfMonth && sessionDate <= endOfMonth) {
+          currentMonthSessionIds.add(session.id);
+        }
+      });
+      relevantRecords = allAttendanceRecords.filter(r => currentMonthSessionIds.has(r.sessionId));
+    }
+
     return allStudents.map(student => {
-      const studentRecords = allAttendanceRecords.filter(r => r.userId === student.id);
+      const studentRecords = relevantRecords.filter(r => r.userId === student.id);
       const present = studentRecords.filter(r => r.status === 'present').length;
       const absent = studentRecords.filter(r => r.status === 'absent').length;
       const late = studentRecords.filter(r => r.status === 'late').length;
       
       const totalAttendedOrLate = present + late;
-      const totalSessionsWithRecord = new Set(studentRecords.map(r => r.sessionId)).size;
+      const uniqueSessionIdsForStudent = new Set(studentRecords.map(r => r.sessionId));
+      const totalSessionsWithRecord = uniqueSessionIdsForStudent.size;
 
       return {
         userId: student.id,
@@ -87,7 +111,7 @@ export default function AttendanceReportsPage() {
         attendanceRate: totalSessionsWithRecord > 0 ? (totalAttendedOrLate / totalSessionsWithRecord) * 100 : 0,
       };
     });
-  }, [allStudents, allAttendanceRecords, isLoading]);
+  }, [allStudents, allAttendanceRecords, allSessions, isLoading, reportType]);
 
   const studentsForFilterDropdown = useMemo(() => {
     if (selectedGroupId === 'all') {
@@ -128,7 +152,7 @@ export default function AttendanceReportsPage() {
       <Card>
         <CardHeader>
           <CardTitle>Attendance Reports</CardTitle>
-          <CardDescription>View attendance statistics for students, filterable by group.</CardDescription>
+          <CardDescription>View attendance statistics for students.</CardDescription>
         </CardHeader>
         <CardContent className="flex items-center justify-center py-10">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -138,22 +162,43 @@ export default function AttendanceReportsPage() {
     );
   }
 
+  const reportDescription = reportType === 'currentMonth' 
+    ? "Showing attendance statistics for the current month."
+    : "Showing overall attendance statistics.";
+
   return (
     <div className="space-y-6">
       <Card>
         <CardHeader>
           <CardTitle>Attendance Reports</CardTitle>
-          <CardDescription>View attendance statistics for students. Filter by group and then by student.</CardDescription>
+          <CardDescription>
+            View attendance statistics. {reportDescription} Filter by report type, group, and then by student.
+          </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="mb-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="mb-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+                <Label htmlFor="report-type-filter">Report Type</Label>
+                <Select 
+                    value={reportType} 
+                    onValueChange={(value) => setReportType(value as 'overall' | 'currentMonth')}
+                >
+                    <SelectTrigger id="report-type-filter" className="w-full md:w-[280px]">
+                    <SelectValue placeholder="Select report type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="overall">Overall Attendance</SelectItem>
+                        <SelectItem value="currentMonth">Current Month Attendance</SelectItem>
+                    </SelectContent>
+                </Select>
+            </div>
             <div>
               <Label htmlFor="group-filter">Filter by Group</Label>
               <Select 
                 value={selectedGroupId} 
                 onValueChange={(value) => {
                   setSelectedGroupId(value);
-                  setSelectedUserId('all'); // Reset student filter when group changes
+                  setSelectedUserId('all'); 
                 }}
               >
                 <SelectTrigger id="group-filter" className="w-full md:w-[280px]">
@@ -230,7 +275,9 @@ export default function AttendanceReportsPage() {
         <Card>
           <CardHeader>
             <CardTitle>Attendance Overview Chart</CardTitle>
-            <CardDescription>Visual representation of student attendance based on current filters.</CardDescription>
+            <CardDescription>
+                Visual representation of student attendance based on current filters ({reportType === 'currentMonth' ? 'Current Month' : 'Overall'}).
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={400}>
@@ -251,3 +298,4 @@ export default function AttendanceReportsPage() {
     </div>
   );
 }
+
