@@ -17,12 +17,12 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogDescription,
+  DialogDescription as DialogPrimitiveDescription, // Renamed to avoid conflict with CardDescription
   DialogFooter,
   DialogTrigger,
   DialogClose,
 } from '@/components/ui/dialog';
-import { Loader2, PlusCircle, Users, Edit, Trash2, CalendarIcon, Search, UserCheck } from 'lucide-react';
+import { Loader2, PlusCircle, Users, Edit, Trash2, CalendarIcon, Search, UserCheck, UserCircle2 } from 'lucide-react'; // Added UserCircle2
 import { useToast } from '@/hooks/use-toast';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, doc, deleteDoc, updateDoc, query, where } from 'firebase/firestore';
@@ -43,7 +43,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Calendar } from '@/components/ui/calendar';
 import { format, isValid, parseISO } from 'date-fns';
 import { cn } from '@/lib/utils';
-import { Checkbox } from '@/components/ui/checkbox';
+// Checkbox removed as it's no longer used for selection in this dialog
 
 const groupFormSchema = z.object({
   name: z.string().min(2, { message: "Group name must be at least 2 characters." }),
@@ -70,9 +70,8 @@ export default function GroupManagementPage() {
   const [isGroupFormDialogOpen, setIsGroupFormDialogOpen] = useState(false);
   const [editingGroup, setEditingGroup] = useState<Group | null>(null);
   
-  const [isManageStudentsDialogOpen, setIsManageStudentsDialogOpen] = useState(false);
-  const [selectedGroupForStudentManagement, setSelectedGroupForStudentManagement] = useState<Group | null>(null);
-  const [selectedStudentIdsForGroup, setSelectedStudentIdsForGroup] = useState<string[]>([]);
+  const [isViewStudentsDialogOpen, setIsViewStudentsDialogOpen] = useState(false); // Renamed
+  const [selectedGroupForStudentViewing, setSelectedGroupForStudentViewing] = useState<Group | null>(null); // Renamed
   const [studentSearchTerm, setStudentSearchTerm] = useState('');
 
   const { toast } = useToast();
@@ -214,51 +213,27 @@ export default function GroupManagementPage() {
     }
   };
   
-  const openManageStudentsDialog = async (group: Group) => {
-    setSelectedGroupForStudentManagement(group);
-    setSelectedStudentIdsForGroup(Array.isArray(group.studentIds) ? [...group.studentIds] : []);
+  const openViewStudentsDialog = (group: Group) => {
+    setSelectedGroupForStudentViewing(group);
     setStudentSearchTerm('');
-    setIsManageStudentsDialogOpen(true);
+    setIsViewStudentsDialogOpen(true);
   };
 
+  const studentsInSelectedGroup = useMemo(() => {
+    if (!selectedGroupForStudentViewing || !Array.isArray(selectedGroupForStudentViewing.studentIds)) {
+      return [];
+    }
+    return allStudents.filter(student => selectedGroupForStudentViewing.studentIds.includes(student.id));
+  }, [allStudents, selectedGroupForStudentViewing]);
+
   const filteredStudentsForDialog = useMemo(() => {
-    if (!studentSearchTerm) return allStudents; // Use allStudents state
-    return allStudents.filter(student => 
+    if (!studentSearchTerm.trim()) return studentsInSelectedGroup;
+    return studentsInSelectedGroup.filter(student =>
       student.name.toLowerCase().includes(studentSearchTerm.toLowerCase()) ||
       (student.preferredShift && student.preferredShift.toLowerCase().includes(studentSearchTerm.toLowerCase()))
     );
-  }, [allStudents, studentSearchTerm]);
+  }, [studentsInSelectedGroup, studentSearchTerm]);
 
-
-  const handleStudentSelectionChange = (studentId: string, checked: boolean) => {
-    setSelectedStudentIdsForGroup(prev => 
-      checked ? [...prev, studentId] : prev.filter(id => id !== studentId)
-    );
-  };
-
-  const handleSaveStudentAssignments = async () => {
-    if (!selectedGroupForStudentManagement) return;
-    setIsSubmitting(true);
-    try {
-      const groupRef = doc(db, 'groups', selectedGroupForStudentManagement.id);
-      await updateDoc(groupRef, { studentIds: selectedStudentIdsForGroup });
-      
-      setGroups(prevGroups => prevGroups.map(g => 
-        g.id === selectedGroupForStudentManagement.id 
-        ? { ...g, studentIds: selectedStudentIdsForGroup } 
-        : g
-      ));
-
-      toast({ title: 'Students Updated', description: `Student assignments for group "${selectedGroupForStudentManagement.name}" updated.` });
-      setIsManageStudentsDialogOpen(false);
-      setSelectedGroupForStudentManagement(null);
-    } catch (error) {
-      console.error("Error updating students in group:", error);
-      toast({ title: 'Update Failed', description: 'Could not update student assignments.', variant: 'destructive' });
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
 
   const formatDateDisplay = (dateInput?: Date | string | null) => {
     if (!dateInput) return 'N/A';
@@ -273,7 +248,7 @@ export default function GroupManagementPage() {
 
   const getTeacherName = (teacherId?: string | null) => {
     if (!teacherId) return 'N/A';
-    const teacher = allTeachers.find(t => t.id === teacherId); // Use allTeachers state
+    const teacher = allTeachers.find(t => t.id === teacherId);
     return teacher ? teacher.name : 'Unknown Teacher';
   };
 
@@ -298,7 +273,7 @@ export default function GroupManagementPage() {
         <CardHeader className="flex flex-row items-center justify-between">
           <div>
             <CardTitle className="flex items-center gap-2"><Users className="h-6 w-6 text-primary" /> Group Management</CardTitle>
-            <CardDescription>Create and manage student groups, assign teachers, and manage student enrollments.</CardDescription>
+            <CardDescription>Create and manage student groups, assign teachers, and view student enrollments.</CardDescription>
           </div>
           <Dialog open={isGroupFormDialogOpen} onOpenChange={(isOpen) => {
             setIsGroupFormDialogOpen(isOpen);
@@ -316,9 +291,9 @@ export default function GroupManagementPage() {
             <DialogContent className="sm:max-w-lg">
               <DialogHeader>
                 <DialogTitle>{editingGroup ? 'Edit Group' : 'Create New Group'}</DialogTitle>
-                <DialogDescription>
+                <DialogPrimitiveDescription>
                   {editingGroup ? 'Update the details for this group.' : 'Fill in the details for the new group.'}
-                </DialogDescription>
+                </DialogPrimitiveDescription>
               </DialogHeader>
               <form onSubmit={form.handleSubmit(handleGroupFormSubmit)} className="space-y-4 py-4 max-h-[70vh] overflow-y-auto pr-2">
                 <div>
@@ -499,8 +474,8 @@ export default function GroupManagementPage() {
                     <TableCell>{getTeacherName(group.teacherId)}</TableCell>
                     <TableCell>{getValidatedStudentCount(group.id)}</TableCell>
                     <TableCell className="space-x-1">
-                      <Button variant="outline" size="sm" onClick={() => openManageStudentsDialog(group)} className="text-xs">
-                        <UserCheck className="mr-1 h-3.5 w-3.5" /> Students
+                      <Button variant="outline" size="sm" onClick={() => openViewStudentsDialog(group)} className="text-xs">
+                        <UserCheck className="mr-1 h-3.5 w-3.5" /> View Students
                       </Button>
                       <Button variant="ghost" size="icon" onClick={() => openEditGroupDialog(group)}>
                         <Edit className="h-4 w-4" />
@@ -519,20 +494,19 @@ export default function GroupManagementPage() {
         </CardContent>
       </Card>
 
-      <Dialog open={isManageStudentsDialogOpen} onOpenChange={(isOpen) => {
-        setIsManageStudentsDialogOpen(isOpen);
+      <Dialog open={isViewStudentsDialogOpen} onOpenChange={(isOpen) => {
+        setIsViewStudentsDialogOpen(isOpen);
         if (!isOpen) {
-          setSelectedGroupForStudentManagement(null);
-          setSelectedStudentIdsForGroup([]);
+          setSelectedGroupForStudentViewing(null);
           setStudentSearchTerm('');
         }
       }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Manage Students for {selectedGroupForStudentManagement?.name}</DialogTitle>
-            <DialogDescription>
-              Select students to add or remove from this group. Search by name or preferred shift.
-            </DialogDescription>
+            <DialogTitle>Students in {selectedGroupForStudentViewing?.name}</DialogTitle>
+            <DialogPrimitiveDescription>
+              List of students currently enrolled in this group. Manage assignments in Student Management.
+            </DialogPrimitiveDescription>
           </DialogHeader>
           <div className="py-2">
             <div className="relative">
@@ -546,42 +520,34 @@ export default function GroupManagementPage() {
                 />
             </div>
           </div>
-          {isLoadingStudents && allStudents.length === 0 ? ( 
+          {isLoadingStudents && studentsInSelectedGroup.length === 0 && !selectedGroupForStudentViewing ? ( 
             <div className="flex items-center justify-center py-10">
               <Loader2 className="h-8 w-8 animate-spin text-primary" />
-              <p className="ml-2">Loading students...</p>
+              <p className="ml-2">Loading student data...</p>
             </div>
           ) : (
-            <div className="py-2 space-y-2 max-h-60 overflow-y-auto">
+            <div className="py-2 space-y-1 max-h-60 overflow-y-auto">
               {filteredStudentsForDialog.length === 0 && (
-                <p className="text-sm text-muted-foreground text-center">
-                  {studentSearchTerm ? 'No students match your search.' : (allStudents.length === 0 ? 'No students available in the system.' : 'No students found.')}
+                <p className="text-sm text-muted-foreground text-center py-4">
+                  {studentSearchTerm ? 'No students match your search in this group.' : (studentsInSelectedGroup.length === 0 ? 'This group currently has no students assigned.' : 'No students found.')}
                 </p>
               )}
               {filteredStudentsForDialog.map(student => (
-                <div key={student.id} className="flex items-center space-x-2 p-1 hover:bg-muted/50 rounded-md">
-                  <Checkbox
-                    id={`student-${student.id}`}
-                    checked={selectedStudentIdsForGroup.includes(student.id)}
-                    onCheckedChange={(checked) => handleStudentSelectionChange(student.id, !!checked)}
-                  />
-                  <Label htmlFor={`student-${student.id}`} className="font-normal flex-1 cursor-pointer">
+                <div key={student.id} className="flex items-center space-x-2 p-2 hover:bg-muted/50 rounded-md">
+                  <UserCircle2 className="h-5 w-5 text-muted-foreground" />
+                  <span className="font-normal flex-1">
                     {student.name} ({student.preferredShift || 'No shift'})
-                  </Label>
+                  </span>
                 </div>
               ))}
             </div>
           )}
-          <DialogFooter>
+          <DialogFooter className="pt-4">
             <DialogClose asChild>
               <Button type="button" variant="outline">
-                Cancel
+                Close
               </Button>
             </DialogClose>
-            <Button type="button" onClick={handleSaveStudentAssignments} disabled={isSubmitting || isLoadingStudents }>
-              {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Save Assignments
-            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
