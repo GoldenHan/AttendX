@@ -99,7 +99,8 @@ export default function AttendanceLogPage() {
         const groupsSnapshot = await getDocs(collection(db, 'groups'));
         setGroups(groupsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Group)));
 
-        const studentsSnapshot = await getDocs(query(collection(db, 'users'), where('role', '==', 'student')));
+        // Fetch students from the 'students' collection directly
+        const studentsSnapshot = await getDocs(collection(db, 'students'));
         setAllStudents(studentsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as User)));
 
       } catch (error) {
@@ -370,4 +371,3 @@ export default function AttendanceLogPage() {
     </Card>
   );
 }
-
