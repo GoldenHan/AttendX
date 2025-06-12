@@ -22,7 +22,7 @@ import {
   DialogTrigger,
   DialogClose,
 } from '@/components/ui/dialog';
-import { Loader2, PlusCircle, Users, Edit, Trash2, CalendarIcon, Search, UserCheck, UserCircle2 } from 'lucide-react'; // Added UserCircle2
+import { Loader2, PlusCircle, Users, Edit, Trash2, CalendarIcon, Search, UserCheck, UserCircle2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, doc, deleteDoc, updateDoc, query, where } from 'firebase/firestore';
@@ -43,7 +43,6 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Calendar } from '@/components/ui/calendar';
 import { format, isValid, parseISO } from 'date-fns';
 import { cn } from '@/lib/utils';
-// Checkbox removed as it's no longer used for selection in this dialog
 
 const groupFormSchema = z.object({
   name: z.string().min(2, { message: "Group name must be at least 2 characters." }),
@@ -70,8 +69,8 @@ export default function GroupManagementPage() {
   const [isGroupFormDialogOpen, setIsGroupFormDialogOpen] = useState(false);
   const [editingGroup, setEditingGroup] = useState<Group | null>(null);
   
-  const [isViewStudentsDialogOpen, setIsViewStudentsDialogOpen] = useState(false); // Renamed
-  const [selectedGroupForStudentViewing, setSelectedGroupForStudentViewing] = useState<Group | null>(null); // Renamed
+  const [isViewStudentsDialogOpen, setIsViewStudentsDialogOpen] = useState(false);
+  const [selectedGroupForStudentViewing, setSelectedGroupForStudentViewing] = useState<Group | null>(null);
   const [studentSearchTerm, setStudentSearchTerm] = useState('');
 
   const { toast } = useToast();
@@ -503,9 +502,9 @@ export default function GroupManagementPage() {
       }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Students in {selectedGroupForStudentViewing?.name}</DialogTitle>
+            <DialogTitle>Students in: {selectedGroupForStudentViewing?.name}</DialogTitle>
             <DialogPrimitiveDescription>
-              List of students currently enrolled in this group. Manage assignments in Student Management.
+              List of students currently enrolled in this group. Manage assignments in "Student Management".
             </DialogPrimitiveDescription>
           </DialogHeader>
           <div className="py-2">
@@ -520,7 +519,7 @@ export default function GroupManagementPage() {
                 />
             </div>
           </div>
-          {isLoadingStudents && studentsInSelectedGroup.length === 0 && !selectedGroupForStudentViewing ? ( 
+          {isLoadingStudents && (!filteredStudentsForDialog || filteredStudentsForDialog.length === 0) && selectedGroupForStudentViewing ? ( 
             <div className="flex items-center justify-center py-10">
               <Loader2 className="h-8 w-8 animate-spin text-primary" />
               <p className="ml-2">Loading student data...</p>
@@ -554,4 +553,4 @@ export default function GroupManagementPage() {
     </>
   );
 }
-
+    
