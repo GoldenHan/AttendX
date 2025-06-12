@@ -35,11 +35,47 @@ export default function LoginPage() {
         description: 'Welcome back!',
       });
     } catch (error: any) {
-      console.error(error);
-      let errorMessage = 'Failed to sign in. Please check your credentials.';
-      if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
-        errorMessage = 'Invalid email or password.';
+      console.error("Login Page Error:", error); // Log the full error for debugging
+      let errorMessage = 'Failed to sign in. Please check your credentials or try again later.'; // Default generic message
+
+      switch (error.code) {
+        case 'auth/user-not-found':
+        case 'auth/wrong-password':
+        case 'auth/invalid-credential':
+          errorMessage = 'Invalid email or password.';
+          break;
+        case 'auth/invalid-email':
+          errorMessage = 'The email address is badly formatted.';
+          break;
+        case 'auth/user-disabled':
+          errorMessage = 'This user account has been disabled.';
+          break;
+        case 'auth/operation-not-allowed':
+          errorMessage = 'Email/password sign-in is not enabled. Please contact support.';
+          break;
+        case 'auth/network-request-failed':
+          errorMessage = 'A network error occurred. Please check your internet connection and try again.';
+          break;
+        case 'auth/too-many-requests':
+          errorMessage = 'Access to this account has been temporarily disabled due to many failed login attempts. You can try again later or reset your password.';
+          break;
+        case 'auth/invalid-api-key':
+           errorMessage = 'System configuration error. Please contact support. (Invalid API Key)';
+           break;
+        case 'auth/app-deleted':
+            errorMessage = 'System configuration error. Please contact support. (App Deleted)';
+            break;
+        case 'auth/app-not-authorized':
+            errorMessage = 'System configuration error. Please contact support. (App Not Authorized for domain)';
+            break;
+        default:
+          // Keep the generic message for unhandled codes, or use error.message if it's user-friendly
+          // For now, stick to our defined messages to avoid showing overly technical Firebase messages.
+          // If error.message is preferred for unknown errors, it can be conditionally used here.
+          console.warn("Unhandled Firebase Auth error code during login:", error.code);
+          break;
       }
+
       toast({
         title: 'Login Failed',
         description: errorMessage,
