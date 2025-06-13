@@ -185,7 +185,7 @@ export default function TeacherSessionAttendancePage() {
           userId: att.userId, 
           sessionId: sessionId,
           status: att.status,
-          timestamp: Timestamp.fromDate(new Date(`${format(data.sessionDate, 'yyyy-MM-dd')}T${data.sessionTime}:00`)).toDate().toISOString(),
+          timestamp: Timestamp.fromDate(new Date(\`\${format(data.sessionDate, 'yyyy-MM-dd')}T\${data.sessionTime}:00\`)).toDate().toISOString(),
         };
         if (att.status === 'absent' && att.observation && att.observation.trim() !== '') {
           record.observation = att.observation.trim();
@@ -197,7 +197,7 @@ export default function TeacherSessionAttendancePage() {
 
       toast({
         title: 'Attendance Logged',
-        description: `Attendance for group recorded successfully for session on ${format(data.sessionDate, 'PPP')} at ${data.sessionTime}.`,
+        description: \`Attendance for group recorded successfully for session on \${format(data.sessionDate, 'PPP')} at \${data.sessionTime}.\`,
       });
       form.setValue('attendances', []); 
       if (firestoreUser?.role === 'admin' || (firestoreUser?.role === 'teacher' && availableGroups.length > 1)) {
@@ -364,13 +364,13 @@ export default function TeacherSessionAttendancePage() {
                   <Card key={item.fieldId} className="p-4 shadow-sm">
                     <div className="flex flex-col md:flex-row md:items-start gap-4">
                       <div className="flex-1 min-w-0">
-                        <p className="font-medium truncate" title={form.getValues(`attendances.${index}.name`)}>{form.getValues(`attendances.${index}.name`)}</p>
-                        <p className="text-xs text-muted-foreground">Student ID: {form.getValues(`attendances.${index}.userId`)}</p>
+                        <p className="font-medium truncate" title={form.getValues(\`attendances.\${index}.name\`)}>{form.getValues(\`attendances.\${index}.name\`)}</p>
+                        <p className="text-xs text-muted-foreground">Student ID: {form.getValues(\`attendances.\${index}.userId\`)}</p>
                       </div>
                       
                       <Controller
                         control={form.control}
-                        name={`attendances.${index}.status`}
+                        name={\`attendances.\${index}.status\`}
                         render={({ field: statusField }) => (
                           <FormItem className="space-y-1 md:pt-1">
                             <FormControl>
@@ -378,7 +378,7 @@ export default function TeacherSessionAttendancePage() {
                                 onValueChange={(value) => {
                                   statusField.onChange(value);
                                   if (value === 'present') {
-                                    form.setValue(`attendances.${index}.observation`, '');
+                                    form.setValue(\`attendances.\${index}.observation\`, '');
                                   }
                                 }}
                                 value={statusField.value}
@@ -403,10 +403,10 @@ export default function TeacherSessionAttendancePage() {
                         )}
                       />
                       
-                      {form.watch(`attendances.${index}.status`) === 'absent' && (
+                      {form.watch(\`attendances.\${index}.status\`) === 'absent' && (
                         <Controller
                           control={form.control}
-                          name={`attendances.${index}.observation`}
+                          name={\`attendances.\${index}.observation\`}
                           render={({ field: obsField }) => (
                             <FormItem className="flex-1 md:min-w-[250px] min-w-full">
                               <FormLabel className="text-xs text-muted-foreground">Observation (if absent)</FormLabel>
