@@ -22,6 +22,15 @@ export interface PartialScores { // Stored in Firestore under student.grades.par
   exam: ExamScore | null; // Single exam for the partial
 }
 
+// This structure will hold grades for a specific level
+export interface StudentGradeStructure {
+  partial1?: PartialScores;
+  partial2?: PartialScores;
+  partial3?: PartialScores;
+  partial4?: PartialScores;
+  certificateCode?: string; // For physical certificate codes per level
+}
+
 export interface User {
   id: string; // Firestore document ID from 'users' or 'students' collection
   uid?: string; // Firebase Auth UID (typically for 'users' collection who can log in)
@@ -32,17 +41,12 @@ export interface User {
   photoUrl?: string;
 
   // Student-specific fields (primarily in 'students' collection)
-  level?: 'Beginner' | 'Intermediate' | 'Advanced' | 'Other';
+  level?: 'Beginner' | 'Intermediate' | 'Advanced' | 'Other'; // Current level of the student
   notes?: string;
   age?: number;
   gender?: 'male' | 'female' | 'other';
   preferredShift?: 'Saturday' | 'Sunday';
-  grades?: {
-    partial1?: PartialScores;
-    partial2?: PartialScores;
-    partial3?: PartialScores;
-    partial4?: PartialScores; // Added for up to 4 partials
-  };
+  gradesByLevel?: Record<string, StudentGradeStructure>; // Key is the level name (e.g., "Beginner")
 }
 
 
@@ -94,6 +98,7 @@ export const DEFAULT_GRADING_CONFIG: GradingConfiguration = {
 
 // Extended User type for grades report pages
 export interface StudentWithDetailedGrades extends User {
+  gradesDisplayLevel?: string; // The level for which grades are being displayed
   calculatedAccumulatedTotalP1?: number | null;
   calculatedAccumulatedTotalP2?: number | null;
   calculatedAccumulatedTotalP3?: number | null;
@@ -104,3 +109,25 @@ export interface StudentWithDetailedGrades extends User {
   calculatedPartial4Total?: number | null;
   calculatedFinalGrade?: number | null;
 }
+
+// Helper to get default partial scores
+export const getDefaultPartialScores = (): PartialScores => ({
+  accumulatedActivities: [],
+  exam: { name: 'Examen', score: null },
+});
+
+// Helper to get default grade structure for a new level
+export const getDefaultStudentGradeStructure = (config: GradingConfiguration): StudentGradeStructure => {
+  const structure: StudentGradeStructure = {};
+  for (let i = 1; i <= config.numberOfPartials; i++) {
+    structure[`partial${i as 1 | 2 | 3 | 4}` as keyof StudentGradeStructure] = getDefaultPartialScores();
+  }
+  // Ensure all 4 partials are defined if config is less, to match GradeEntryFormValues expectations
+  for (let i = config.numberOfPartials + 1; i <= 4; i++) {
+     if (!structure[`partial${i as 1 | 2 | 3 | 4}` as keyof StudentGradeStructure]) {
+        structure[`partial${i as 1 | 2 | 3 | 4}` as keyof StudentGradeStructure] = getDefaultPartialScores();
+     }
+  }
+  structure.certificateCode = '';
+  return structure;
+};
