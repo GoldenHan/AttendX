@@ -6,7 +6,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Mail, Lock, User as UserIcon } from 'lucide-react'; // Added Mail, Lock, UserIcon
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -21,6 +21,7 @@ import {
 import { cn } from '@/lib/utils';
 import { collection, query, where, getDocs, limit } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import Link from 'next/link'; // For Forgot Password link
 
 const loginFormSchema = z.object({
   identifier: z.string().min(1, { message: "El nombre de usuario o email es requerido." }),
@@ -112,7 +113,7 @@ export default function AuthPage() {
     <div className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-br from-primary to-primary/70 p-4 font-body">
       <div
         className={cn(
-          "relative h-[600px] w-full max-w-4xl overflow-hidden rounded-2xl shadow-2xl bg-card",
+          "relative h-[650px] w-full max-w-4xl overflow-hidden rounded-2xl shadow-2xl bg-card", // Increased height slightly for forgot password link
           "container" 
         )}
       >
@@ -128,21 +129,66 @@ export default function AuthPage() {
               onSubmit={signupForm.handleSubmit(handleSignupSubmit)}
               className="flex h-full flex-col items-center justify-center space-y-3 bg-card px-10 text-center"
             >
-              <h1 className="text-3xl font-bold text-foreground mb-6">Regístrate aquí</h1>
+              <h1 className="text-3xl font-bold text-foreground mb-6">Crear Cuenta</h1>
               <FormField control={signupForm.control} name="name" render={({ field }) => (
-                <FormItem className="w-full"><FormLabel className="sr-only">Nombre Completo</FormLabel><FormControl><Input placeholder="Nombre Completo" {...field} disabled={currentLoadingState} className="bg-input" /></FormControl><FormMessage className="text-xs text-left" /></FormItem>
+                <FormItem className="w-full">
+                  <FormLabel className="sr-only">Nombre Completo</FormLabel>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <UserIcon className="h-5 w-5 text-gray-400" />
+                    </div>
+                    <FormControl><Input placeholder="Nombre Completo" {...field} disabled={currentLoadingState} className="bg-input pl-10" /></FormControl>
+                  </div>
+                  <FormMessage className="text-xs text-left" />
+                </FormItem>
               )}/>
               <FormField control={signupForm.control} name="username" render={({ field }) => (
-                <FormItem className="w-full"><FormLabel className="sr-only">Nombre de Usuario</FormLabel><FormControl><Input placeholder="Nombre de Usuario" {...field} disabled={currentLoadingState} className="bg-input" /></FormControl><FormMessage className="text-xs text-left" /></FormItem>
+                <FormItem className="w-full">
+                  <FormLabel className="sr-only">Nombre de Usuario</FormLabel>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <UserIcon className="h-5 w-5 text-gray-400" />
+                    </div>
+                    <FormControl><Input placeholder="Nombre de Usuario" {...field} disabled={currentLoadingState} className="bg-input pl-10" /></FormControl>
+                  </div>
+                  <FormMessage className="text-xs text-left" />
+                </FormItem>
               )}/>
               <FormField control={signupForm.control} name="email" render={({ field }) => (
-                <FormItem className="w-full"><FormLabel className="sr-only">Email</FormLabel><FormControl><Input type="email" placeholder="Correo Electrónico" {...field} disabled={currentLoadingState} className="bg-input" /></FormControl><FormMessage className="text-xs text-left" /></FormItem>
+                <FormItem className="w-full">
+                  <FormLabel className="sr-only">Email</FormLabel>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <Mail className="h-5 w-5 text-gray-400" />
+                    </div>
+                    <FormControl><Input type="email" placeholder="Correo Electrónico" {...field} disabled={currentLoadingState} className="bg-input pl-10" /></FormControl>
+                  </div>
+                  <FormMessage className="text-xs text-left" />
+                </FormItem>
               )}/>
               <FormField control={signupForm.control} name="password" render={({ field }) => (
-                <FormItem className="w-full"><FormLabel className="sr-only">Contraseña</FormLabel><FormControl><Input type="password" placeholder="Contraseña" {...field} disabled={currentLoadingState} className="bg-input" /></FormControl><FormMessage className="text-xs text-left" /></FormItem>
+                <FormItem className="w-full">
+                  <FormLabel className="sr-only">Contraseña</FormLabel>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <Lock className="h-5 w-5 text-gray-400" />
+                    </div>
+                    <FormControl><Input type="password" placeholder="Contraseña" {...field} disabled={currentLoadingState} className="bg-input pl-10" /></FormControl>
+                  </div>
+                  <FormMessage className="text-xs text-left" />
+                </FormItem>
               )}/>
               <FormField control={signupForm.control} name="confirmPassword" render={({ field }) => (
-                <FormItem className="w-full"><FormLabel className="sr-only">Confirmar Contraseña</FormLabel><FormControl><Input type="password" placeholder="Confirmar Contraseña" {...field} disabled={currentLoadingState} className="bg-input" /></FormControl><FormMessage className="text-xs text-left" /></FormItem>
+                <FormItem className="w-full">
+                  <FormLabel className="sr-only">Confirmar Contraseña</FormLabel>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <Lock className="h-5 w-5 text-gray-400" />
+                    </div>
+                    <FormControl><Input type="password" placeholder="Confirmar Contraseña" {...field} disabled={currentLoadingState} className="bg-input pl-10" /></FormControl>
+                  </div>
+                  <FormMessage className="text-xs text-left" />
+                </FormItem>
               )}/>
               <Button type="submit" className="mt-4 rounded-full px-8 py-3 text-sm font-semibold uppercase tracking-wider" disabled={currentLoadingState}>
                 {currentLoadingState && isSignUpActive ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Registrar'}
@@ -170,9 +216,14 @@ export default function AuthPage() {
                 render={({ field }) => (
                   <FormItem className="w-full">
                     <FormLabel className="sr-only">Nombre de Usuario o Email</FormLabel>
-                    <FormControl>
-                      <Input placeholder="Nombre de Usuario o Email" {...field} disabled={currentLoadingState} className="bg-input" />
-                    </FormControl>
+                     <div className="relative">
+                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                          <UserIcon className="h-5 w-5 text-gray-400" />
+                        </div>
+                        <FormControl>
+                          <Input placeholder="Nombre de Usuario o Email" {...field} disabled={currentLoadingState} className="bg-input pl-10" />
+                        </FormControl>
+                    </div>
                     <FormMessage className="text-xs text-left"/>
                   </FormItem>
                 )}
@@ -183,13 +234,23 @@ export default function AuthPage() {
                 render={({ field }) => (
                   <FormItem className="w-full">
                     <FormLabel className="sr-only">Contraseña</FormLabel>
-                    <FormControl>
-                      <Input type="password" placeholder="Contraseña" {...field} disabled={currentLoadingState} className="bg-input" />
-                    </FormControl>
+                    <div className="relative">
+                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                            <Lock className="h-5 w-5 text-gray-400" />
+                        </div>
+                        <FormControl>
+                        <Input type="password" placeholder="Contraseña" {...field} disabled={currentLoadingState} className="bg-input pl-10" />
+                        </FormControl>
+                    </div>
                     <FormMessage className="text-xs text-left"/>
                   </FormItem>
                 )}
               />
+              <div className="w-full text-right mt-1">
+                <Link href="#" className="text-xs text-primary hover:underline">
+                  ¿Olvidaste tu contraseña?
+                </Link>
+              </div>
               <Button type="submit" className="mt-4 rounded-full px-8 py-3 text-sm font-semibold uppercase tracking-wider" disabled={currentLoadingState}>
                 {currentLoadingState && !isSignUpActive ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Ingresar'}
               </Button>
@@ -217,9 +278,9 @@ export default function AuthPage() {
                 isSignUpActive ? "opacity-100" : "opacity-0 -translate-x-[20%]"
               )}
             >
-              <h1 className="text-3xl font-bold">Hola amigos</h1>
+              <h1 className="text-3xl font-bold">¡Bienvenido de Nuevo!</h1>
               <p className="mt-4 text-sm font-light leading-relaxed">
-                Si tienes una cuenta, inicia sesión aquí y diviértete
+                Para mantenerse conectado con nosotros, por favor inicie sesión con su información personal.
               </p>
               <Button
                 variant="outline"
@@ -238,9 +299,9 @@ export default function AuthPage() {
                  isSignUpActive ? "opacity-0 translate-x-[20%]" : "opacity-100"
               )}
             >
-              <h1 className="text-3xl font-bold">Bienvenido!</h1>
+              <h1 className="text-3xl font-bold">¡Hola!</h1>
               <p className="mt-4 text-sm font-light leading-relaxed">
-                Aún no tienes una cuenta? Regístrate y empieza la aventura con nosotros.
+                Ingrese sus datos personales y comience su viaje con nosotros.
               </p>
               <Button
                 variant="outline"
