@@ -14,7 +14,7 @@ import { collection, query, where, getDocs, limit } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
 export default function LoginPage() {
-  const [identifier, setIdentifier] = useState(''); // Can be username 
+  const [identifier, setIdentifier] = useState(''); // Can be username or email for staff
   const [password, setPassword] = useState('');
   const { signIn, loading } = useAuth(); // signIn in context still expects email
   const { toast } = useToast();
@@ -25,8 +25,8 @@ export default function LoginPage() {
     e.preventDefault();
     if (!identifier || !password) {
       toast({
-        title: 'Error',
-        description: 'Please enter both username and password.',
+        title: 'Error de Ingreso',
+        description: 'Por favor, ingresa tu nombre de usuario y contraseña.',
         variant: 'destructive',
       });
       return;
@@ -35,33 +35,33 @@ export default function LoginPage() {
     try {
       // Attempt to find user by username in 'users' collection
       const usersRef = collection(db, 'users');
-      const q = query(usersRef, where('username', '==', identifier), limit(1));
+      const q = query(usersRef, where('username', '==', identifier.trim()), limit(1));
       const querySnapshot = await getDocs(q);
 
-      let userEmail: string | null = null;
+      let userEmailToAuth: string | null = null;
 
       if (!querySnapshot.empty) {
         const userDoc = querySnapshot.docs[0].data();
         if (userDoc.email) {
-          userEmail = userDoc.email;
+          userEmailToAuth = userDoc.email;
         } else {
           toast({
-            title: 'Login Failed',
-            description: 'User account is not properly configured (missing email). Please contact support.',
+            title: 'Fallo de Ingreso',
+            description: 'La cuenta de usuario no está configurada correctamente (falta correo electrónico). Por favor, contacta a soporte.',
             variant: 'destructive',
           });
           setIsSubmitting(false);
           return;
         }
       } else {
-         // Fallback: if not found by username, try if identifier itself is an email (for staff)
-         // This allows staff to login with email if they don't have/use a username
+         // Fallback: if not found by username, try if identifier itself is an email (e.g. for staff)
+         // This allows staff to login with email if they don't have/use a username or if student enters email
          if (identifier.includes('@')) {
-            userEmail = identifier;
+            userEmailToAuth = identifier.trim();
          } else {
             toast({
-                title: 'Login Failed',
-                description: 'Username not found.',
+                title: 'Fallo de Ingreso',
+                description: 'Nombre de usuario no encontrado.',
                 variant: 'destructive',
             });
             setIsSubmitting(false);
@@ -69,48 +69,59 @@ export default function LoginPage() {
          }
       }
 
-      await signIn(userEmail, password); // Use the retrieved/provided email to sign in
+      if (!userEmailToAuth) {
+        // Should not happen if logic above is correct, but as a safeguard
+        toast({
+            title: 'Fallo de Ingreso',
+            description: 'No se pudo determinar el correo electrónico para la autenticación.',
+            variant: 'destructive',
+        });
+        setIsSubmitting(false);
+        return;
+      }
+
+      await signIn(userEmailToAuth, password);
       toast({
-        title: 'Login Successful',
-        description: 'Welcome back!',
+        title: 'Ingreso Exitoso',
+        description: '¡Bienvenido/a de nuevo!',
       });
+      // Router will redirect via AuthContext effect
     } catch (error: any) {
       console.error("Login Page Error:", error); 
-      let errorMessage = 'Failed to sign in. Please check your credentials or try again later.'; 
+      let errorMessage = 'Fallo al ingresar. Por favor, verifica tus credenciales o inténtalo más tarde.'; 
 
       switch (error.code) {
         case 'auth/user-not-found':
         case 'auth/wrong-password':
         case 'auth/invalid-credential':
-          errorMessage = 'Invalid username or password.';
+          errorMessage = 'Nombre de usuario o contraseña incorrectos.';
           break;
         case 'auth/invalid-email':
-          // This might occur if the retrieved email is badly formatted, less likely if stored correctly
-          errorMessage = 'The email associated with the username is badly formatted.';
+          errorMessage = 'El formato del correo electrónico asociado al nombre de usuario no es válido.';
           break;
         case 'auth/user-disabled':
-          errorMessage = 'This user account has been disabled.';
+          errorMessage = 'Esta cuenta de usuario ha sido deshabilitada.';
           break;
         case 'auth/operation-not-allowed':
-          errorMessage = 'Sign-in method is not enabled. Please contact support.';
+          errorMessage = 'El método de inicio de sesión no está habilitado. Por favor, contacta a soporte.';
           break;
         case 'auth/network-request-failed':
-          errorMessage = 'A network error occurred. Please check your internet connection and try again.';
+          errorMessage = 'Ocurrió un error de red. Por favor, verifica tu conexión a internet e inténtalo de nuevo.';
           break;
         case 'auth/too-many-requests':
-          errorMessage = 'Access to this account has been temporarily disabled due to many failed login attempts. You can try again later or reset your password.';
+          errorMessage = 'El acceso a esta cuenta ha sido deshabilitado temporalmente debido a muchos intentos fallidos. Intenta más tarde o restablece tu contraseña.';
           break;
         case 'auth/invalid-api-key':
-           errorMessage = 'System configuration error. Please contact support. (Invalid API Key)';
+           errorMessage = 'Error de configuración del sistema. Por favor, contacta a soporte. (API Key Inválida)';
            break;
         case 'auth/app-deleted':
-            errorMessage = 'System configuration error. Please contact support. (App Deleted)';
+            errorMessage = 'Error de configuración del sistema. Por favor, contacta a soporte. (App Eliminada)';
             break;
         case 'auth/app-not-authorized':
-            errorMessage = 'System configuration error. Please contact support. (App Not Authorized for domain)';
+            errorMessage = 'Error de configuración del sistema. Por favor, contacta a soporte. (App No Autorizada para el dominio)';
             break;
         case 'auth/visibility-check-was-unavailable':
-            errorMessage = 'Could not verify app visibility. This might be a temporary issue or due to browser settings/extensions. Please try again. If it persists, try disabling browser extensions or check privacy settings.';
+            errorMessage = 'No se pudo verificar la visibilidad de la aplicación. Esto podría ser un problema temporal o debido a la configuración/extensiones del navegador. Por favor, inténtalo de nuevo. Si persiste, intenta deshabilitar las extensiones del navegador o verifica la configuración de privacidad.';
             break;
         default:
           console.warn("Unhandled Firebase Auth error code during login:", error.code, error.message);
@@ -120,7 +131,7 @@ export default function LoginPage() {
           break;
       }
       toast({
-        title: 'Login Failed',
+        title: 'Fallo de Ingreso',
         description: errorMessage,
         variant: 'destructive',
       });
@@ -139,16 +150,16 @@ export default function LoginPage() {
             <LogIn className="h-12 w-12 text-primary" />
           </div>
           <CardTitle className="text-3xl font-bold">SERVEX Login</CardTitle>
-          <CardDescription>Access your attendance management dashboard.</CardDescription>
+          <CardDescription>Accede a tu panel de gestión de asistencia.</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-6">
             <div className="space-y-2">
-              <Label htmlFor="identifier">Username</Label>
+              <Label htmlFor="identifier">Nombre de Usuario</Label>
               <Input
                 id="identifier"
                 type="text" 
-                placeholder="Enter your username"
+                placeholder="Ingresa tu nombre de usuario"
                 value={identifier}
                 onChange={(e) => setIdentifier(e.target.value)}
                 required
@@ -156,7 +167,7 @@ export default function LoginPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
+              <Label htmlFor="password">Contraseña</Label>
               <Input
                 id="password"
                 type="password"
@@ -171,18 +182,18 @@ export default function LoginPage() {
               {currentLoadingState ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               ) : (
-                'Sign In'
+                'Ingresar'
               )}
             </Button>
           </form>
         </CardContent>
         <CardFooter className="flex flex-col items-center text-sm">
-           <p className="text-muted-foreground">Ensure you have an account before attempting to log in.</p>
+           <p className="text-muted-foreground">Asegúrate de tener una cuenta antes de intentar ingresar.</p>
            <div className="mt-4">
             <Button variant="outline" asChild>
               <Link href="/signup">
                 <UserPlus className="mr-2 h-4 w-4" />
-                Create an Account
+                Crear una Cuenta
               </Link>
             </Button>
            </div>
