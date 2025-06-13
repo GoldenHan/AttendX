@@ -21,7 +21,6 @@ import {
 import { cn } from '@/lib/utils';
 import { collection, query, where, getDocs, limit } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-// Removed Link import as it's not used after integrating signup
 
 const loginFormSchema = z.object({
   identifier: z.string().min(1, { message: "El nombre de usuario o email es requerido." }),
@@ -110,7 +109,11 @@ export default function AuthPage() {
   };
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-br from-primary to-primary/70 p-4 font-body">
+    <div className={cn(
+        "flex min-h-screen flex-col items-center justify-center p-4 font-body transition-colors duration-700",
+        isSignUpActive ? 'bg-gradient-to-br from-signup-panel to-signup-panel/80' : 'bg-gradient-to-br from-primary to-primary/70'
+      )}
+    >
       <div
         className={cn(
           "relative h-[650px] w-full max-w-4xl overflow-hidden rounded-2xl shadow-2xl",
@@ -127,7 +130,7 @@ export default function AuthPage() {
           <Form {...signupForm}>
             <form
               onSubmit={signupForm.handleSubmit(handleSignupSubmit)}
-              className="flex h-full flex-col items-center justify-center space-y-3 bg-card px-10 text-center text-foreground"
+              className="flex h-full flex-col items-center justify-center space-y-3 bg-card px-10 text-center text-card-foreground"
             >
               <h1 className="text-3xl font-bold mb-6">Crear Cuenta</h1>
               <FormField control={signupForm.control} name="name" render={({ field }) => (
@@ -207,7 +210,7 @@ export default function AuthPage() {
           <Form {...loginForm}>
             <form
               onSubmit={loginForm.handleSubmit(handleLoginSubmit)}
-              className="flex h-full flex-col items-center justify-center space-y-4 bg-card px-10 text-center text-foreground"
+              className="flex h-full flex-col items-center justify-center space-y-4 bg-card px-10 text-center text-card-foreground"
             >
               <h1 className="text-3xl font-bold mb-6">Iniciar Sesión</h1>
                <FormField
@@ -271,11 +274,11 @@ export default function AuthPage() {
               isSignUpActive ? "translate-x-1/2" : "translate-x-0"
             )}
           >
-            {/* Overlay Left Panel (Prompts to Sign In) */}
+            {/* Overlay Left Panel (Prompts to Sign In, visible when SignUp form is active) */}
             <div
               className={cn(
                 "overlay-panel overlay-left absolute top-0 flex h-full w-1/2 flex-col items-center justify-center px-10 text-center transform transition-opacity duration-300 ease-in-out clip-edge-right-gearish",
-                "bg-primary text-primary-foreground",
+                "bg-signup-panel text-signup-panel-foreground", // Use new green color
                 isSignUpActive ? "opacity-100" : "opacity-0 -translate-x-[20%]"
               )}
             >
@@ -284,8 +287,11 @@ export default function AuthPage() {
                 Para mantenerse conectado con nosotros, por favor inicie sesión con su información personal.
               </p>
               <Button
-                variant="secondary" // Changed to secondary
-                className="mt-8 rounded-full px-8 py-3 text-sm font-semibold uppercase tracking-wider"
+                variant="outline"
+                className={cn(
+                    "mt-8 rounded-full px-8 py-3 text-sm font-semibold uppercase tracking-wider",
+                    "border-signup-panel-foreground text-signup-panel-foreground hover:bg-signup-panel-foreground hover:text-signup-panel-bg"
+                )}
                 onClick={() => { loginForm.reset(); setIsSignUpActive(false); }}
                 disabled={currentLoadingState}
               >
@@ -293,11 +299,11 @@ export default function AuthPage() {
               </Button>
             </div>
 
-            {/* Overlay Right Panel (Prompts to Sign Up) */}
+            {/* Overlay Right Panel (Prompts to Sign Up, visible when SignIn form is active) */}
             <div
               className={cn(
                 "overlay-panel overlay-right absolute top-0 right-0 flex h-full w-1/2 flex-col items-center justify-center px-10 text-center transform transition-opacity duration-300 ease-in-out clip-edge-left-gearish",
-                "bg-primary text-primary-foreground",
+                "bg-primary text-primary-foreground", // Keep original blue color
                  isSignUpActive ? "opacity-0 translate-x-[20%]" : "opacity-100"
               )}
             >
@@ -306,8 +312,8 @@ export default function AuthPage() {
                 Ingrese sus datos personales y comience su viaje con nosotros.
               </p>
               <Button
-                variant="secondary" // Changed to secondary
-                className="mt-8 rounded-full px-8 py-3 text-sm font-semibold uppercase tracking-wider"
+                variant="secondary" 
+                className="mt-8 rounded-full px-8 py-3 text-sm font-semibold uppercase tracking-wider" // Keeps yellow button
                 onClick={() => { signupForm.reset(); setIsSignUpActive(true); }}
                 disabled={currentLoadingState}
               >
@@ -324,11 +330,11 @@ export default function AuthPage() {
         @keyframes show {
           0%, 49.99% {
             opacity: 0;
-            z-index: 10; /* ensure it's below the active form if needed during transition */
+            z-index: 10; 
           }
           50%, 100% {
             opacity: 1;
-            z-index: 20; /* ensure it's on top when active */
+            z-index: 20; 
           }
         }
       `}</style>
