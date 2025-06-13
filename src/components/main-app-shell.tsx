@@ -9,6 +9,7 @@ import {
   SidebarContent,
   SidebarFooter,
   SidebarInset,
+  SidebarTrigger, // Import SidebarTrigger
 } from '@/components/ui/sidebar';
 import { Header } from '@/components/header';
 import { SidebarNav } from '@/components/sidebar-nav';
@@ -32,6 +33,8 @@ export function MainAppShell({ children }: { children: React.ReactNode }) {
           <Link href="/" className="flex items-center gap-2 text-lg font-semibold font-headline text-primary">
             <span className="group-data-[collapsible=icon]:hidden">SERVEX</span>
           </Link>
+          {/* Desktop Sidebar Toggle Button */}
+          <SidebarTrigger className="text-sidebar-foreground hidden md:flex" />
         </SidebarHeader>
         <SidebarContent>
           {authLoading && !firestoreUser ? (
