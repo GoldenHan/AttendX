@@ -138,11 +138,11 @@ export default function StaffManagementPage() {
 
     const firestoreUserData: Partial<User> = {
       name: data.name,
-      email: data.email || undefined, // Use undefined to remove field if empty
-      phoneNumber: data.phoneNumber || undefined,
+      email: data.email || null,
+      phoneNumber: data.phoneNumber || null,
       role: data.role,
-      photoUrl: data.photoUrl || undefined,
-      attendanceCode: data.role === 'teacher' ? (data.attendanceCode || undefined) : undefined, // Only for teachers, remove if not teacher or empty
+      photoUrl: data.photoUrl || null,
+      attendanceCode: data.role === 'teacher' ? (data.attendanceCode || null) : null,
     };
 
     let staffMemberId: string | undefined = editingStaff?.id;
