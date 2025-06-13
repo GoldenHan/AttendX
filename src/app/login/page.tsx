@@ -63,28 +63,55 @@ export default function AuthPage() {
     setIsSubmitting(true);
     try {
       const usersRef = collection(db, 'users');
-      const usernameQuery = query(usersRef, where('username', '==', data.identifier.trim()), limit(1));
-      const usernameSnapshot = await getDocs(usernameQuery);
+      const identifierIsEmail = data.identifier.includes('@');
       let userEmailToAuth: string | null = null;
 
-      if (!usernameSnapshot.empty) {
-        const userDoc = usernameSnapshot.docs[0].data();
-        if (userDoc.email) userEmailToAuth = userDoc.email;
-      } else if (data.identifier.includes('@')) {
+      if (identifierIsEmail) {
+        // If it looks like an email, we'll use it directly for Firebase Auth.
+        // Firebase Auth will tell us if the user/email doesn't exist or password is wrong.
         userEmailToAuth = data.identifier.trim();
+      } else {
+        // If it's not an email, assume it's a username and try to find their email in Firestore.
+        const usernameQuery = query(usersRef, where('username', '==', data.identifier.trim()), limit(1));
+        const usernameSnapshot = await getDocs(usernameQuery);
+        if (!usernameSnapshot.empty) {
+          const userDoc = usernameSnapshot.docs[0].data();
+          if (userDoc.email) {
+            userEmailToAuth = userDoc.email;
+          } else {
+            toast({ title: 'Error de Cuenta', description: 'El usuario no tiene un correo electrónico asociado. Contacta al administrador.', variant: 'destructive' });
+            setIsSubmitting(false);
+            return;
+          }
+        } else {
+          // Username not found in Firestore, and it wasn't an email.
+          toast({ title: 'Fallo de Ingreso', description: 'Nombre de usuario o correo no encontrado.', variant: 'destructive' });
+          setIsSubmitting(false);
+          return;
+        }
       }
 
-      if (!userEmailToAuth) {
-        toast({ title: 'Fallo de Ingreso', description: 'Nombre de usuario o correo no encontrado.', variant: 'destructive' });
-        setIsSubmitting(false);
-        return;
+      // At this point, userEmailToAuth should be set if we intend to proceed
+      if (userEmailToAuth) {
+        await signIn(userEmailToAuth, data.password); // signIn is from AuthContext
+        toast({ title: 'Ingreso Exitoso', description: '¡Bienvenido/a de nuevo!' });
+        // router.push('/dashboard'); // AuthContext useEffect handles redirect
+      } else {
+        // This case implies an email-like identifier was provided but perhaps was empty string after trim,
+        // or a non-email identifier was provided and not found as a username.
+        // The specific username-not-found case is handled above.
+        // This is a fallback.
+        toast({ title: 'Fallo de Ingreso', description: 'No se pudo determinar el correo para autenticación. Asegúrate de que el identificador no esté vacío.', variant: 'destructive' });
       }
-      await signIn(userEmailToAuth, data.password);
-      toast({ title: 'Ingreso Exitoso', description: '¡Bienvenido/a de nuevo!' });
+
     } catch (error: any) {
       let errorMessage = 'Fallo al ingresar. Verifica tus credenciales.';
-      if (error.code === 'auth/invalid-credential' || error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
-        errorMessage = 'Nombre de usuario o contraseña incorrectos.';
+      // Firebase Auth error codes
+      if (error.code === 'auth/user-not-found' || 
+          error.code === 'auth/wrong-password' || 
+          error.code === 'auth/invalid-credential' || 
+          error.code === 'auth/invalid-email') {
+        errorMessage = 'Correo electrónico o contraseña incorrectos.';
       }
       toast({ title: 'Fallo de Ingreso', description: errorMessage, variant: 'destructive' });
     } finally {
@@ -132,7 +159,7 @@ export default function AuthPage() {
               onSubmit={signupForm.handleSubmit(handleSignupSubmit)}
               className="flex h-full flex-col items-center justify-center space-y-3 bg-card px-10 text-center text-card-foreground"
             >
-              <h1 className="text-3xl font-bold mb-6">Crear Cuenta</h1>
+              <h1 className="text-3xl font-bold mb-6 text-signup-panel-foreground">Crear Cuenta</h1>
               <FormField control={signupForm.control} name="name" render={({ field }) => (
                 <FormItem className="w-full">
                   <FormLabel className="sr-only">Nombre Completo</FormLabel>
@@ -193,7 +220,7 @@ export default function AuthPage() {
                   <FormMessage className="text-xs text-left" />
                 </FormItem>
               )}/>
-              <Button type="submit" variant="default" className="mt-4 rounded-full px-8 py-3 text-sm font-semibold uppercase tracking-wider" disabled={currentLoadingState}>
+              <Button type="submit" variant="default" className="mt-4 rounded-full px-8 py-3 text-sm font-semibold uppercase tracking-wider bg-signup-panel text-signup-panel-foreground hover:bg-signup-panel/90" disabled={currentLoadingState}>
                 {currentLoadingState && isSignUpActive ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Registrar'}
               </Button>
             </form>
