@@ -23,9 +23,9 @@ import {
   ClipboardCheck,
   Briefcase,
   GraduationCap,
-  UserCheck,
+  // UserCheck, // Icon for the removed teacher-session-attendance
   ClipboardList, 
-  Award, // Added for Certificate Management
+  Award, 
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import type { User } from '@/types';
@@ -50,9 +50,9 @@ const managementNavItems: NavItem[] = [
    { href: '/student-management', label: 'Student Management', icon: GraduationCap, roles: ['admin', 'teacher'] },
    { href: '/group-management', label: 'Groups', icon: FolderKanban, roles: ['admin', 'teacher'] },
    { href: '/grades-management', label: 'Grades Management', icon: ClipboardCheck, roles: ['admin', 'teacher'] },
-   { href: '/teacher-session-attendance', label: 'Session Attendance', icon: UserCheck, roles: ['admin', 'teacher'] },
+   // { href: '/teacher-session-attendance', label: 'Session Attendance', icon: UserCheck, roles: ['admin', 'teacher'] }, // Removed
    { href: '/partial-grades-report', label: 'Partial Grades Report', icon: ClipboardList, roles: ['admin', 'teacher'] }, 
-   { href: '/certificate-management', label: 'Certificate Records', icon: Award, roles: ['admin', 'teacher'] }, // New Item
+   { href: '/certificate-management', label: 'Certificate Records', icon: Award, roles: ['admin', 'teacher'] },
 ];
 
 const adminNavItems: NavItem[] = [
@@ -130,4 +130,3 @@ export function SidebarNav() {
     </div>
   );
 }
-
