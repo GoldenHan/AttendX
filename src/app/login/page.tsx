@@ -278,12 +278,11 @@ export default function AuthPage() {
             <div
               className={cn(
                 "overlay-panel overlay-left absolute top-0 flex h-full w-1/2 flex-col items-center justify-center px-10 text-center transform clip-edge-right-gearish",
-                "bg-signup-panel text-signup-panel-foreground",
-                // Removed conditional opacity and transform for the panel itself
+                "bg-signup-panel text-signup-panel-foreground"
               )}
             >
-              <h1 className="text-3xl font-bold">¡Bienvenido de Nuevo!</h1>
-              <p className="mt-4 text-sm font-light leading-relaxed">
+              <h1 className="text-3xl font-bold text-signup-panel-foreground">¡Bienvenido de Nuevo!</h1>
+              <p className="mt-4 text-sm font-light leading-relaxed text-signup-panel-foreground">
                 Para mantenerse conectado con nosotros, por favor inicie sesión con su información personal.
               </p>
               <Button
@@ -303,8 +302,7 @@ export default function AuthPage() {
             <div
               className={cn(
                 "overlay-panel overlay-right absolute top-0 right-0 flex h-full w-1/2 flex-col items-center justify-center px-10 text-center transform clip-edge-left-gearish",
-                "bg-primary text-primary-foreground",
-                // Removed conditional opacity and transform for the panel itself
+                "bg-primary text-primary-foreground"
               )}
             >
               <h1 className="text-3xl font-bold">¡Hola!</h1>
@@ -341,3 +339,4 @@ export default function AuthPage() {
     </div>
   );
 }
+
