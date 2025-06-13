@@ -1,0 +1,82 @@
+
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Regla por defecto: denegar todas las lecturas y escrituras a menos que se permita explícitamente.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Usuarios (personal: admin, teacher, caja)
+    match /users/{userId} {
+      // Cualquier usuario autenticado puede leer su propio documento de usuario.
+      allow read: if request.auth != null && request.auth.uid == userId;
+      // Los administradores pueden escribir/actualizar cualquier documento de usuario.
+      // Los usuarios pueden actualizar su propio documento (para cambios de perfil, por ejemplo - añadir si es necesario).
+      allow write: if request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+      // Considera añadir: || (request.auth.uid == userId && request.resource.data.uid == request.auth.uid) para permitir a los usuarios actualizar sus propios perfiles (sin cambiar rol).
+    }
+
+    // Estudiantes (registros de estudiantes)
+    match /students/{studentId} {
+      // Autenticados pueden leer (simplificado, ajustar si es necesario, ej. solo admins/teachers o el propio estudiante)
+      allow read: if request.auth != null;
+      // Solo administradores y maestros pueden crear/actualizar/eliminar registros de estudiantes.
+      allow write: if request.auth != null && (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'teacher');
+    }
+
+    // Configuración de la aplicación (como config de calificación)
+    match /appConfiguration/{configId} {
+      // Todos pueden leer la configuración.
+      allow read: if true;
+      // Solo administradores pueden escribir la configuración.
+      allow write: if request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    // Grupos
+    match /groups/{groupId} {
+      // Todos los autenticados pueden leer información de grupos (para seleccionar, etc.)
+      allow read: if request.auth != null;
+      // Administradores y maestros pueden crear/modificar grupos.
+      allow write: if request.auth != null && (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'teacher');
+    }
+    
+    // Sesiones de clase
+    match /sessions/{sessionId} {
+      // Todos los autenticados pueden leer sesiones (para seleccionar en QR o logs).
+      allow read: if request.auth != null;
+      // Administradores y maestros pueden crear/modificar sesiones.
+      allow write: if request.auth != null && (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'teacher');
+    }
+
+    // Registros de asistencia de estudiantes
+    match /attendanceRecords/{recordId} {
+      // Todos los autenticados pueden leer (para reportes, etc. Ajustar si es muy permisivo)
+      allow read: if request.auth != null;
+      // Administradores, maestros y personal de caja pueden crear registros de asistencia.
+      allow create: if request.auth != null && (
+                       get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+                       get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'teacher' ||
+                       get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'caja'
+                     );
+      // Solo administradores pueden actualizar o eliminar (ajustar si maestros deben poder editar).
+      allow update, delete: if request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    // NUEVA REGLA: Registros de asistencia de maestros
+    match /teacherAttendanceRecords/{recordId} {
+      // Un maestro puede crear un registro de asistencia para sí mismo si el código coincide.
+      allow create: if request.auth != null &&
+                       get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'teacher' &&
+                       request.resource.data.teacherId == request.auth.uid &&
+                       request.resource.data.attendanceCodeUsed == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.attendanceCode;
+      
+      // Los administradores pueden leer o eliminar estos registros.
+      allow read, delete: if request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+  }
+}
+
+    
