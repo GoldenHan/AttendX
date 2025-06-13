@@ -24,6 +24,7 @@ import {
 
 const signupFormSchema = z.object({
   name: z.string().min(2, { message: "Name must be at least 2 characters." }),
+  username: z.string().min(3, { message: "Username must be at least 3 characters."}).regex(/^[a-zA-Z0-9_.-]+$/, "Username can only contain letters, numbers, dots, underscores, or hyphens."),
   email: z.string().email({ message: "Invalid email address." }),
   password: z.string().min(6, { message: "Password must be at least 6 characters." }),
   confirmPassword: z.string().min(6, { message: "Password must be at least 6 characters." }),
@@ -44,6 +45,7 @@ export default function SignupPage() {
     resolver: zodResolver(signupFormSchema),
     defaultValues: {
       name: '',
+      username: '',
       email: '',
       password: '',
       confirmPassword: '',
@@ -53,22 +55,23 @@ export default function SignupPage() {
   const onSubmit = async (data: SignupFormValues) => {
     setIsSubmitting(true);
     try {
-      await signUp(data.name, data.email, data.password);
-      // Navigation is handled by AuthProvider's useEffect
+      // Pass username to signUp context function
+      await signUp(data.name, data.username, data.email, data.password);
       toast({
         title: 'Account Created',
         description: "You've been successfully registered and logged in! The first account created is automatically an administrator.",
       });
-      // form.reset(); // AuthProvider will redirect, so reset might not be visible
     } catch (error: any) {
       console.error('Signup Error:', error);
       let errorMessage = 'Failed to create account. Please try again.';
       if (error.code === 'auth/email-already-in-use') {
-        errorMessage = 'This email address is already in use.';
+        errorMessage = 'This email address is already in use by another account.';
       } else if (error.code === 'auth/weak-password') {
         errorMessage = 'The password is too weak. Please choose a stronger password.';
       } else if (error.code === 'auth/public-registration-disabled') {
         errorMessage = 'An administrator account already exists. New accounts are now created by an administrator.';
+      } else if (error.message && error.message.includes("Username already exists")) {
+        errorMessage = "This username is already taken. Please choose another one.";
       }
       toast({
         title: 'Signup Failed',
@@ -110,10 +113,23 @@ export default function SignupPage() {
               />
               <FormField
                 control={form.control}
+                name="username"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Username</FormLabel>
+                    <FormControl>
+                      <Input placeholder="johndoe123" {...field} disabled={isLoading} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
                 name="email"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Email</FormLabel>
+                    <FormLabel>Email (for password recovery)</FormLabel>
                     <FormControl>
                       <Input type="email" placeholder="you@example.com" {...field} disabled={isLoading} />
                     </FormControl>

@@ -35,8 +35,9 @@ export interface User {
   id: string; // Firestore document ID from 'users' or 'students' collection
   uid?: string; // Firebase Auth UID (typically for 'users' collection who can log in)
   name: string;
+  username?: string; // Added for student login
   role: 'student' | 'teacher' | 'admin' | 'caja';
-  email?: string;
+  email?: string; // Still needed for Firebase Auth, but username is primary for students
   phoneNumber?: string;
   photoUrl?: string;
 

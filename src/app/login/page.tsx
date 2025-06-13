@@ -10,26 +10,66 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter }
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, LogIn, UserPlus } from 'lucide-react';
 import Link from 'next/link';
+import { collection, query, where, getDocs, limit } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 
 export default function LoginPage() {
-  const [email, setEmail] = useState('');
+  const [identifier, setIdentifier] = useState(''); // Can be username 
   const [password, setPassword] = useState('');
-  const { signIn, loading } = useAuth();
+  const { signIn, loading } = useAuth(); // signIn in context still expects email
   const { toast } = useToast();
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email || !password) {
+    if (!identifier || !password) {
       toast({
         title: 'Error',
-        description: 'Please enter both email and password.',
+        description: 'Please enter both username and password.',
         variant: 'destructive',
       });
       return;
     }
+    setIsSubmitting(true);
     try {
-      await signIn(email, password);
-      // Navigation is handled by AuthProvider's useEffect
+      // Attempt to find user by username in 'users' collection
+      const usersRef = collection(db, 'users');
+      const q = query(usersRef, where('username', '==', identifier), limit(1));
+      const querySnapshot = await getDocs(q);
+
+      let userEmail: string | null = null;
+
+      if (!querySnapshot.empty) {
+        const userDoc = querySnapshot.docs[0].data();
+        if (userDoc.email) {
+          userEmail = userDoc.email;
+        } else {
+          toast({
+            title: 'Login Failed',
+            description: 'User account is not properly configured (missing email). Please contact support.',
+            variant: 'destructive',
+          });
+          setIsSubmitting(false);
+          return;
+        }
+      } else {
+         // Fallback: if not found by username, try if identifier itself is an email (for staff)
+         // This allows staff to login with email if they don't have/use a username
+         if (identifier.includes('@')) {
+            userEmail = identifier;
+         } else {
+            toast({
+                title: 'Login Failed',
+                description: 'Username not found.',
+                variant: 'destructive',
+            });
+            setIsSubmitting(false);
+            return;
+         }
+      }
+
+      await signIn(userEmail, password); // Use the retrieved/provided email to sign in
       toast({
         title: 'Login Successful',
         description: 'Welcome back!',
@@ -42,16 +82,17 @@ export default function LoginPage() {
         case 'auth/user-not-found':
         case 'auth/wrong-password':
         case 'auth/invalid-credential':
-          errorMessage = 'Invalid email or password.';
+          errorMessage = 'Invalid username or password.';
           break;
         case 'auth/invalid-email':
-          errorMessage = 'The email address is badly formatted.';
+          // This might occur if the retrieved email is badly formatted, less likely if stored correctly
+          errorMessage = 'The email associated with the username is badly formatted.';
           break;
         case 'auth/user-disabled':
           errorMessage = 'This user account has been disabled.';
           break;
         case 'auth/operation-not-allowed':
-          errorMessage = 'Email/password sign-in is not enabled. Please contact support.';
+          errorMessage = 'Sign-in method is not enabled. Please contact support.';
           break;
         case 'auth/network-request-failed':
           errorMessage = 'A network error occurred. Please check your internet connection and try again.';
@@ -74,18 +115,21 @@ export default function LoginPage() {
         default:
           console.warn("Unhandled Firebase Auth error code during login:", error.code, error.message);
           if (error.message && typeof error.message === 'string' && !error.message.includes('INTERNAL ASSERTION FAILED')) {
-            errorMessage = error.message; // Use Firebase's message if it's potentially user-friendly
+            errorMessage = error.message; 
           }
           break;
       }
-
       toast({
         title: 'Login Failed',
         description: errorMessage,
         variant: 'destructive',
       });
+    } finally {
+      setIsSubmitting(false);
     }
   };
+
+  const currentLoadingState = loading || isSubmitting;
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-background p-4">
@@ -100,15 +144,15 @@ export default function LoginPage() {
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-6">
             <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="identifier">Username</Label>
               <Input
-                id="email"
-                type="email"
-                placeholder="admin@servex.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                id="identifier"
+                type="text" 
+                placeholder="Enter your username"
+                value={identifier}
+                onChange={(e) => setIdentifier(e.target.value)}
                 required
-                disabled={loading}
+                disabled={currentLoadingState}
               />
             </div>
             <div className="space-y-2">
@@ -120,11 +164,11 @@ export default function LoginPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
-                disabled={loading}
+                disabled={currentLoadingState}
               />
             </div>
-            <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? (
+            <Button type="submit" className="w-full" disabled={currentLoadingState}>
+              {currentLoadingState ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               ) : (
                 'Sign In'

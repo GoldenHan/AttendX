@@ -13,10 +13,10 @@ import {
 } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Loader2, Pencil, Trash2, UserPlus, Search, GraduationCap, NotebookPen, FolderOpen } from 'lucide-react';
+import { Loader2, Pencil, Trash2, UserPlus, Search, GraduationCap, NotebookPen } from 'lucide-react'; // Removed FolderOpen
 import type { User, Group, PartialScores } from '@/types';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, deleteDoc, doc, updateDoc, query, where, addDoc, writeBatch, arrayUnion, arrayRemove } from 'firebase/firestore';
+import { collection, getDocs, deleteDoc, doc, updateDoc, query, addDoc, writeBatch, arrayUnion, arrayRemove } from 'firebase/firestore'; // Removed where
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -38,17 +38,18 @@ import * as z from 'zod';
 import {
   Form,
   FormControl,
-  FormDescription,
   FormField,
   FormItem,
   FormLabel,
   FormMessage,
 } from '@/components/ui/form';
 import { Label } from "@/components/ui/label";
+import { getDefaultStudentGradeStructure } from '@/types';
+import { DEFAULT_GRADING_CONFIG } from '@/types'; // Assuming this holds default grading config
 
 const studentFormSchema = z.object({
   name: z.string().min(2, { message: "Name must be at least 2 characters." }),
-  email: z.string().email({ message: "Invalid email address." }).optional().or(z.literal('')), 
+  username: z.string().min(3, "Username must be at least 3 characters.").regex(/^[a-zA-Z0-9_.-]+$/, "Username can only contain letters, numbers, dots, underscores, or hyphens.").optional().or(z.literal('')),
   phoneNumber: z.string().optional().or(z.literal('')),
   photoUrl: z.string().url({ message: "Please enter a valid URL for photo." }).optional().or(z.literal('')),
   level: z.enum(['Beginner', 'Intermediate', 'Advanced', 'Other'], {required_error: "Level is required."}),
@@ -63,11 +64,6 @@ const studentFormSchema = z.object({
 });
 
 type StudentFormValues = z.infer<typeof studentFormSchema>;
-
-const defaultPartialScore = (): PartialScores => ({
-  accumulatedActivities: [],
-  exam: { name: null, score: null }
-});
 
 const UNASSIGN_STUDENT_FROM_GROUP_KEY = "##NO_GROUP##";
 
@@ -95,7 +91,7 @@ export default function StudentManagementPage() {
     resolver: zodResolver(studentFormSchema),
     defaultValues: {
       name: '',
-      email: '',
+      username: '',
       phoneNumber: '',
       photoUrl: '',
       level: undefined,
@@ -147,6 +143,7 @@ export default function StudentManagementPage() {
     if (searchTerm) {
       studentsToDisplay = studentsToDisplay.filter(student =>
         student.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (student.username && student.username.toLowerCase().includes(searchTerm.toLowerCase())) ||
         (student.preferredShift && student.preferredShift.toLowerCase().includes(searchTerm.toLowerCase()))
       );
     }
@@ -156,7 +153,7 @@ export default function StudentManagementPage() {
   const handleOpenAddDialog = () => {
     setEditingStudent(null);
     studentForm.reset({
-      name: '', email: '', phoneNumber: '', photoUrl: '',
+      name: '', username: '', phoneNumber: '', photoUrl: '',
       level: undefined, notes: '', age: undefined, gender: undefined, preferredShift: undefined,
       assignedGroupId: undefined,
     });
@@ -168,7 +165,7 @@ export default function StudentManagementPage() {
     const currentGroup = groups.find(g => Array.isArray(g.studentIds) && g.studentIds.includes(studentToEdit.id));
     studentForm.reset({
       name: studentToEdit.name,
-      email: studentToEdit.email || '',
+      username: studentToEdit.username || '',
       phoneNumber: studentToEdit.phoneNumber || '',
       photoUrl: studentToEdit.photoUrl || '',
       level: studentToEdit.level || undefined,
@@ -184,9 +181,9 @@ export default function StudentManagementPage() {
   const handleStudentFormSubmit = async (data: StudentFormValues) => {
     setIsSubmitting(true);
         
-    const studentDetailsToSave: Partial<Omit<User, 'id' | 'uid' | 'role' | 'grades' | 'gradesByLevel'>> = {
+    const studentDetailsToSave: Partial<Omit<User, 'id' | 'uid' | 'role' | 'grades' | 'gradesByLevel' | 'email'>> & {username?: string} = {
         name: data.name,
-        email: data.email || undefined,
+        username: data.username || undefined,
         phoneNumber: data.phoneNumber || undefined,
         photoUrl: data.photoUrl || undefined,
         level: data.level,
@@ -198,7 +195,8 @@ export default function StudentManagementPage() {
 
     const finalStudentDetails = Object.fromEntries(
         Object.entries(studentDetailsToSave).filter(([_, v]) => v !== undefined)
-    );
+    ) as Partial<User>;
+
 
     const newAssignedGroupId = data.assignedGroupId === UNASSIGN_STUDENT_FROM_GROUP_KEY ? null : data.assignedGroupId || null;
 
@@ -230,16 +228,11 @@ export default function StudentManagementPage() {
 
     } else { // Creating new student
       try {
-        const newStudentData: Omit<User, 'id' | 'grades'> = {
-          ...finalStudentDetails,
-          role: 'student' as 'student',
-          gradesByLevel: { // Initialize for the assigned level
-            [data.level!]: { // data.level should be defined due to schema validation
-              partial1: defaultPartialScore(),
-              partial2: defaultPartialScore(),
-              partial3: defaultPartialScore(),
-              partial4: defaultPartialScore(),
-            }
+         const newStudentData: Omit<User, 'id' | 'grades'> = {
+          ...(finalStudentDetails as Omit<User, 'id' | 'grades' | 'gradesByLevel' | 'role'>), // Cast to satisfy base properties
+          role: 'student' as 'student', // Explicitly set role
+          gradesByLevel: { 
+            [data.level!]: getDefaultStudentGradeStructure(DEFAULT_GRADING_CONFIG)
           }
         };
         
@@ -364,14 +357,14 @@ export default function StudentManagementPage() {
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div>
                 <CardTitle className="flex items-center gap-2"><GraduationCap className="h-6 w-6 text-primary" /> Student Management</CardTitle>
-                <CardDescription>Manage student records. Assign to groups, filter by group, or search by name/shift.</CardDescription>
+                <CardDescription>Manage student records. Assign to groups, filter by group, or search by name/username/shift.</CardDescription>
             </div>
             <Dialog open={isStudentFormDialogOpen} onOpenChange={(isOpen) => {
                 setIsStudentFormDialogOpen(isOpen);
                 if (!isOpen) {
                 setEditingStudent(null); 
                 studentForm.reset({
-                    name: '', email: '', phoneNumber: '', photoUrl: '',
+                    name: '', username: '', phoneNumber: '', photoUrl: '',
                     level: undefined, notes: '', age: undefined, gender: undefined, preferredShift: undefined,
                     assignedGroupId: undefined,
                 });
@@ -403,6 +396,18 @@ export default function StudentManagementPage() {
                         </FormItem>
                         )}
                     />
+                     <FormField
+                        control={studentForm.control}
+                        name="username"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Username (Optional)</FormLabel>
+                            <FormControl><Input placeholder="johndoe123" {...field} /></FormControl>
+                            <FormDescription>Student's login username. If they self-register, this might be set by them.</FormDescription>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
                     <FormField
                         control={studentForm.control}
                         name="level"
@@ -442,18 +447,6 @@ export default function StudentManagementPage() {
                                 ))}
                               </SelectContent>
                             </Select>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                    <FormField
-                        control={studentForm.control}
-                        name="email"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Email (Optional)</FormLabel>
-                            <FormControl><Input type="email" placeholder="student@example.com (for reference)" {...field} /></FormControl>
-                            <FormDescription>Used for contact or to link with a manually created Auth account.</FormDescription>
                             <FormMessage />
                           </FormItem>
                         )}
@@ -567,7 +560,7 @@ export default function StudentManagementPage() {
                 </Select>
             </div>
             <div className="flex-1 min-w-[200px]">
-                 <Label htmlFor="search-student">Search by Name or Shift</Label>
+                 <Label htmlFor="search-student">Search by Name, Username, or Shift</Label>
                  <div className="relative">
                     <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input
@@ -593,9 +586,9 @@ export default function StudentManagementPage() {
           <TableHeader>
             <TableRow>
               <TableHead>Name</TableHead>
+              <TableHead>Username</TableHead>
               <TableHead>Level</TableHead>
               <TableHead>Assigned Group</TableHead>
-              <TableHead>Email</TableHead>
               <TableHead>Phone</TableHead>
               <TableHead>Age</TableHead>
               <TableHead>Gender</TableHead>
@@ -607,13 +600,13 @@ export default function StudentManagementPage() {
             {(!isLoading && filteredStudents.length > 0) ? filteredStudents.map((student) => (
               <TableRow key={student.id}>
                 <TableCell>{student.name}</TableCell>
+                <TableCell>{student.username || 'N/A'}</TableCell>
                 <TableCell>{student.level || 'N/A'}</TableCell>
                 <TableCell>
                      <span className={`px-2 py-1 text-xs font-medium rounded-full ${getStudentGroupName(student.id) === "Unassigned" ? "bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300" : "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300"}`}>
                         {getStudentGroupName(student.id)}
                     </span>
                 </TableCell>
-                <TableCell>{student.email || 'N/A'}</TableCell>
                 <TableCell>{student.phoneNumber || 'N/A'}</TableCell>
                 <TableCell>{student.age ?? 'N/A'}</TableCell>
                 <TableCell>{student.gender ? student.gender.charAt(0).toUpperCase() + student.gender.slice(1) : 'N/A'}</TableCell>
@@ -705,4 +698,3 @@ export default function StudentManagementPage() {
     </>
   );
 }
-
