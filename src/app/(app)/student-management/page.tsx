@@ -42,6 +42,7 @@ import {
   FormItem,
   FormLabel,
   FormMessage,
+  FormDescription, // Added FormDescription here
 } from '@/components/ui/form';
 import { Label } from "@/components/ui/label";
 import { getDefaultStudentGradeStructure } from '@/types';
@@ -698,3 +699,4 @@ export default function StudentManagementPage() {
     </>
   );
 }
+
