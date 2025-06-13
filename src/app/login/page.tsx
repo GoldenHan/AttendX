@@ -64,14 +64,16 @@ export default function AuthPage() {
     setIsSubmitting(true);
     try {
       const usersRef = collection(db, 'users');
-      const q = query(usersRef, where('username', '==', data.identifier.trim()), limit(1));
-      const querySnapshot = await getDocs(q);
+      // Try finding by username first
+      const usernameQuery = query(usersRef, where('username', '==', data.identifier.trim()), limit(1));
+      const usernameSnapshot = await getDocs(usernameQuery);
       let userEmailToAuth: string | null = null;
 
-      if (!querySnapshot.empty) {
-        const userDoc = querySnapshot.docs[0].data();
+      if (!usernameSnapshot.empty) {
+        const userDoc = usernameSnapshot.docs[0].data();
         if (userDoc.email) userEmailToAuth = userDoc.email;
       } else if (data.identifier.includes('@')) {
+        // If not found by username and identifier looks like an email, try authenticating with it directly
         userEmailToAuth = data.identifier.trim();
       }
 
@@ -98,6 +100,7 @@ export default function AuthPage() {
     try {
       await signUp(data.name, data.username, data.email, data.password);
       toast({ title: 'Cuenta Creada', description: "Te has registrado e iniciado sesión exitosamente." });
+      // No need to manually switch, auth context handles redirect
     } catch (error: any) {
       let errorMessage = 'Fallo al crear la cuenta. Por favor, inténtalo de nuevo.';
       if (error.code === 'auth/email-already-in-use') errorMessage = 'Este correo electrónico ya está en uso.';
@@ -267,7 +270,7 @@ export default function AuthPage() {
         >
           <div
             className={cn(
-              "overlay relative -left-full h-full w-[200%] transform bg-primary text-primary-foreground transition-transform duration-700 ease-in-out",
+              "overlay relative -left-full h-full w-[200%] transform transition-transform duration-700 ease-in-out",
               isSignUpActive ? "translate-x-1/2" : "translate-x-0"
             )}
           >
@@ -275,6 +278,7 @@ export default function AuthPage() {
             <div
               className={cn(
                 "overlay-panel overlay-left absolute top-0 flex h-full w-1/2 flex-col items-center justify-center px-10 text-center transform transition-opacity duration-300 ease-in-out clip-edge-right-gearish",
+                "bg-primary text-primary-foreground", // Moved background here
                 isSignUpActive ? "opacity-100" : "opacity-0 -translate-x-[20%]"
               )}
             >
@@ -296,6 +300,7 @@ export default function AuthPage() {
             <div
               className={cn(
                 "overlay-panel overlay-right absolute top-0 right-0 flex h-full w-1/2 flex-col items-center justify-center px-10 text-center transform transition-opacity duration-300 ease-in-out clip-edge-left-gearish",
+                "bg-primary text-primary-foreground", // Moved background here
                  isSignUpActive ? "opacity-0 translate-x-[20%]" : "opacity-100"
               )}
             >
@@ -322,14 +327,15 @@ export default function AuthPage() {
         @keyframes show {
           0%, 49.99% {
             opacity: 0;
-            z-index: 10;
+            z-index: 10; /* ensure it's below the active form if needed during transition */
           }
           50%, 100% {
             opacity: 1;
-            z-index: 20;
+            z-index: 20; /* ensure it's on top when active */
           }
         }
       `}</style>
     </div>
   );
 }
+
