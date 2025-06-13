@@ -11,6 +11,27 @@ import { db } from '@/lib/firebase';
 import { collection, getDocs, query, where, Timestamp } from 'firebase/firestore';
 import type { User, Group, AttendanceRecord } from '@/types'; // Changed ClassInfo to Group
 
+interface QuickActionProps {
+  href: string;
+  icon: React.ElementType;
+  label: string;
+  bgColorClass: string;
+  hoverBgColorClass: string;
+  textColorClass: string;
+}
+
+const QuickActionButton: React.FC<QuickActionProps> = ({ href, icon: Icon, label, bgColorClass, hoverBgColorClass, textColorClass }) => (
+  <Button
+    asChild
+    className={`w-full h-auto flex flex-col items-center justify-center p-6 rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 ease-in-out transform hover:-translate-y-1 ${bgColorClass} ${hoverBgColorClass} ${textColorClass}`}
+  >
+    <Link href={href} className="flex flex-col items-center justify-center text-center">
+      <Icon className="h-8 w-8 mb-2" />
+      <span className="font-semibold text-sm">{label}</span>
+    </Link>
+  </Button>
+);
+
 export default function DashboardPage() {
   const [totalStudents, setTotalStudents] = useState(0);
   const [totalGroups, setTotalGroups] = useState(0); // Renamed totalClasses to totalGroups
@@ -70,6 +91,14 @@ export default function DashboardPage() {
     </Card>
   );
 
+  const quickActions: QuickActionProps[] = [
+    { href: "/attendance-log", icon: ClipboardEdit, label: "Log Attendance", bgColorClass: "bg-blue-500", hoverBgColorClass: "hover:bg-blue-600", textColorClass: "text-white" },
+    { href: "/attendance-records", icon: BookUser, label: "View Records", bgColorClass: "bg-yellow-400", hoverBgColorClass: "hover:bg-yellow-500", textColorClass: "text-yellow-900" },
+    { href: "/reports", icon: BarChart3, label: "Generate Reports", bgColorClass: "bg-teal-500", hoverBgColorClass: "hover:bg-teal-600", textColorClass: "text-white" },
+    { href: "/ai-analysis", icon: Brain, label: "AI Analysis", bgColorClass: "bg-orange-500", hoverBgColorClass: "hover:bg-orange-600", textColorClass: "text-white" },
+    { href: "/qr-login-setup", icon: QrCode, label: "QR Session Login", bgColorClass: "bg-indigo-500", hoverBgColorClass: "hover:bg-indigo-600", textColorClass: "text-white" },
+  ];
+
   return (
     <div className="flex flex-col gap-6">
       <h1 className="text-3xl font-bold font-headline">Welcome to SERVEX</h1>
@@ -87,31 +116,9 @@ export default function DashboardPage() {
             <CardDescription>Easily access common tasks.</CardDescription>
           </CardHeader>
           <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Button asChild variant="outline" className="w-full">
-              <Link href="/attendance-log">
-                <ClipboardEdit className="mr-2 h-4 w-4" /> Log Attendance
-              </Link>
-            </Button>
-            <Button asChild variant="outline" className="w-full">
-              <Link href="/attendance-records">
-                <BookUser className="mr-2 h-4 w-4" /> View Records
-              </Link>
-            </Button>
-            <Button asChild variant="outline" className="w-full">
-              <Link href="/reports">
-                <BarChart3 className="mr-2 h-4 w-4" /> Generate Reports
-              </Link>
-            </Button>
-            <Button asChild variant="outline" className="w-full">
-              <Link href="/ai-analysis">
-                <Brain className="mr-2 h-4 w-4" /> AI Analysis
-              </Link>
-            </Button>
-             <Button asChild variant="outline" className="w-full">
-              <Link href="/qr-login-setup">
-                <QrCode className="mr-2 h-4 w-4" /> QR Session Login
-              </Link>
-            </Button>
+            {quickActions.map(action => (
+              <QuickActionButton key={action.href} {...action} />
+            ))}
           </CardContent>
         </Card>
         <Card className="flex flex-col">
