@@ -9,195 +9,208 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, LogIn, UserPlus } from 'lucide-react';
-import Link from 'next/link';
 import { collection, query, where, getDocs, limit } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import * as z from 'zod';
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from '@/components/ui/form';
 
-export default function LoginPage() {
-  const [identifier, setIdentifier] = useState(''); // Can be username or email for staff
-  const [password, setPassword] = useState('');
-  const { signIn, loading } = useAuth(); // signIn in context still expects email
+const loginFormSchema = z.object({
+  identifier: z.string().min(1, { message: "El nombre de usuario o email es requerido." }),
+  password: z.string().min(1, { message: "La contraseña es requerida." }),
+});
+
+const signupFormSchema = z.object({
+  name: z.string().min(2, { message: "El nombre debe tener al menos 2 caracteres." }),
+  username: z.string().min(3, { message: "El nombre de usuario debe tener al menos 3 caracteres."}).regex(/^[a-zA-Z0-9_.-]+$/, "El nombre de usuario solo puede contener letras, números, puntos, guiones bajos o guiones."),
+  email: z.string().email({ message: "Dirección de correo electrónico inválida." }),
+  password: z.string().min(6, { message: "La contraseña debe tener al menos 6 caracteres." }),
+  confirmPassword: z.string().min(6, { message: "La contraseña debe tener al menos 6 caracteres." }),
+}).refine(data => data.password === data.confirmPassword, {
+  message: "Las contraseñas no coinciden.",
+  path: ["confirmPassword"],
+});
+
+type LoginFormValues = z.infer<typeof loginFormSchema>;
+type SignupFormValues = z.infer<typeof signupFormSchema>;
+
+export default function AuthPage() {
+  const [view, setView] = useState<'login' | 'signup'>('login');
+  const { signIn, signUp, loading: authLoading } = useAuth();
   const { toast } = useToast();
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const loginForm = useForm<LoginFormValues>({
+    resolver: zodResolver(loginFormSchema),
+    defaultValues: { identifier: '', password: '' },
+  });
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!identifier || !password) {
-      toast({
-        title: 'Error de Ingreso',
-        description: 'Por favor, ingresa tu nombre de usuario y contraseña.',
-        variant: 'destructive',
-      });
-      return;
-    }
+  const signupForm = useForm<SignupFormValues>({
+    resolver: zodResolver(signupFormSchema),
+    defaultValues: { name: '', username: '', email: '', password: '', confirmPassword: '' },
+  });
+
+  const handleLoginSubmit = async (data: LoginFormValues) => {
     setIsSubmitting(true);
     try {
-      // Attempt to find user by username in 'users' collection
       const usersRef = collection(db, 'users');
-      const q = query(usersRef, where('username', '==', identifier.trim()), limit(1));
+      const q = query(usersRef, where('username', '==', data.identifier.trim()), limit(1));
       const querySnapshot = await getDocs(q);
-
       let userEmailToAuth: string | null = null;
 
       if (!querySnapshot.empty) {
         const userDoc = querySnapshot.docs[0].data();
-        if (userDoc.email) {
-          userEmailToAuth = userDoc.email;
-        } else {
-          toast({
-            title: 'Fallo de Ingreso',
-            description: 'La cuenta de usuario no está configurada correctamente (falta correo electrónico). Por favor, contacta a soporte.',
-            variant: 'destructive',
-          });
-          setIsSubmitting(false);
-          return;
-        }
-      } else {
-         // Fallback: if not found by username, try if identifier itself is an email (e.g. for staff)
-         // This allows staff to login with email if they don't have/use a username or if student enters email
-         if (identifier.includes('@')) {
-            userEmailToAuth = identifier.trim();
-         } else {
-            toast({
-                title: 'Fallo de Ingreso',
-                description: 'Nombre de usuario no encontrado.',
-                variant: 'destructive',
-            });
-            setIsSubmitting(false);
-            return;
-         }
+        if (userDoc.email) userEmailToAuth = userDoc.email;
+      } else if (data.identifier.includes('@')) {
+        userEmailToAuth = data.identifier.trim();
       }
 
       if (!userEmailToAuth) {
-        // Should not happen if logic above is correct, but as a safeguard
-        toast({
-            title: 'Fallo de Ingreso',
-            description: 'No se pudo determinar el correo electrónico para la autenticación.',
-            variant: 'destructive',
-        });
+        toast({ title: 'Fallo de Ingreso', description: 'Nombre de usuario o correo no encontrado.', variant: 'destructive' });
         setIsSubmitting(false);
         return;
       }
-
-      await signIn(userEmailToAuth, password);
-      toast({
-        title: 'Ingreso Exitoso',
-        description: '¡Bienvenido/a de nuevo!',
-      });
-      // Router will redirect via AuthContext effect
+      await signIn(userEmailToAuth, data.password);
+      toast({ title: 'Ingreso Exitoso', description: '¡Bienvenido/a de nuevo!' });
     } catch (error: any) {
-      console.error("Login Page Error:", error); 
-      let errorMessage = 'Fallo al ingresar. Por favor, verifica tus credenciales o inténtalo más tarde.'; 
-
-      switch (error.code) {
-        case 'auth/user-not-found':
-        case 'auth/wrong-password':
-        case 'auth/invalid-credential':
-          errorMessage = 'Nombre de usuario o contraseña incorrectos.';
-          break;
-        case 'auth/invalid-email':
-          errorMessage = 'El formato del correo electrónico asociado al nombre de usuario no es válido.';
-          break;
-        case 'auth/user-disabled':
-          errorMessage = 'Esta cuenta de usuario ha sido deshabilitada.';
-          break;
-        case 'auth/operation-not-allowed':
-          errorMessage = 'El método de inicio de sesión no está habilitado. Por favor, contacta a soporte.';
-          break;
-        case 'auth/network-request-failed':
-          errorMessage = 'Ocurrió un error de red. Por favor, verifica tu conexión a internet e inténtalo de nuevo.';
-          break;
-        case 'auth/too-many-requests':
-          errorMessage = 'El acceso a esta cuenta ha sido deshabilitado temporalmente debido a muchos intentos fallidos. Intenta más tarde o restablece tu contraseña.';
-          break;
-        case 'auth/invalid-api-key':
-           errorMessage = 'Error de configuración del sistema. Por favor, contacta a soporte. (API Key Inválida)';
-           break;
-        case 'auth/app-deleted':
-            errorMessage = 'Error de configuración del sistema. Por favor, contacta a soporte. (App Eliminada)';
-            break;
-        case 'auth/app-not-authorized':
-            errorMessage = 'Error de configuración del sistema. Por favor, contacta a soporte. (App No Autorizada para el dominio)';
-            break;
-        case 'auth/visibility-check-was-unavailable':
-            errorMessage = 'No se pudo verificar la visibilidad de la aplicación. Esto podría ser un problema temporal o debido a la configuración/extensiones del navegador. Por favor, inténtalo de nuevo. Si persiste, intenta deshabilitar las extensiones del navegador o verifica la configuración de privacidad.';
-            break;
-        default:
-          console.warn("Unhandled Firebase Auth error code during login:", error.code, error.message);
-          if (error.message && typeof error.message === 'string' && !error.message.includes('INTERNAL ASSERTION FAILED')) {
-            errorMessage = error.message; 
-          }
-          break;
+      let errorMessage = 'Fallo al ingresar. Verifica tus credenciales.';
+      if (error.code === 'auth/invalid-credential' || error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
+        errorMessage = 'Nombre de usuario o contraseña incorrectos.';
       }
-      toast({
-        title: 'Fallo de Ingreso',
-        description: errorMessage,
-        variant: 'destructive',
-      });
+      toast({ title: 'Fallo de Ingreso', description: errorMessage, variant: 'destructive' });
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const currentLoadingState = loading || isSubmitting;
+  const handleSignupSubmit = async (data: SignupFormValues) => {
+    setIsSubmitting(true);
+    try {
+      await signUp(data.name, data.username, data.email, data.password);
+      toast({ title: 'Cuenta Creada', description: "Te has registrado e iniciado sesión exitosamente." });
+    } catch (error: any) {
+      let errorMessage = 'Fallo al crear la cuenta. Por favor, inténtalo de nuevo.';
+      if (error.code === 'auth/email-already-in-use') errorMessage = 'Este correo electrónico ya está en uso.';
+      else if (error.code === 'auth/weak-password') errorMessage = 'La contraseña es demasiado débil.';
+      else if (error.message?.includes("Username already exists")) errorMessage = "Este nombre de usuario ya está en uso.";
+      toast({ title: 'Fallo de Registro', description: errorMessage, variant: 'destructive' });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const currentLoadingState = authLoading || isSubmitting;
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-background p-4">
       <Card className="w-full max-w-sm shadow-xl">
-        <CardHeader className="text-center">
-          <div className="mb-4 flex justify-center">
-            <LogIn className="h-12 w-12 text-primary" />
-          </div>
-          <CardTitle className="text-3xl font-bold">SERVEX Login</CardTitle>
-          <CardDescription>Accede a tu panel de gestión de asistencia.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-6">
-            <div className="space-y-2">
-              <Label htmlFor="identifier">Nombre de Usuario</Label>
-              <Input
-                id="identifier"
-                type="text" 
-                placeholder="Ingresa tu nombre de usuario"
-                value={identifier}
-                onChange={(e) => setIdentifier(e.target.value)}
-                required
-                disabled={currentLoadingState}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="password">Contraseña</Label>
-              <Input
-                id="password"
-                type="password"
-                placeholder="••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                disabled={currentLoadingState}
-              />
-            </div>
-            <Button type="submit" className="w-full" disabled={currentLoadingState}>
-              {currentLoadingState ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                'Ingresar'
-              )}
-            </Button>
-          </form>
-        </CardContent>
-        <CardFooter className="flex flex-col items-center text-sm">
-           <p className="text-muted-foreground">¿No tienes una cuenta?</p>
-           <div className="mt-2"> {/* Reduced margin from mt-4 to mt-2 for tighter spacing */}
-            <Button variant="outline" asChild>
-              <Link href="/signup">
+        {view === 'login' ? (
+          <>
+            <CardHeader className="text-center">
+              <div className="mb-4 flex justify-center">
+                <LogIn className="h-12 w-12 text-primary" />
+              </div>
+              <CardTitle className="text-3xl font-bold">SERVEX Login</CardTitle>
+              <CardDescription>Accede a tu panel de gestión.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Form {...loginForm}>
+                <form onSubmit={loginForm.handleSubmit(handleLoginSubmit)} className="space-y-6">
+                  <FormField
+                    control={loginForm.control}
+                    name="identifier"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Nombre de Usuario o Email</FormLabel>
+                        <FormControl>
+                          <Input placeholder="Tu nombre de usuario o email" {...field} disabled={currentLoadingState} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={loginForm.control}
+                    name="password"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Contraseña</FormLabel>
+                        <FormControl>
+                          <Input type="password" placeholder="••••••••" {...field} disabled={currentLoadingState} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <Button type="submit" className="w-full" disabled={currentLoadingState}>
+                    {currentLoadingState ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Ingresar'}
+                  </Button>
+                </form>
+              </Form>
+            </CardContent>
+            <CardFooter className="flex flex-col items-center text-sm">
+              <p className="text-muted-foreground">¿No tienes una cuenta?</p>
+              <Button variant="link" onClick={() => { setView('signup'); loginForm.reset(); signupForm.reset(); }} disabled={currentLoadingState}>
                 <UserPlus className="mr-2 h-4 w-4" />
                 Crear una Cuenta
-              </Link>
-            </Button>
-           </div>
-        </CardFooter>
+              </Button>
+            </CardFooter>
+          </>
+        ) : (
+          <>
+            <CardHeader className="text-center">
+              <div className="mb-4 flex justify-center">
+                <UserPlus className="h-12 w-12 text-primary" />
+              </div>
+              <CardTitle className="text-3xl font-bold">Crear Cuenta SERVEX</CardTitle>
+              <CardDescription>Regístrate para acceder. La primera cuenta será admin.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Form {...signupForm}>
+                <form onSubmit={signupForm.handleSubmit(handleSignupSubmit)} className="space-y-4">
+                  <FormField control={signupForm.control} name="name" render={({ field }) => (
+                      <FormItem><FormLabel>Nombre Completo</FormLabel><FormControl><Input placeholder="John Doe" {...field} disabled={currentLoadingState} /></FormControl><FormMessage /></FormItem>
+                    )}
+                  />
+                  <FormField control={signupForm.control} name="username" render={({ field }) => (
+                      <FormItem><FormLabel>Nombre de Usuario</FormLabel><FormControl><Input placeholder="johndoe123" {...field} disabled={currentLoadingState} /></FormControl><FormMessage /></FormItem>
+                    )}
+                  />
+                  <FormField control={signupForm.control} name="email" render={({ field }) => (
+                      <FormItem><FormLabel>Email</FormLabel><FormControl><Input type="email" placeholder="tu@ejemplo.com" {...field} disabled={currentLoadingState} /></FormControl><FormMessage /></FormItem>
+                    )}
+                  />
+                  <FormField control={signupForm.control} name="password" render={({ field }) => (
+                      <FormItem><FormLabel>Contraseña</FormLabel><FormControl><Input type="password" placeholder="••••••••" {...field} disabled={currentLoadingState} /></FormControl><FormMessage /></FormItem>
+                    )}
+                  />
+                  <FormField control={signupForm.control} name="confirmPassword" render={({ field }) => (
+                      <FormItem><FormLabel>Confirmar Contraseña</FormLabel><FormControl><Input type="password" placeholder="••••••••" {...field} disabled={currentLoadingState} /></FormControl><FormMessage /></FormItem>
+                    )}
+                  />
+                  <Button type="submit" className="w-full" disabled={currentLoadingState}>
+                    {currentLoadingState ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Crear Cuenta'}
+                  </Button>
+                </form>
+              </Form>
+            </CardContent>
+            <CardFooter className="flex flex-col items-center text-sm">
+              <p className="text-muted-foreground">¿Ya tienes una cuenta?</p>
+              <Button variant="link" onClick={() => { setView('login'); loginForm.reset(); signupForm.reset(); }} disabled={currentLoadingState}>
+                <LogIn className="mr-2 h-4 w-4" />
+                Ingresar
+              </Button>
+            </CardFooter>
+          </>
+        )}
       </Card>
     </div>
   );
