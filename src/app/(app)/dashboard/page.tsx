@@ -131,25 +131,6 @@ export default function DashboardPage() {
             ))}
           </CardContent>
         </Card>
-        {/* Academy Overview Card can be added back if desired, or kept separate */}
-         <Card className="flex flex-col">
-          <CardHeader>
-            <CardTitle>Academy Overview</CardTitle>
-            <CardDescription>A glimpse into our learning environment.</CardDescription>
-          </CardHeader>
-          <CardContent className="flex-grow">
-            <div className="aspect-video w-full overflow-hidden rounded-md">
-              <Image 
-                src="https://placehold.co/600x400.png" 
-                alt="Academy classroom" 
-                width={600} 
-                height={400} 
-                className="object-cover w-full h-full"
-                data-ai-hint="classroom students"
-              />
-            </div>
-          </CardContent>
-        </Card>
       </div>
     </div>
   );
