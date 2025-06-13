@@ -21,7 +21,7 @@ import {
 import { cn } from '@/lib/utils';
 import { collection, query, where, getDocs, limit } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import Link from 'next/link';
+// Removed Link import as it's not used after integrating signup
 
 const loginFormSchema = z.object({
   identifier: z.string().min(1, { message: "El nombre de usuario o email es requerido." }),
@@ -64,7 +64,6 @@ export default function AuthPage() {
     setIsSubmitting(true);
     try {
       const usersRef = collection(db, 'users');
-      // Try finding by username first
       const usernameQuery = query(usersRef, where('username', '==', data.identifier.trim()), limit(1));
       const usernameSnapshot = await getDocs(usernameQuery);
       let userEmailToAuth: string | null = null;
@@ -73,7 +72,6 @@ export default function AuthPage() {
         const userDoc = usernameSnapshot.docs[0].data();
         if (userDoc.email) userEmailToAuth = userDoc.email;
       } else if (data.identifier.includes('@')) {
-        // If not found by username and identifier looks like an email, try authenticating with it directly
         userEmailToAuth = data.identifier.trim();
       }
 
@@ -100,7 +98,6 @@ export default function AuthPage() {
     try {
       await signUp(data.name, data.username, data.email, data.password);
       toast({ title: 'Cuenta Creada', description: "Te has registrado e iniciado sesión exitosamente." });
-      // No need to manually switch, auth context handles redirect
     } catch (error: any) {
       let errorMessage = 'Fallo al crear la cuenta. Por favor, inténtalo de nuevo.';
       if (error.code === 'auth/email-already-in-use') errorMessage = 'Este correo electrónico ya está en uso.';
@@ -116,7 +113,7 @@ export default function AuthPage() {
     <div className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-br from-primary to-primary/70 p-4 font-body">
       <div
         className={cn(
-          "relative h-[650px] w-full max-w-4xl overflow-hidden rounded-2xl shadow-2xl bg-card",
+          "relative h-[650px] w-full max-w-4xl overflow-hidden rounded-2xl shadow-2xl",
           "container" 
         )}
       >
@@ -130,15 +127,15 @@ export default function AuthPage() {
           <Form {...signupForm}>
             <form
               onSubmit={signupForm.handleSubmit(handleSignupSubmit)}
-              className="flex h-full flex-col items-center justify-center space-y-3 bg-card px-10 text-center"
+              className="flex h-full flex-col items-center justify-center space-y-3 bg-card px-10 text-center text-foreground"
             >
-              <h1 className="text-3xl font-bold text-foreground mb-6">Crear Cuenta</h1>
+              <h1 className="text-3xl font-bold mb-6">Crear Cuenta</h1>
               <FormField control={signupForm.control} name="name" render={({ field }) => (
                 <FormItem className="w-full">
                   <FormLabel className="sr-only">Nombre Completo</FormLabel>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                      <UserIcon className="h-5 w-5 text-gray-400" />
+                      <UserIcon className="h-5 w-5 text-muted-foreground" />
                     </div>
                     <FormControl><Input placeholder="Nombre Completo" {...field} disabled={currentLoadingState} className="bg-input pl-10" /></FormControl>
                   </div>
@@ -150,7 +147,7 @@ export default function AuthPage() {
                   <FormLabel className="sr-only">Nombre de Usuario</FormLabel>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                      <UserIcon className="h-5 w-5 text-gray-400" />
+                      <UserIcon className="h-5 w-5 text-muted-foreground" />
                     </div>
                     <FormControl><Input placeholder="Nombre de Usuario" {...field} disabled={currentLoadingState} className="bg-input pl-10" /></FormControl>
                   </div>
@@ -162,7 +159,7 @@ export default function AuthPage() {
                   <FormLabel className="sr-only">Email</FormLabel>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                      <Mail className="h-5 w-5 text-gray-400" />
+                      <Mail className="h-5 w-5 text-muted-foreground" />
                     </div>
                     <FormControl><Input type="email" placeholder="Correo Electrónico" {...field} disabled={currentLoadingState} className="bg-input pl-10" /></FormControl>
                   </div>
@@ -174,7 +171,7 @@ export default function AuthPage() {
                   <FormLabel className="sr-only">Contraseña</FormLabel>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                      <Lock className="h-5 w-5 text-gray-400" />
+                      <Lock className="h-5 w-5 text-muted-foreground" />
                     </div>
                     <FormControl><Input type="password" placeholder="Contraseña" {...field} disabled={currentLoadingState} className="bg-input pl-10" /></FormControl>
                   </div>
@@ -186,14 +183,14 @@ export default function AuthPage() {
                   <FormLabel className="sr-only">Confirmar Contraseña</FormLabel>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                      <Lock className="h-5 w-5 text-gray-400" />
+                      <Lock className="h-5 w-5 text-muted-foreground" />
                     </div>
                     <FormControl><Input type="password" placeholder="Confirmar Contraseña" {...field} disabled={currentLoadingState} className="bg-input pl-10" /></FormControl>
                   </div>
                   <FormMessage className="text-xs text-left" />
                 </FormItem>
               )}/>
-              <Button type="submit" className="mt-4 rounded-full px-8 py-3 text-sm font-semibold uppercase tracking-wider" disabled={currentLoadingState}>
+              <Button type="submit" variant="default" className="mt-4 rounded-full px-8 py-3 text-sm font-semibold uppercase tracking-wider" disabled={currentLoadingState}>
                 {currentLoadingState && isSignUpActive ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Registrar'}
               </Button>
             </form>
@@ -210,9 +207,9 @@ export default function AuthPage() {
           <Form {...loginForm}>
             <form
               onSubmit={loginForm.handleSubmit(handleLoginSubmit)}
-              className="flex h-full flex-col items-center justify-center space-y-4 bg-card px-10 text-center"
+              className="flex h-full flex-col items-center justify-center space-y-4 bg-card px-10 text-center text-foreground"
             >
-              <h1 className="text-3xl font-bold text-foreground mb-6">Iniciar Sesión</h1>
+              <h1 className="text-3xl font-bold mb-6">Iniciar Sesión</h1>
                <FormField
                 control={loginForm.control}
                 name="identifier"
@@ -221,7 +218,7 @@ export default function AuthPage() {
                     <FormLabel className="sr-only">Nombre de Usuario o Email</FormLabel>
                      <div className="relative">
                         <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                          <UserIcon className="h-5 w-5 text-gray-400" />
+                          <UserIcon className="h-5 w-5 text-muted-foreground" />
                         </div>
                         <FormControl>
                           <Input placeholder="Nombre de Usuario o Email" {...field} disabled={currentLoadingState} className="bg-input pl-10" />
@@ -239,7 +236,7 @@ export default function AuthPage() {
                     <FormLabel className="sr-only">Contraseña</FormLabel>
                     <div className="relative">
                         <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                            <Lock className="h-5 w-5 text-gray-400" />
+                            <Lock className="h-5 w-5 text-muted-foreground" />
                         </div>
                         <FormControl>
                         <Input type="password" placeholder="Contraseña" {...field} disabled={currentLoadingState} className="bg-input pl-10" />
@@ -250,11 +247,11 @@ export default function AuthPage() {
                 )}
               />
               <div className="w-full text-right mt-1">
-                <Link href="#" className="text-xs text-primary hover:underline">
+                <a href="#" className="text-xs text-primary hover:underline">
                   ¿Olvidaste tu contraseña?
-                </Link>
+                </a>
               </div>
-              <Button type="submit" className="mt-4 rounded-full px-8 py-3 text-sm font-semibold uppercase tracking-wider" disabled={currentLoadingState}>
+              <Button type="submit" variant="default" className="mt-4 rounded-full px-8 py-3 text-sm font-semibold uppercase tracking-wider" disabled={currentLoadingState}>
                 {currentLoadingState && !isSignUpActive ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Ingresar'}
               </Button>
             </form>
@@ -278,7 +275,7 @@ export default function AuthPage() {
             <div
               className={cn(
                 "overlay-panel overlay-left absolute top-0 flex h-full w-1/2 flex-col items-center justify-center px-10 text-center transform transition-opacity duration-300 ease-in-out clip-edge-right-gearish",
-                "bg-primary text-primary-foreground", // Moved background here
+                "bg-primary text-primary-foreground",
                 isSignUpActive ? "opacity-100" : "opacity-0 -translate-x-[20%]"
               )}
             >
@@ -287,8 +284,8 @@ export default function AuthPage() {
                 Para mantenerse conectado con nosotros, por favor inicie sesión con su información personal.
               </p>
               <Button
-                variant="outline"
-                className="mt-8 rounded-full px-8 py-3 text-sm font-semibold uppercase tracking-wider bg-transparent border-primary-foreground text-primary-foreground hover:bg-primary-foreground hover:text-primary focus:bg-primary-foreground focus:text-primary"
+                variant="secondary" // Changed to secondary
+                className="mt-8 rounded-full px-8 py-3 text-sm font-semibold uppercase tracking-wider"
                 onClick={() => { loginForm.reset(); setIsSignUpActive(false); }}
                 disabled={currentLoadingState}
               >
@@ -300,7 +297,7 @@ export default function AuthPage() {
             <div
               className={cn(
                 "overlay-panel overlay-right absolute top-0 right-0 flex h-full w-1/2 flex-col items-center justify-center px-10 text-center transform transition-opacity duration-300 ease-in-out clip-edge-left-gearish",
-                "bg-primary text-primary-foreground", // Moved background here
+                "bg-primary text-primary-foreground",
                  isSignUpActive ? "opacity-0 translate-x-[20%]" : "opacity-100"
               )}
             >
@@ -309,8 +306,8 @@ export default function AuthPage() {
                 Ingrese sus datos personales y comience su viaje con nosotros.
               </p>
               <Button
-                variant="outline"
-                className="mt-8 rounded-full px-8 py-3 text-sm font-semibold uppercase tracking-wider bg-transparent border-primary-foreground text-primary-foreground hover:bg-primary-foreground hover:text-primary focus:bg-primary-foreground focus:text-primary"
+                variant="secondary" // Changed to secondary
+                className="mt-8 rounded-full px-8 py-3 text-sm font-semibold uppercase tracking-wider"
                 onClick={() => { signupForm.reset(); setIsSignUpActive(true); }}
                 disabled={currentLoadingState}
               >
@@ -338,4 +335,3 @@ export default function AuthPage() {
     </div>
   );
 }
-
