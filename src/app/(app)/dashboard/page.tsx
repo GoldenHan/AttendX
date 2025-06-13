@@ -25,6 +25,7 @@ import type { User, Group, AttendanceRecord as StudentAttendanceRecord, TeacherA
 import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { useAuth } from '@/contexts/AuthContext'; // Import useAuth
 
 interface QuickActionProps {
   href: string;
@@ -57,6 +58,7 @@ export default function DashboardPage() {
   const [teacherAttendanceCode, setTeacherAttendanceCode] = useState('');
   const [isSubmittingTeacherAttendance, setIsSubmittingTeacherAttendance] = useState(false);
   const { toast } = useToast();
+  const { authUser } = useAuth(); // Get authUser from context
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -107,6 +109,14 @@ export default function DashboardPage() {
 
   const handleTeacherAttendanceSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    console.log('Auth User on submit:', authUser); // Log authUser state
+    if (!authUser) {
+      toast({ title: 'Error', description: 'Usuario no autenticado. Por favor, inicie sesión de nuevo.', variant: 'destructive' });
+      setIsSubmittingTeacherAttendance(false);
+      return;
+    }
+
     if (!teacherAttendanceCode.trim()) {
       toast({ title: 'Error', description: 'Por favor, ingrese su código de asistencia.', variant: 'destructive' });
       return;
@@ -126,8 +136,15 @@ export default function DashboardPage() {
         const teacherDoc = teachersSnapshot.docs[0];
         const teacherData = teacherDoc.data() as User;
 
+        // Crucial check: Ensure the logged-in user (authUser.uid) is the one whose code was entered
+        if (teacherDoc.id !== authUser.uid) {
+            toast({ title: 'Error de Coincidencia', description: 'El código de asistencia ingresado no pertenece al usuario actualmente logueado.', variant: 'destructive'});
+            setIsSubmittingTeacherAttendance(false);
+            return;
+        }
+
         const newRecord: Omit<TeacherAttendanceRecord, 'id'> = {
-          teacherId: teacherDoc.id,
+          teacherId: teacherDoc.id, // This should match authUser.uid
           teacherName: teacherData.name,
           timestamp: new Date().toISOString(),
           attendanceCodeUsed: teacherAttendanceCode.trim(),
@@ -136,9 +153,16 @@ export default function DashboardPage() {
         toast({ title: `¡Bienvenido, ${teacherData.name}!`, description: 'Tu asistencia ha sido registrada.' });
         setTeacherAttendanceCode('');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error registering teacher attendance:", error);
-      toast({ title: 'Error', description: 'Ocurrió un error al registrar la asistencia.', variant: 'destructive' });
+      let userMessage = 'Ocurrió un error al registrar la asistencia.';
+      // Check for Firestore permission denied error
+      if (error.code === 'permission-denied' || error.message?.toLowerCase().includes('permission denied')) {
+        userMessage = 'Permiso denegado. No tienes autorización para registrar esta asistencia. Verifica tus permisos o contacta al administrador.';
+      } else if (error.code) {
+        userMessage = `Error (${error.code}). Inténtalo de nuevo o contacta soporte.`;
+      }
+      toast({ title: 'Error', description: userMessage, variant: 'destructive' });
     } finally {
       setIsSubmittingTeacherAttendance(false);
     }
@@ -190,7 +214,7 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
-
+      
       <div className="grid gap-4 md:grid-cols-1">
         <Card> 
           <CardHeader>
@@ -232,3 +256,4 @@ export default function DashboardPage() {
     </div>
   );
 }
+

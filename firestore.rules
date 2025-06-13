@@ -4,84 +4,68 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Users Collection:
-    // - Allow read if user is authenticated.
-    // - Allow create if user is signing up (specific logic usually handled by secure backend or cloud functions for initial admin).
-    // - Allow update by the user themselves or by an admin.
-    // - Allow delete by an admin (requires re-authentication, usually handled by backend).
+    // Helper function to get user data
+    function getUserData(userId) {
+      return get(/databases/$(database)/documents/users/$(userId)).data;
+    }
+
+    // Users collection (staff, admins, teachers with auth accounts)
     match /users/{userId} {
       allow read: if request.auth != null;
-      allow create: if request.auth != null; // More specific rules might be needed for signup security
-      allow update: if request.auth.uid == userId || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
-      allow delete: if get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+      allow write: if request.auth != null && request.auth.uid == userId; // Users can update their own profile
+      allow create: if request.auth != null && getUserData(request.auth.uid).role == 'admin'; // Only admins can create users
+      allow delete: if request.auth != null && getUserData(request.auth.uid).role == 'admin';// Only admins can delete users
     }
 
-    // Students Collection: (Assuming 'students' are managed by admins/teachers)
-    // - Admins/teachers can read, create, update, delete student records.
-    // - Students might be able to read their own record (if applicable, based on auth.uid matching student.uid).
+    // Students collection
     match /students/{studentId} {
-      allow read: if request.auth != null && (
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'teacher' ||
-        (exists(/databases/$(database)/documents/students/$(studentId)) && resource.data.uid == request.auth.uid) // If students have UIDs
-      );
-      allow create, update, delete: if request.auth != null && (
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'teacher'
-      );
+      allow read: if request.auth != null;
+      // Admins and teachers can manage student records
+      allow write: if request.auth != null && getUserData(request.auth.uid).role in ['admin', 'teacher'];
+      allow create: if request.auth != null && getUserData(request.auth.uid).role in ['admin', 'teacher'];
+      allow delete: if request.auth != null && getUserData(request.auth.uid).role == 'admin';
     }
 
-    // Groups Collection:
-    // - Admins/teachers can read, create, update, delete groups.
+    // Groups collection
     match /groups/{groupId} {
-      allow read: if request.auth != null; // All authenticated can read group info
-      allow create, update, delete: if request.auth != null && (
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'teacher'
-      );
+      allow read: if request.auth != null;
+      // Admins and teachers can manage groups
+      allow write: if request.auth != null && getUserData(request.auth.uid).role in ['admin', 'teacher'];
     }
 
-    // Sessions Collection:
-    // - Admins/teachers can create/manage sessions.
-    // - All authenticated users can read sessions (e.g., for QR code or selection).
+    // Sessions collection (for student attendance)
     match /sessions/{sessionId} {
       allow read: if request.auth != null;
-      allow create, update, delete: if request.auth != null && (
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'teacher'
-      );
+      // Admins and teachers can manage sessions
+      allow write: if request.auth != null && getUserData(request.auth.uid).role in ['admin', 'teacher'];
     }
 
-    // AttendanceRecords Collection (for students):
-    // - Admins/teachers can create/manage student attendance.
-    // - Students might read their own records.
+    // AttendanceRecords collection (for student attendance)
     match /attendanceRecords/{recordId} {
-      allow read: if request.auth != null; // Simplification, refine if needed
-      allow create, update, delete: if request.auth != null && (
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'teacher'
-      );
+      allow read: if request.auth != null;
+      // Admins and teachers can create/update student attendance records
+      allow write: if request.auth != null && getUserData(request.auth.uid).role in ['admin', 'teacher'];
+      allow delete: if request.auth != null && getUserData(request.auth.uid).role == 'admin';
     }
 
-    // AppConfiguration Collection (e.g., for gradingConfig):
-    // - Only admins can read/write.
-    match /appConfiguration/{configId} {
-      allow read, write: if request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
-    }
-
-    // TeacherAttendanceRecords Collection:
-    // - Teachers can create their own attendance records.
-    // - Admins can read/delete these records.
+    // TeacherAttendanceRecords collection
     match /teacherAttendanceRecords/{recordId} {
-      allow read: if request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
-      // TEMPORARILY SIMPLIFIED: Allow any authenticated user to create.
-      allow create: if request.auth != null;
-      // Original create rule for reference, will restore later:
-      // allow create: if request.auth != null &&
-      //                  request.auth.uid == request.resource.data.teacherId &&
-      //                  get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'teacher' &&
-      //                  get(/databases/$(database)/documents/users/$(request.auth.uid)).data.attendanceCode == request.resource.data.attendanceCodeUsed;
-      allow delete: if request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+      // Allow a teacher to create their own attendance record
+      allow create: if request.auth != null &&
+                       request.resource.data.teacherId == request.auth.uid &&
+                       // Optional: Add check for role if teacherId could belong to non-teacher
+                       getUserData(request.auth.uid).role == 'teacher' &&
+                       // Optional: verify code used matches stored code if needed (requires reading user doc again or passing it in request)
+                       request.resource.data.attendanceCodeUsed == getUserData(request.auth.uid).attendanceCode;
+
+      // Only admins can read or delete teacher attendance records
+      allow read, delete: if request.auth != null && getUserData(request.auth.uid).role == 'admin';
+    }
+
+    // App Configuration (e.g., grading)
+    match /appConfiguration/{configId} {
+      allow read: if request.auth != null; // Any authenticated user can read configuration
+      allow write: if request.auth != null && getUserData(request.auth.uid).role == 'admin'; // Only admins can change configuration
     }
   }
 }
