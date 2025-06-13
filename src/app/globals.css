@@ -40,8 +40,8 @@
     --radius: 0.5rem; /* Radio de bordes */
 
     /* Colores para panel de registro (verdecito/teal) */
-    --signup-panel-bg: 165 55% 50%; /* Teal medio vibrante */
-    --signup-panel-fg: 200 20% 95%; /* Texto muy claro, casi blanco */
+    --signup-panel-bg: 165 55% 30%; /* Teal oscuro para buen contraste con texto blanco */
+    --signup-panel-fg: 0 0% 100%;   /* Texto blanco puro */
 
     /* Sidebar - Fondo blanco, texto oscuro, acento amarillo */
     --sidebar-background: 0 0% 100%; /* Fondo blanco */
@@ -94,8 +94,8 @@
     --ring: 217 100% 70%;
 
     /* Colores para panel de registro (verdecito/teal) en modo oscuro */
-    --signup-panel-bg: 165 45% 40%; /* Teal más oscuro */
-    --signup-panel-fg: 200 20% 95%; /* Texto muy claro, casi blanco */
+    --signup-panel-bg: 165 50% 20%; /* Teal muy oscuro */
+    --signup-panel-fg: 210 30% 90%; /* Texto gris claro/azulado */
 
     /* Sidebar modo oscuro - Azul noche */
     --sidebar-background: 222 47% 13%;
