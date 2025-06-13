@@ -6,7 +6,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, Mail, Lock, User as UserIcon } from 'lucide-react'; // Added Mail, Lock, UserIcon
+import { Loader2, Mail, Lock, User as UserIcon } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -21,7 +21,7 @@ import {
 import { cn } from '@/lib/utils';
 import { collection, query, where, getDocs, limit } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import Link from 'next/link'; // For Forgot Password link
+import Link from 'next/link';
 
 const loginFormSchema = z.object({
   identifier: z.string().min(1, { message: "El nombre de usuario o email es requerido." }),
@@ -113,7 +113,7 @@ export default function AuthPage() {
     <div className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-br from-primary to-primary/70 p-4 font-body">
       <div
         className={cn(
-          "relative h-[650px] w-full max-w-4xl overflow-hidden rounded-2xl shadow-2xl bg-card", // Increased height slightly for forgot password link
+          "relative h-[650px] w-full max-w-4xl overflow-hidden rounded-2xl shadow-2xl bg-card",
           "container" 
         )}
       >
@@ -274,7 +274,7 @@ export default function AuthPage() {
             {/* Overlay Left Panel (Prompts to Sign In) */}
             <div
               className={cn(
-                "overlay-panel overlay-left absolute top-0 flex h-full w-1/2 flex-col items-center justify-center px-10 text-center transform transition-opacity duration-300 ease-in-out",
+                "overlay-panel overlay-left absolute top-0 flex h-full w-1/2 flex-col items-center justify-center px-10 text-center transform transition-opacity duration-300 ease-in-out clip-edge-right-gearish",
                 isSignUpActive ? "opacity-100" : "opacity-0 -translate-x-[20%]"
               )}
             >
@@ -295,7 +295,7 @@ export default function AuthPage() {
             {/* Overlay Right Panel (Prompts to Sign Up) */}
             <div
               className={cn(
-                "overlay-panel overlay-right absolute top-0 right-0 flex h-full w-1/2 flex-col items-center justify-center px-10 text-center transform transition-opacity duration-300 ease-in-out",
+                "overlay-panel overlay-right absolute top-0 right-0 flex h-full w-1/2 flex-col items-center justify-center px-10 text-center transform transition-opacity duration-300 ease-in-out clip-edge-left-gearish",
                  isSignUpActive ? "opacity-0 translate-x-[20%]" : "opacity-100"
               )}
             >
@@ -333,3 +333,4 @@ export default function AuthPage() {
     </div>
   );
 }
+
