@@ -14,14 +14,14 @@ import {
   FolderKanban,
   GraduationCap,
   ClipboardCheck,
-  Clock, // Added for Teacher Attendance
-  LogIn, // Added for Teacher Attendance Button
+  Clock, 
+  LogIn, 
 } from 'lucide-react';
 import Image from 'next/image';
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, query, where, Timestamp, addDoc } from 'firebase/firestore';
-import type { User, Group, AttendanceRecord as StudentAttendanceRecord, TeacherAttendanceRecord } from '@/types'; // Added TeacherAttendanceRecord
+import type { User, Group, AttendanceRecord as StudentAttendanceRecord, TeacherAttendanceRecord } from '@/types'; 
 import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -171,12 +171,28 @@ export default function DashboardPage() {
     <div className="flex flex-col gap-6">
       <h1 className="text-3xl font-bold font-headline">Welcome to SERVEX</h1>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4"> {/* Adjusted for 4 columns to fit teacher attendance */}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         {renderStatCard("Total Students", totalStudents, Users, "Currently enrolled")}
         {renderStatCard("Active Groups", totalGroups, FolderKanban, "Across all programs")}
         {renderStatCard("Student Attendance Today", attendanceToday, BarChartBig, "Students marked present")}
+      </div>
 
-        <Card className="col-span-1 md:col-span-2 lg:col-span-1"> {/* Teacher Attendance Card */}
+      <div className="grid gap-4 md:grid-cols-1">
+        <Card>
+          <CardHeader>
+            <CardTitle>Quick Actions</CardTitle>
+            <CardDescription>Easily access common tasks.</CardDescription>
+          </CardHeader>
+          <CardContent className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-6 gap-4">
+            {quickActions.map(action => (
+              <QuickActionButton key={action.href} {...action} />
+            ))}
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-1">
+        <Card> 
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Clock className="h-5 w-5 text-primary" />
@@ -193,7 +209,7 @@ export default function DashboardPage() {
                 <Label htmlFor="teacherAttendanceCode" className="sr-only">Attendance Code</Label>
                 <Input
                   id="teacherAttendanceCode"
-                  type="password" // Use password type to obscure the code
+                  type="password" 
                   placeholder="Enter your attendance code"
                   value={teacherAttendanceCode}
                   onChange={(e) => setTeacherAttendanceCode(e.target.value)}
@@ -210,20 +226,6 @@ export default function DashboardPage() {
                 Register Arrival
               </Button>
             </form>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-1">
-        <Card>
-          <CardHeader>
-            <CardTitle>Quick Actions</CardTitle>
-            <CardDescription>Easily access common tasks.</CardDescription>
-          </CardHeader>
-          <CardContent className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-6 gap-4">
-            {quickActions.map(action => (
-              <QuickActionButton key={action.href} {...action} />
-            ))}
           </CardContent>
         </Card>
       </div>
