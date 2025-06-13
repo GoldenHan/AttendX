@@ -5,12 +5,8 @@ import React, { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, LogIn, UserPlus } from 'lucide-react';
-import { collection, query, where, getDocs, limit } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { Loader2 } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -22,6 +18,9 @@ import {
   FormLabel,
   FormMessage,
 } from '@/components/ui/form';
+import { cn } from '@/lib/utils';
+import { collection, query, where, getDocs, limit } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 
 const loginFormSchema = z.object({
   identifier: z.string().min(1, { message: "El nombre de usuario o email es requerido." }),
@@ -43,7 +42,7 @@ type LoginFormValues = z.infer<typeof loginFormSchema>;
 type SignupFormValues = z.infer<typeof signupFormSchema>;
 
 export default function AuthPage() {
-  const [view, setView] = useState<'login' | 'signup'>('login');
+  const [isSignUpActive, setIsSignUpActive] = useState(false);
   const { signIn, signUp, loading: authLoading } = useAuth();
   const { toast } = useToast();
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -57,6 +56,8 @@ export default function AuthPage() {
     resolver: zodResolver(signupFormSchema),
     defaultValues: { name: '', username: '', email: '', password: '', confirmPassword: '' },
   });
+
+  const currentLoadingState = authLoading || isSubmitting;
 
   const handleLoginSubmit = async (data: LoginFormValues) => {
     setIsSubmitting(true);
@@ -107,111 +108,167 @@ export default function AuthPage() {
     }
   };
 
-  const currentLoadingState = authLoading || isSubmitting;
-
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-background p-4">
-      <Card className="w-full max-w-sm shadow-xl">
-        {view === 'login' ? (
-          <>
-            <CardHeader className="text-center">
-              <div className="mb-4 flex justify-center">
-                <LogIn className="h-12 w-12 text-primary" />
-              </div>
-              <CardTitle className="text-3xl font-bold">SERVEX Login</CardTitle>
-              <CardDescription>Accede a tu panel de gestión.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Form {...loginForm}>
-                <form onSubmit={loginForm.handleSubmit(handleLoginSubmit)} className="space-y-6">
-                  <FormField
-                    control={loginForm.control}
-                    name="identifier"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Nombre de Usuario o Email</FormLabel>
-                        <FormControl>
-                          <Input placeholder="Tu nombre de usuario o email" {...field} disabled={currentLoadingState} />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                  <FormField
-                    control={loginForm.control}
-                    name="password"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Contraseña</FormLabel>
-                        <FormControl>
-                          <Input type="password" placeholder="••••••••" {...field} disabled={currentLoadingState} />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                  <Button type="submit" className="w-full" disabled={currentLoadingState}>
-                    {currentLoadingState ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Ingresar'}
-                  </Button>
-                </form>
-              </Form>
-            </CardContent>
-            <CardFooter className="flex flex-col items-center text-sm">
-              <p className="text-muted-foreground">¿No tienes una cuenta?</p>
-              <Button variant="link" onClick={() => { setView('signup'); loginForm.reset(); signupForm.reset(); }} disabled={currentLoadingState}>
-                <UserPlus className="mr-2 h-4 w-4" />
-                Crear una Cuenta
-              </Button>
-            </CardFooter>
-          </>
-        ) : (
-          <>
-            <CardHeader className="text-center">
-              <div className="mb-4 flex justify-center">
-                <UserPlus className="h-12 w-12 text-primary" />
-              </div>
-              <CardTitle className="text-3xl font-bold">Crear Cuenta SERVEX</CardTitle>
-              <CardDescription>Regístrate para acceder. La primera cuenta será admin.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Form {...signupForm}>
-                <form onSubmit={signupForm.handleSubmit(handleSignupSubmit)} className="space-y-4">
-                  <FormField control={signupForm.control} name="name" render={({ field }) => (
-                      <FormItem><FormLabel>Nombre Completo</FormLabel><FormControl><Input placeholder="John Doe" {...field} disabled={currentLoadingState} /></FormControl><FormMessage /></FormItem>
-                    )}
-                  />
-                  <FormField control={signupForm.control} name="username" render={({ field }) => (
-                      <FormItem><FormLabel>Nombre de Usuario</FormLabel><FormControl><Input placeholder="johndoe123" {...field} disabled={currentLoadingState} /></FormControl><FormMessage /></FormItem>
-                    )}
-                  />
-                  <FormField control={signupForm.control} name="email" render={({ field }) => (
-                      <FormItem><FormLabel>Email</FormLabel><FormControl><Input type="email" placeholder="tu@ejemplo.com" {...field} disabled={currentLoadingState} /></FormControl><FormMessage /></FormItem>
-                    )}
-                  />
-                  <FormField control={signupForm.control} name="password" render={({ field }) => (
-                      <FormItem><FormLabel>Contraseña</FormLabel><FormControl><Input type="password" placeholder="••••••••" {...field} disabled={currentLoadingState} /></FormControl><FormMessage /></FormItem>
-                    )}
-                  />
-                  <FormField control={signupForm.control} name="confirmPassword" render={({ field }) => (
-                      <FormItem><FormLabel>Confirmar Contraseña</FormLabel><FormControl><Input type="password" placeholder="••••••••" {...field} disabled={currentLoadingState} /></FormControl><FormMessage /></FormItem>
-                    )}
-                  />
-                  <Button type="submit" className="w-full" disabled={currentLoadingState}>
-                    {currentLoadingState ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Crear Cuenta'}
-                  </Button>
-                </form>
-              </Form>
-            </CardContent>
-            <CardFooter className="flex flex-col items-center text-sm">
-              <p className="text-muted-foreground">¿Ya tienes una cuenta?</p>
-              <Button variant="link" onClick={() => { setView('login'); loginForm.reset(); signupForm.reset(); }} disabled={currentLoadingState}>
-                <LogIn className="mr-2 h-4 w-4" />
-                Ingresar
-              </Button>
-            </CardFooter>
-          </>
+    <div className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-br from-primary to-primary/70 p-4 font-body">
+      <div
+        className={cn(
+          "relative h-[600px] w-full max-w-4xl overflow-hidden rounded-2xl shadow-2xl bg-card",
+          "container" 
         )}
-      </Card>
+      >
+        {/* Sign Up Form Container */}
+        <div
+          className={cn(
+            "form-container sign-up-container absolute top-0 left-0 h-full w-1/2 opacity-0 z-10 transition-all duration-700 ease-in-out",
+            isSignUpActive && "translate-x-full opacity-100 z-20 animate-show"
+          )}
+        >
+          <Form {...signupForm}>
+            <form
+              onSubmit={signupForm.handleSubmit(handleSignupSubmit)}
+              className="flex h-full flex-col items-center justify-center space-y-3 bg-card px-10 text-center"
+            >
+              <h1 className="text-3xl font-bold text-foreground mb-6">Regístrate aquí</h1>
+              <FormField control={signupForm.control} name="name" render={({ field }) => (
+                <FormItem className="w-full"><FormLabel className="sr-only">Nombre Completo</FormLabel><FormControl><Input placeholder="Nombre Completo" {...field} disabled={currentLoadingState} className="bg-input" /></FormControl><FormMessage className="text-xs text-left" /></FormItem>
+              )}/>
+              <FormField control={signupForm.control} name="username" render={({ field }) => (
+                <FormItem className="w-full"><FormLabel className="sr-only">Nombre de Usuario</FormLabel><FormControl><Input placeholder="Nombre de Usuario" {...field} disabled={currentLoadingState} className="bg-input" /></FormControl><FormMessage className="text-xs text-left" /></FormItem>
+              )}/>
+              <FormField control={signupForm.control} name="email" render={({ field }) => (
+                <FormItem className="w-full"><FormLabel className="sr-only">Email</FormLabel><FormControl><Input type="email" placeholder="Correo Electrónico" {...field} disabled={currentLoadingState} className="bg-input" /></FormControl><FormMessage className="text-xs text-left" /></FormItem>
+              )}/>
+              <FormField control={signupForm.control} name="password" render={({ field }) => (
+                <FormItem className="w-full"><FormLabel className="sr-only">Contraseña</FormLabel><FormControl><Input type="password" placeholder="Contraseña" {...field} disabled={currentLoadingState} className="bg-input" /></FormControl><FormMessage className="text-xs text-left" /></FormItem>
+              )}/>
+              <FormField control={signupForm.control} name="confirmPassword" render={({ field }) => (
+                <FormItem className="w-full"><FormLabel className="sr-only">Confirmar Contraseña</FormLabel><FormControl><Input type="password" placeholder="Confirmar Contraseña" {...field} disabled={currentLoadingState} className="bg-input" /></FormControl><FormMessage className="text-xs text-left" /></FormItem>
+              )}/>
+              <Button type="submit" className="mt-4 rounded-full px-8 py-3 text-sm font-semibold uppercase tracking-wider" disabled={currentLoadingState}>
+                {currentLoadingState && isSignUpActive ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Registrar'}
+              </Button>
+            </form>
+          </Form>
+        </div>
+
+        {/* Sign In Form Container */}
+        <div
+          className={cn(
+            "form-container sign-in-container absolute top-0 left-0 h-full w-1/2 z-20 transition-all duration-700 ease-in-out",
+             isSignUpActive && "translate-x-full opacity-0 z-10"
+          )}
+        >
+          <Form {...loginForm}>
+            <form
+              onSubmit={loginForm.handleSubmit(handleLoginSubmit)}
+              className="flex h-full flex-col items-center justify-center space-y-4 bg-card px-10 text-center"
+            >
+              <h1 className="text-3xl font-bold text-foreground mb-6">Iniciar Sesión</h1>
+               <FormField
+                control={loginForm.control}
+                name="identifier"
+                render={({ field }) => (
+                  <FormItem className="w-full">
+                    <FormLabel className="sr-only">Nombre de Usuario o Email</FormLabel>
+                    <FormControl>
+                      <Input placeholder="Nombre de Usuario o Email" {...field} disabled={currentLoadingState} className="bg-input" />
+                    </FormControl>
+                    <FormMessage className="text-xs text-left"/>
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={loginForm.control}
+                name="password"
+                render={({ field }) => (
+                  <FormItem className="w-full">
+                    <FormLabel className="sr-only">Contraseña</FormLabel>
+                    <FormControl>
+                      <Input type="password" placeholder="Contraseña" {...field} disabled={currentLoadingState} className="bg-input" />
+                    </FormControl>
+                    <FormMessage className="text-xs text-left"/>
+                  </FormItem>
+                )}
+              />
+              <Button type="submit" className="mt-4 rounded-full px-8 py-3 text-sm font-semibold uppercase tracking-wider" disabled={currentLoadingState}>
+                {currentLoadingState && !isSignUpActive ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Ingresar'}
+              </Button>
+            </form>
+          </Form>
+        </div>
+
+        {/* Overlay Container */}
+        <div
+          className={cn(
+            "overlay-container absolute top-0 left-1/2 h-full w-1/2 overflow-hidden z-50 transition-transform duration-700 ease-in-out",
+            isSignUpActive ? "-translate-x-full" : "translate-x-0"
+          )}
+        >
+          <div
+            className={cn(
+              "overlay relative -left-full h-full w-[200%] transform bg-primary text-primary-foreground transition-transform duration-700 ease-in-out",
+              isSignUpActive ? "translate-x-1/2" : "translate-x-0"
+            )}
+          >
+            {/* Overlay Left Panel (Prompts to Sign In) */}
+            <div
+              className={cn(
+                "overlay-panel overlay-left absolute top-0 flex h-full w-1/2 flex-col items-center justify-center px-10 text-center transform transition-opacity duration-300 ease-in-out",
+                isSignUpActive ? "opacity-100" : "opacity-0 -translate-x-[20%]"
+              )}
+            >
+              <h1 className="text-3xl font-bold">Hola amigos</h1>
+              <p className="mt-4 text-sm font-light leading-relaxed">
+                Si tienes una cuenta, inicia sesión aquí y diviértete
+              </p>
+              <Button
+                variant="outline"
+                className="mt-8 rounded-full px-8 py-3 text-sm font-semibold uppercase tracking-wider bg-transparent border-primary-foreground text-primary-foreground hover:bg-primary-foreground hover:text-primary focus:bg-primary-foreground focus:text-primary"
+                onClick={() => { loginForm.reset(); setIsSignUpActive(false); }}
+                disabled={currentLoadingState}
+              >
+                Iniciar Sesión
+              </Button>
+            </div>
+
+            {/* Overlay Right Panel (Prompts to Sign Up) */}
+            <div
+              className={cn(
+                "overlay-panel overlay-right absolute top-0 right-0 flex h-full w-1/2 flex-col items-center justify-center px-10 text-center transform transition-opacity duration-300 ease-in-out",
+                 isSignUpActive ? "opacity-0 translate-x-[20%]" : "opacity-100"
+              )}
+            >
+              <h1 className="text-3xl font-bold">Bienvenido!</h1>
+              <p className="mt-4 text-sm font-light leading-relaxed">
+                Aún no tienes una cuenta? Regístrate y empieza la aventura con nosotros.
+              </p>
+              <Button
+                variant="outline"
+                className="mt-8 rounded-full px-8 py-3 text-sm font-semibold uppercase tracking-wider bg-transparent border-primary-foreground text-primary-foreground hover:bg-primary-foreground hover:text-primary focus:bg-primary-foreground focus:text-primary"
+                onClick={() => { signupForm.reset(); setIsSignUpActive(true); }}
+                disabled={currentLoadingState}
+              >
+                Regístrarme
+              </Button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <style jsx global>{`
+        .animate-show {
+          animation: show 0.7s;
+        }
+        @keyframes show {
+          0%, 49.99% {
+            opacity: 0;
+            z-index: 10;
+          }
+          50%, 100% {
+            opacity: 1;
+            z-index: 20;
+          }
+        }
+      `}</style>
     </div>
   );
 }
