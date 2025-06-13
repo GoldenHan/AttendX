@@ -188,8 +188,8 @@ export default function LoginPage() {
           </form>
         </CardContent>
         <CardFooter className="flex flex-col items-center text-sm">
-           <p className="text-muted-foreground">Asegúrate de tener una cuenta antes de intentar ingresar.</p>
-           <div className="mt-4">
+           <p className="text-muted-foreground">¿No tienes una cuenta?</p>
+           <div className="mt-2"> {/* Reduced margin from mt-4 to mt-2 for tighter spacing */}
             <Button variant="outline" asChild>
               <Link href="/signup">
                 <UserPlus className="mr-2 h-4 w-4" />
