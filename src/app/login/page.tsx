@@ -278,7 +278,7 @@ export default function AuthPage() {
             <div
               className={cn(
                 "overlay-panel overlay-left absolute top-0 flex h-full w-1/2 flex-col items-center justify-center px-10 text-center transform clip-edge-right-gearish",
-                "bg-signup-panel text-signup-panel-foreground"
+                "bg-signup-panel" 
               )}
             >
               <h1 className="text-3xl font-bold text-signup-panel-foreground">¡Bienvenido de Nuevo!</h1>
@@ -289,7 +289,7 @@ export default function AuthPage() {
                 variant="outline"
                 className={cn(
                     "mt-8 rounded-full px-8 py-3 text-sm font-semibold uppercase tracking-wider",
-                    "border-signup-panel-foreground text-signup-panel-foreground hover:bg-signup-panel-foreground hover:text-signup-panel-bg focus:bg-signup-panel-foreground focus:text-signup-panel-bg"
+                    "bg-signup-panel-foreground text-signup-panel-bg hover:bg-signup-panel-foreground/90 focus:bg-signup-panel-foreground/90"
                 )}
                 onClick={() => { loginForm.reset(); setIsSignUpActive(false); }}
                 disabled={currentLoadingState}
