@@ -111,7 +111,7 @@ export default function AuthPage() {
   return (
     <div className={cn(
         "flex min-h-screen flex-col items-center justify-center p-4 font-body transition-colors duration-700",
-        isSignUpActive ? 'bg-gradient-to-br from-signup-panel to-signup-panel/80' : 'bg-gradient-to-br from-primary to-primary/70'
+        isSignUpActive ? 'bg-gradient-to-br from-signup-panel to-signup-panel/70' : 'bg-gradient-to-br from-primary to-primary/70'
       )}
     >
       <div
@@ -123,8 +123,8 @@ export default function AuthPage() {
         {/* Sign Up Form Container */}
         <div
           className={cn(
-            "form-container sign-up-container absolute top-0 left-0 h-full w-1/2 opacity-0 z-10 transition-all duration-700 ease-in-out",
-            isSignUpActive && "translate-x-full opacity-100 z-20 animate-show"
+            "form-container sign-up-container absolute top-0 left-0 h-full w-1/2 z-10 transition-all duration-700 ease-in-out",
+            isSignUpActive ? "translate-x-full opacity-100 z-20 animate-show" : "opacity-0 z-10"
           )}
         >
           <Form {...signupForm}>
@@ -277,9 +277,9 @@ export default function AuthPage() {
             {/* Overlay Left Panel (Prompts to Sign In, visible when SignUp form is active) */}
             <div
               className={cn(
-                "overlay-panel overlay-left absolute top-0 flex h-full w-1/2 flex-col items-center justify-center px-10 text-center transform transition-opacity duration-300 ease-in-out clip-edge-right-gearish",
-                "bg-signup-panel text-signup-panel-foreground", // Use new green color
-                isSignUpActive ? "opacity-100" : "opacity-0 -translate-x-[20%]"
+                "overlay-panel overlay-left absolute top-0 flex h-full w-1/2 flex-col items-center justify-center px-10 text-center transform clip-edge-right-gearish",
+                "bg-signup-panel text-signup-panel-foreground",
+                // Removed conditional opacity and transform for the panel itself
               )}
             >
               <h1 className="text-3xl font-bold">¡Bienvenido de Nuevo!</h1>
@@ -290,7 +290,7 @@ export default function AuthPage() {
                 variant="outline"
                 className={cn(
                     "mt-8 rounded-full px-8 py-3 text-sm font-semibold uppercase tracking-wider",
-                    "border-signup-panel-foreground text-signup-panel-foreground hover:bg-signup-panel-foreground hover:text-signup-panel-bg"
+                    "border-signup-panel-foreground text-signup-panel-foreground hover:bg-signup-panel-foreground hover:text-signup-panel-bg focus:bg-signup-panel-foreground focus:text-signup-panel-bg"
                 )}
                 onClick={() => { loginForm.reset(); setIsSignUpActive(false); }}
                 disabled={currentLoadingState}
@@ -302,9 +302,9 @@ export default function AuthPage() {
             {/* Overlay Right Panel (Prompts to Sign Up, visible when SignIn form is active) */}
             <div
               className={cn(
-                "overlay-panel overlay-right absolute top-0 right-0 flex h-full w-1/2 flex-col items-center justify-center px-10 text-center transform transition-opacity duration-300 ease-in-out clip-edge-left-gearish",
-                "bg-primary text-primary-foreground", // Keep original blue color
-                 isSignUpActive ? "opacity-0 translate-x-[20%]" : "opacity-100"
+                "overlay-panel overlay-right absolute top-0 right-0 flex h-full w-1/2 flex-col items-center justify-center px-10 text-center transform clip-edge-left-gearish",
+                "bg-primary text-primary-foreground",
+                // Removed conditional opacity and transform for the panel itself
               )}
             >
               <h1 className="text-3xl font-bold">¡Hola!</h1>
@@ -313,7 +313,7 @@ export default function AuthPage() {
               </p>
               <Button
                 variant="secondary" 
-                className="mt-8 rounded-full px-8 py-3 text-sm font-semibold uppercase tracking-wider" // Keeps yellow button
+                className="mt-8 rounded-full px-8 py-3 text-sm font-semibold uppercase tracking-wider"
                 onClick={() => { signupForm.reset(); setIsSignUpActive(true); }}
                 disabled={currentLoadingState}
               >
