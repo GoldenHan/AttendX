@@ -25,9 +25,6 @@ import type { User, Group, AttendanceRecord as StudentAttendanceRecord, TeacherA
 import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-// useAuth is no longer strictly needed for the teacher attendance submission part in this scenario
-// but might be used by other parts of the dashboard or if you want to show admin info.
-// For now, let's assume it's still there for the overall dashboard context.
 import { useAuth } from '@/contexts/AuthContext'; 
 
 interface QuickActionProps {
@@ -55,13 +52,13 @@ export default function DashboardPage() {
   const [totalStudents, setTotalStudents] = useState(0);
   const [totalGroups, setTotalGroups] = useState(0);
   const [attendanceToday, setAttendanceToday] = useState(0);
-  const [isLoadingStats, setIsLoadingStats] = useState(true); // Renamed from isLoading for clarity
+  const [isLoadingStats, setIsLoadingStats] = useState(true);
 
   const [currentTime, setCurrentTime] = useState('');
   const [teacherAttendanceCode, setTeacherAttendanceCode] = useState('');
   const [isSubmittingTeacherAttendance, setIsSubmittingTeacherAttendance] = useState(false);
   const { toast } = useToast();
-  const { authUser } = useAuth(); // Still useful to ensure an admin is operating this page
+  const { authUser, firestoreUser } = useAuth(); 
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -94,7 +91,6 @@ export default function DashboardPage() {
         let presentTodayCount = 0;
         studentAttendanceSnapshot.docs.forEach(doc => {
           const record = doc.data() as StudentAttendanceRecord;
-          // Assuming record.timestamp is an ISO string
           const recordDate = new Date(record.timestamp); 
           if (recordDate >= today && recordDate < tomorrow) {
             presentTodayCount++;
@@ -115,11 +111,11 @@ export default function DashboardPage() {
   const handleTeacherAttendanceSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Optional: You might still want to ensure an admin is logged in to operate this.
-    // If authUser is null here, it means no one is logged in (e.g. public terminal, less secure)
-    // or the admin session expired.
-    if (!authUser) {
-      toast({ title: 'Error', description: 'Operación no permitida. Se requiere una sesión de administrador.', variant: 'destructive' });
+    // This check ensures an admin is operating the terminal if desired for audit,
+    // but the Firestore rules will ultimately determine write permission based on the admin's role.
+    if (!authUser || firestoreUser?.role !== 'admin') {
+      toast({ title: 'Acción no Permitida', description: 'Solo un administrador puede operar este registro. (Error Cliente)', variant: 'destructive' });
+      // console.log('Dashboard Submit Auth Check: authUser:', authUser, 'firestoreUser:', firestoreUser);
       return;
     }
 
@@ -142,8 +138,6 @@ export default function DashboardPage() {
       } else {
         const teacherDoc = teachersSnapshot.docs[0];
         const teacherData = teacherDoc.data() as User;
-
-        // No need to check teacherDoc.id against authUser.uid in this scenario
 
         const newRecord: Omit<TeacherAttendanceRecord, 'id'> = {
           teacherId: teacherDoc.id,
@@ -195,6 +189,12 @@ export default function DashboardPage() {
   return (
     <div className="flex flex-col gap-6">
       <h1 className="text-3xl font-bold font-headline">Welcome to SERVEX</h1>
+      {/* Diagnostic Info */}
+      {firestoreUser && (
+        <p className="text-xs text-muted-foreground text-center bg-muted p-2 rounded-md">
+          Diagnostic Info: Logged in as {firestoreUser.email} (Role in Firestore: {firestoreUser.role || 'Not defined in Firestore user doc'})
+        </p>
+      )}
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         {renderStatCard("Total Students", totalStudents, Users, "Currently enrolled")}
@@ -251,9 +251,9 @@ export default function DashboardPage() {
                 Register Arrival
               </Button>
             </form>
-             { authUser && authUser.email && (
+             { authUser && firestoreUser && (
                 <p className="text-xs text-muted-foreground mt-3 text-center">
-                    Operating as: {authUser.email} {authUser.displayName ? `(${authUser.displayName})` : ''}
+                    Operating as: {firestoreUser.email} ({firestoreUser.displayName || firestoreUser.name}) (Firestore Role: {firestoreUser.role})
                 </p>
             )}
           </CardContent>
@@ -262,3 +262,4 @@ export default function DashboardPage() {
     </div>
   );
 }
+
