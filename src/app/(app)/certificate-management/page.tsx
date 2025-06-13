@@ -18,7 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Loader2, Award, Save, UserCircle, AlertTriangle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { db } from '@/lib/firebase';
-import { collection, doc, getDocs, getDoc, updateDoc, query } from 'firebase/firestore';
+import { collection, doc, getDocs, getDoc, updateDoc, query, where } from 'firebase/firestore';
 import type { User, Group, GradingConfiguration, StudentGradeStructure, PartialScores, ActivityScore } from '@/types';
 import { DEFAULT_GRADING_CONFIG } from '@/types';
 
@@ -29,10 +29,9 @@ interface StudentLevelRecord {
   finalGrade: number | null;
   teacherName: string | null;
   certificateCode: string;
-  groupType?: 'Saturday' | 'Sunday' | null; // For certificate text template
+  groupType?: 'Saturday' | 'Sunday' | null;
 }
 
-// Helper to calculate final grade for a specific level
 const calculateLevelFinalGrade = (levelGrades: StudentGradeStructure | undefined, config: GradingConfiguration): number | null => {
   if (!levelGrades) return null;
 
@@ -42,10 +41,10 @@ const calculateLevelFinalGrade = (levelGrades: StudentGradeStructure | undefined
     const partialData = levelGrades[partialKey] as PartialScores | undefined;
 
     if (!partialData) {
-      partialTotals.push(null); // Mark as incomplete if a partial is missing
+      partialTotals.push(null);
       continue;
     }
-    
+
     const accumulatedActivities = partialData.accumulatedActivities || [];
     const examScore = partialData.exam?.score;
 
@@ -57,20 +56,20 @@ const calculateLevelFinalGrade = (levelGrades: StudentGradeStructure | undefined
         hasNumericAccumulated = true;
       }
     });
-    if(!hasNumericAccumulated && accumulatedActivities.length > 0) currentAccumulatedScore = 0; // Consider 0 if activities exist but no scores
-    else if (accumulatedActivities.length === 0) currentAccumulatedScore = 0; // Consider 0 if no activities
+    if(!hasNumericAccumulated && accumulatedActivities.length > 0) currentAccumulatedScore = 0;
+    else if (accumulatedActivities.length === 0) currentAccumulatedScore = 0;
 
     const currentExamScore = typeof examScore === 'number' ? examScore : 0;
-    
+
     const totalForPartial = Math.min(currentAccumulatedScore, config.maxTotalAccumulatedScore) + Math.min(currentExamScore, config.maxExamScore);
     partialTotals.push(totalForPartial);
   }
-  
+
   const validPartials = partialTotals.filter(total => typeof total === 'number');
   if (validPartials.length < config.numberOfPartials) {
-    return null; // Not all partials have grades
+    return null;
   }
-  
+
   const sumOfTotals = validPartials.reduce((sum, current) => sum + (current as number), 0);
   return sumOfTotals / config.numberOfPartials;
 };
@@ -82,17 +81,17 @@ export default function CertificateManagementPage() {
   const [allGroups, setAllGroups] = useState<Group[]>([]);
   const [allTeachers, setAllTeachers] = useState<User[]>([]);
   const [gradingConfig, setGradingConfig] = useState<GradingConfiguration>(DEFAULT_GRADING_CONFIG);
-  
+
   const [selectedGroupId, setSelectedGroupId] = useState<string>('all');
   const [studentLevelRecords, setStudentLevelRecords] = useState<StudentLevelRecord[]>([]);
-  
+
   const [isLoading, setIsLoading] = useState(true);
   const [isSavingCode, setIsSavingCode] = useState<{ [key: string]: boolean }>({});
 
   const [certificateTemplate, setCertificateTemplate] = useState(
     "La academia SERVEX, hace constar que [Nombre del Estudiante], con base en los resultados de los exámenes correspondientes, ha aprobado satisfactoriamente el nivel [Nivel del Estudiante] del programa de [Tipo de Programa], impartido en el turno [Turno del Programa].\n\nFirman las autoridades correspondientes."
   );
-  
+
   const [selectedStudentForTemplate, setSelectedStudentForTemplate] = useState<StudentLevelRecord | null>(null);
 
 
@@ -133,8 +132,8 @@ export default function CertificateManagementPage() {
     if (isLoading) return;
 
     const records: StudentLevelRecord[] = [];
-    const studentsToProcess = selectedGroupId === 'all' 
-      ? allStudents 
+    const studentsToProcess = selectedGroupId === 'all'
+      ? allStudents
       : allStudents.filter(s => {
           const group = allGroups.find(g => g.id === selectedGroupId);
           return group?.studentIds.includes(s.id);
@@ -144,12 +143,11 @@ export default function CertificateManagementPage() {
       if (student.gradesByLevel) {
         Object.entries(student.gradesByLevel).forEach(([levelName, levelData]) => {
           const finalGrade = calculateLevelFinalGrade(levelData, gradingConfig);
-          
-          // Attempt to find the teacher for this student and potentially this level
+
           let teacherName: string | null = null;
           let groupType: StudentLevelRecord['groupType'] = null;
 
-          const currentGroupForStudent = allGroups.find(g => g.studentIds.includes(student.id));
+          const currentGroupForStudent = allGroups.find(g => Array.isArray(g.studentIds) && g.studentIds.includes(student.id));
           if (currentGroupForStudent) {
             groupType = currentGroupForStudent.type;
             if (currentGroupForStudent.teacherId) {
@@ -157,7 +155,7 @@ export default function CertificateManagementPage() {
               teacherName = teacher?.name || 'Desconocido';
             }
           }
-          
+
           records.push({
             studentId: student.id,
             studentName: student.name,
@@ -196,13 +194,13 @@ export default function CertificateManagementPage() {
       if (studentDoc.exists()) {
         const studentData = studentDoc.data() as User;
         const updatedGradesByLevel = { ...studentData.gradesByLevel };
-        
+
         if (updatedGradesByLevel[levelName]) {
           updatedGradesByLevel[levelName] = {
             ...updatedGradesByLevel[levelName],
             certificateCode: recordToSave.certificateCode,
           };
-        } else { // Should not happen if record exists, but as a fallback
+        } else {
           updatedGradesByLevel[levelName] = { certificateCode: recordToSave.certificateCode };
         }
         await updateDoc(studentRef, { gradesByLevel: updatedGradesByLevel });
@@ -215,14 +213,14 @@ export default function CertificateManagementPage() {
       setIsSavingCode(prev => ({ ...prev, [key]: false }));
     }
   };
-  
+
   const getFormattedCertificateText = () => {
     if (!selectedStudentForTemplate) return certificateTemplate;
-    
+
     let text = certificateTemplate;
     text = text.replace(/\[Nombre del Estudiante]/g, selectedStudentForTemplate.studentName);
     text = text.replace(/\[Nivel del Estudiante]/g, selectedStudentForTemplate.levelName);
-    
+
     const programType = selectedStudentForTemplate.groupType || "No especificado";
     const programTurn = selectedStudentForTemplate.groupType || "No especificado";
 
@@ -247,7 +245,7 @@ export default function CertificateManagementPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <>
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2"><Award className="h-6 w-6 text-primary" /> Certificate Records</CardTitle>
@@ -344,22 +342,24 @@ export default function CertificateManagementPage() {
         </CardHeader>
         <CardContent>
           {selectedStudentForTemplate && (
-            <AlertTriangle className="mb-2 h-4 w-4 text-amber-600 inline-block mr-1" />
-            <span className="text-sm text-amber-700 mb-3 block">
-                Mostrando texto pre-llenado para: {selectedStudentForTemplate.studentName} - {selectedStudentForTemplate.levelName}.
-                <Button variant="link" size="sm" onClick={() => setSelectedStudentForTemplate(null)} className="ml-2 p-0 h-auto text-amber-700">(Limpiar selección)</Button>
-            </span>
+            <>
+              <AlertTriangle className="mb-2 h-4 w-4 text-amber-600 inline-block mr-1" />
+              <span className="text-sm text-amber-700 mb-3 block">
+                  Mostrando texto pre-llenado para: {selectedStudentForTemplate.studentName} - {selectedStudentForTemplate.levelName}.
+                  <Button variant="link" size="sm" onClick={() => setSelectedStudentForTemplate(null)} className="ml-2 p-0 h-auto text-amber-700">(Limpiar selección)</Button>
+              </span>
+            </>
           )}
           <Textarea
             value={getFormattedCertificateText()}
             onChange={(e) => {
-              if (!selectedStudentForTemplate) { // Only allow editing the base template if no student is selected for preview
+              if (!selectedStudentForTemplate) {
                  setCertificateTemplate(e.target.value);
               }
             }}
             rows={10}
             placeholder="Escribe o pega aquí el texto para el acta o certificado..."
-            readOnly={!!selectedStudentForTemplate} // Make it readonly if a student is selected, to avoid confusion
+            readOnly={!!selectedStudentForTemplate}
           />
           {selectedStudentForTemplate && (
             <p className="text-xs text-muted-foreground mt-2">
@@ -368,6 +368,6 @@ export default function CertificateManagementPage() {
           )}
         </CardContent>
       </Card>
-    </div>
+    </>
   );
 }
