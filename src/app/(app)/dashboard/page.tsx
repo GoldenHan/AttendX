@@ -4,12 +4,22 @@
 import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Users, UserCheck, BarChartBig, ClipboardEdit, Brain, QrCode, BookUser, BarChart3, Loader2, FolderKanban } from 'lucide-react'; // Added FolderKanban
+import { 
+  Users, 
+  BarChartBig, 
+  ClipboardEdit, 
+  BookUser, 
+  BarChart3, 
+  Loader2, 
+  FolderKanban,
+  GraduationCap, // Added for Student Management
+  ClipboardCheck // Added for Grades Management
+} from 'lucide-react';
 import Image from 'next/image';
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, query, where, Timestamp } from 'firebase/firestore';
-import type { User, Group, AttendanceRecord } from '@/types'; // Changed ClassInfo to Group
+import type { User, Group, AttendanceRecord } from '@/types';
 
 interface QuickActionProps {
   href: string;
@@ -34,7 +44,7 @@ const QuickActionButton: React.FC<QuickActionProps> = ({ href, icon: Icon, label
 
 export default function DashboardPage() {
   const [totalStudents, setTotalStudents] = useState(0);
-  const [totalGroups, setTotalGroups] = useState(0); // Renamed totalClasses to totalGroups
+  const [totalGroups, setTotalGroups] = useState(0);
   const [attendanceToday, setAttendanceToday] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -42,17 +52,16 @@ export default function DashboardPage() {
     const fetchDashboardData = async () => {
       setIsLoading(true);
       try {
-        // Fetch from 'students' collection directly for total students
         const studentsSnapshot = await getDocs(collection(db, 'students'));
         setTotalStudents(studentsSnapshot.size);
 
-        const groupsSnapshot = await getDocs(collection(db, 'groups')); // Fetch from 'groups' collection
-        setTotalGroups(groupsSnapshot.size); // Set totalGroups
+        const groupsSnapshot = await getDocs(collection(db, 'groups'));
+        setTotalGroups(groupsSnapshot.size);
 
         const today = new Date();
-        today.setHours(0, 0, 0, 0); // Start of today
+        today.setHours(0, 0, 0, 0); 
         const tomorrow = new Date(today);
-        tomorrow.setDate(today.getDate() + 1); // Start of tomorrow
+        tomorrow.setDate(today.getDate() + 1);
 
         const attendanceQuery = query(
           collection(db, 'attendanceRecords'),
@@ -93,10 +102,11 @@ export default function DashboardPage() {
 
   const quickActions: QuickActionProps[] = [
     { href: "/attendance-log", icon: ClipboardEdit, label: "Log Attendance", bgColorClass: "bg-blue-500", hoverBgColorClass: "hover:bg-blue-600", textColorClass: "text-white" },
-    { href: "/attendance-records", icon: BookUser, label: "View Records", bgColorClass: "bg-yellow-400", hoverBgColorClass: "hover:bg-yellow-500", textColorClass: "text-yellow-900" },
-    { href: "/reports", icon: BarChart3, label: "Generate Reports", bgColorClass: "bg-teal-500", hoverBgColorClass: "hover:bg-teal-600", textColorClass: "text-white" },
-    { href: "/ai-analysis", icon: Brain, label: "AI Analysis", bgColorClass: "bg-orange-500", hoverBgColorClass: "hover:bg-orange-600", textColorClass: "text-white" },
-    { href: "/qr-login-setup", icon: QrCode, label: "QR Session Login", bgColorClass: "bg-indigo-500", hoverBgColorClass: "hover:bg-indigo-600", textColorClass: "text-white" },
+    { href: "/attendance-records", icon: BookUser, label: "View Records", bgColorClass: "bg-green-500", hoverBgColorClass: "hover:bg-green-600", textColorClass: "text-white" },
+    { href: "/student-management", icon: GraduationCap, label: "Students", bgColorClass: "bg-purple-500", hoverBgColorClass: "hover:bg-purple-600", textColorClass: "text-white" },
+    { href: "/group-management", icon: FolderKanban, label: "Groups", bgColorClass: "bg-yellow-400", hoverBgColorClass: "hover:bg-yellow-500", textColorClass: "text-yellow-900" },
+    { href: "/grades-management", icon: ClipboardCheck, label: "Grades", bgColorClass: "bg-pink-500", hoverBgColorClass: "hover:bg-pink-600", textColorClass: "text-white" },
+    { href: "/reports", icon: BarChart3, label: "Reports", bgColorClass: "bg-teal-500", hoverBgColorClass: "hover:bg-teal-600", textColorClass: "text-white" },
   ];
 
   return (
@@ -105,23 +115,24 @@ export default function DashboardPage() {
       
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         {renderStatCard("Total Students", totalStudents, Users, "Currently enrolled")}
-        {renderStatCard("Active Groups", totalGroups, FolderKanban, "Across all programs")} {/* Changed from Active Classes, UserCheck to FolderKanban */}
+        {renderStatCard("Active Groups", totalGroups, FolderKanban, "Across all programs")}
         {renderStatCard("Attendance Today", attendanceToday, BarChartBig, "Students marked present")}
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-4 md:grid-cols-1"> {/* Changed to 1 column for full width quick actions card */}
         <Card>
           <CardHeader>
             <CardTitle>Quick Actions</CardTitle>
             <CardDescription>Easily access common tasks.</CardDescription>
           </CardHeader>
-          <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <CardContent className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-6 gap-4"> {/* Adjusted grid for more items */}
             {quickActions.map(action => (
               <QuickActionButton key={action.href} {...action} />
             ))}
           </CardContent>
         </Card>
-        <Card className="flex flex-col">
+        {/* Academy Overview Card can be added back if desired, or kept separate */}
+         <Card className="flex flex-col">
           <CardHeader>
             <CardTitle>Academy Overview</CardTitle>
             <CardDescription>A glimpse into our learning environment.</CardDescription>
