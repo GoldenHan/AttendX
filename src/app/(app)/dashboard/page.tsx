@@ -25,7 +25,10 @@ import type { User, Group, AttendanceRecord as StudentAttendanceRecord, TeacherA
 import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { useAuth } from '@/contexts/AuthContext'; // Import useAuth
+// useAuth is no longer strictly needed for the teacher attendance submission part in this scenario
+// but might be used by other parts of the dashboard or if you want to show admin info.
+// For now, let's assume it's still there for the overall dashboard context.
+import { useAuth } from '@/contexts/AuthContext'; 
 
 interface QuickActionProps {
   href: string;
@@ -52,13 +55,13 @@ export default function DashboardPage() {
   const [totalStudents, setTotalStudents] = useState(0);
   const [totalGroups, setTotalGroups] = useState(0);
   const [attendanceToday, setAttendanceToday] = useState(0);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingStats, setIsLoadingStats] = useState(true); // Renamed from isLoading for clarity
 
   const [currentTime, setCurrentTime] = useState('');
   const [teacherAttendanceCode, setTeacherAttendanceCode] = useState('');
   const [isSubmittingTeacherAttendance, setIsSubmittingTeacherAttendance] = useState(false);
   const { toast } = useToast();
-  const { authUser } = useAuth(); // Get authUser from context
+  const { authUser } = useAuth(); // Still useful to ensure an admin is operating this page
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -70,7 +73,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     const fetchDashboardData = async () => {
-      setIsLoading(true);
+      setIsLoadingStats(true);
       try {
         const studentsSnapshot = await getDocs(collection(db, 'students'));
         setTotalStudents(studentsSnapshot.size);
@@ -91,7 +94,8 @@ export default function DashboardPage() {
         let presentTodayCount = 0;
         studentAttendanceSnapshot.docs.forEach(doc => {
           const record = doc.data() as StudentAttendanceRecord;
-          const recordDate = new Date(record.timestamp);
+          // Assuming record.timestamp is an ISO string
+          const recordDate = new Date(record.timestamp); 
           if (recordDate >= today && recordDate < tomorrow) {
             presentTodayCount++;
           }
@@ -100,25 +104,28 @@ export default function DashboardPage() {
 
       } catch (error) {
         console.error("Error fetching dashboard data:", error);
+        toast({ title: 'Error', description: 'Could not load dashboard statistics.', variant: 'destructive' });
       }
-      setIsLoading(false);
+      setIsLoadingStats(false);
     };
 
     fetchDashboardData();
-  }, []);
+  }, [toast]);
 
   const handleTeacherAttendanceSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    console.log('Auth User on submit:', authUser); // Log authUser state
+    // Optional: You might still want to ensure an admin is logged in to operate this.
+    // If authUser is null here, it means no one is logged in (e.g. public terminal, less secure)
+    // or the admin session expired.
     if (!authUser) {
-      toast({ title: 'Error', description: 'Usuario no autenticado. Por favor, inicie sesión de nuevo.', variant: 'destructive' });
-      setIsSubmittingTeacherAttendance(false);
+      toast({ title: 'Error', description: 'Operación no permitida. Se requiere una sesión de administrador.', variant: 'destructive' });
       return;
     }
 
+
     if (!teacherAttendanceCode.trim()) {
-      toast({ title: 'Error', description: 'Por favor, ingrese su código de asistencia.', variant: 'destructive' });
+      toast({ title: 'Error', description: 'Por favor, ingrese el código de asistencia del docente.', variant: 'destructive' });
       return;
     }
     setIsSubmittingTeacherAttendance(true);
@@ -136,15 +143,10 @@ export default function DashboardPage() {
         const teacherDoc = teachersSnapshot.docs[0];
         const teacherData = teacherDoc.data() as User;
 
-        // Crucial check: Ensure the logged-in user (authUser.uid) is the one whose code was entered
-        if (teacherDoc.id !== authUser.uid) {
-            toast({ title: 'Error de Coincidencia', description: 'El código de asistencia ingresado no pertenece al usuario actualmente logueado.', variant: 'destructive'});
-            setIsSubmittingTeacherAttendance(false);
-            return;
-        }
+        // No need to check teacherDoc.id against authUser.uid in this scenario
 
         const newRecord: Omit<TeacherAttendanceRecord, 'id'> = {
-          teacherId: teacherDoc.id, // This should match authUser.uid
+          teacherId: teacherDoc.id,
           teacherName: teacherData.name,
           timestamp: new Date().toISOString(),
           attendanceCodeUsed: teacherAttendanceCode.trim(),
@@ -156,13 +158,12 @@ export default function DashboardPage() {
     } catch (error: any) {
       console.error("Error registering teacher attendance:", error);
       let userMessage = 'Ocurrió un error al registrar la asistencia.';
-      // Check for Firestore permission denied error
       if (error.code === 'permission-denied' || error.message?.toLowerCase().includes('permission denied')) {
-        userMessage = 'Permiso denegado. No tienes autorización para registrar esta asistencia. Verifica tus permisos o contacta al administrador.';
+        userMessage = 'Permiso denegado. La sesión actual no tiene autorización para registrar esta asistencia. Verifica los permisos de administrador.';
       } else if (error.code) {
         userMessage = `Error (${error.code}). Inténtalo de nuevo o contacta soporte.`;
       }
-      toast({ title: 'Error', description: userMessage, variant: 'destructive' });
+      toast({ title: 'Error de Registro', description: userMessage, variant: 'destructive' });
     } finally {
       setIsSubmittingTeacherAttendance(false);
     }
@@ -176,7 +177,7 @@ export default function DashboardPage() {
         <Icon className="h-4 w-4 text-muted-foreground" />
       </CardHeader>
       <CardContent>
-        {isLoading ? <Loader2 className="h-6 w-6 animate-spin" /> : <div className="text-2xl font-bold">{value}</div>}
+        {isLoadingStats ? <Loader2 className="h-6 w-6 animate-spin" /> : <div className="text-2xl font-bold">{value}</div>}
         <p className="text-xs text-muted-foreground">{description}</p>
       </CardContent>
     </Card>
@@ -222,7 +223,7 @@ export default function DashboardPage() {
               <Clock className="h-5 w-5 text-primary" />
               Teacher Attendance
             </CardTitle>
-            <CardDescription>Register your arrival.</CardDescription>
+            <CardDescription>Teachers enter their attendance code here upon arrival.</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="text-3xl font-bold text-center mb-3 text-primary">
@@ -234,7 +235,7 @@ export default function DashboardPage() {
                 <Input
                   id="teacherAttendanceCode"
                   type="password" 
-                  placeholder="Enter your attendance code"
+                  placeholder="Enter attendance code"
                   value={teacherAttendanceCode}
                   onChange={(e) => setTeacherAttendanceCode(e.target.value)}
                   className="text-center"
@@ -250,10 +251,14 @@ export default function DashboardPage() {
                 Register Arrival
               </Button>
             </form>
+             { authUser && authUser.email && (
+                <p className="text-xs text-muted-foreground mt-3 text-center">
+                    Operating as: {authUser.email} {authUser.displayName ? `(${authUser.displayName})` : ''}
+                </p>
+            )}
           </CardContent>
         </Card>
       </div>
     </div>
   );
 }
-
