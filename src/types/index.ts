@@ -40,6 +40,7 @@ export interface User {
   email?: string; // Still needed for Firebase Auth, but username is primary for students
   phoneNumber?: string;
   photoUrl?: string;
+  attendanceCode?: string; // Personal code for teachers to log their own attendance
 
   // Student-specific fields (primarily in 'students' collection)
   level?: 'Beginner' | 'Intermediate' | 'Advanced' | 'Other'; // Current level of the student
@@ -50,6 +51,13 @@ export interface User {
   gradesByLevel?: Record<string, StudentGradeStructure>; // Key is the level name (e.g., "Beginner")
 }
 
+export interface TeacherAttendanceRecord {
+  id: string; // Firestore document ID
+  teacherId: string; // User.id of the teacher
+  teacherName: string;
+  timestamp: string; // ISO string for when the attendance was logged
+  attendanceCodeUsed: string;
+}
 
 export interface Session {
   id: string; // Firestore document ID from 'sessions' collection
