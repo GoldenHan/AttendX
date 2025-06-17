@@ -62,57 +62,22 @@ export default function AuthPage() {
   const handleLoginSubmit = async (data: LoginFormValues) => {
     setIsSubmitting(true);
     try {
-      const usersRef = collection(db, 'users');
-      const identifierIsEmail = data.identifier.includes('@');
-      let userEmailToAuth: string | null = null;
-
-      if (identifierIsEmail) {
-        // If it looks like an email, we'll use it directly for Firebase Auth.
-        // Firebase Auth will tell us if the user/email doesn't exist or password is wrong.
-        userEmailToAuth = data.identifier.trim();
-      } else {
-        // If it's not an email, assume it's a username and try to find their email in Firestore.
-        const usernameQuery = query(usersRef, where('username', '==', data.identifier.trim()), limit(1));
-        const usernameSnapshot = await getDocs(usernameQuery);
-        if (!usernameSnapshot.empty) {
-          const userDoc = usernameSnapshot.docs[0].data();
-          if (userDoc.email) {
-            userEmailToAuth = userDoc.email;
-          } else {
-            toast({ title: 'Error de Cuenta', description: 'El usuario no tiene un correo electrónico asociado. Contacta al administrador.', variant: 'destructive' });
-            setIsSubmitting(false);
-            return;
-          }
-        } else {
-          // Username not found in Firestore, and it wasn't an email.
-          toast({ title: 'Fallo de Ingreso', description: 'Nombre de usuario o correo no encontrado.', variant: 'destructive' });
-          setIsSubmitting(false);
-          return;
-        }
-      }
-
-      // At this point, userEmailToAuth should be set if we intend to proceed
-      if (userEmailToAuth) {
-        await signIn(userEmailToAuth, data.password); // signIn is from AuthContext
-        toast({ title: 'Ingreso Exitoso', description: '¡Bienvenido/a de nuevo!' });
-        // router.push('/dashboard'); // AuthContext useEffect handles redirect
-      } else {
-        // This case implies an email-like identifier was provided but perhaps was empty string after trim,
-        // or a non-email identifier was provided and not found as a username.
-        // The specific username-not-found case is handled above.
-        // This is a fallback.
-        toast({ title: 'Fallo de Ingreso', description: 'No se pudo determinar el correo para autenticación. Asegúrate de que el identificador no esté vacío.', variant: 'destructive' });
-      }
-
+      await signIn(data.identifier, data.password);
+      toast({ title: 'Ingreso Exitoso', description: '¡Bienvenido/a de nuevo!' });
     } catch (error: any) {
       let errorMessage = 'Fallo al ingresar. Verifica tus credenciales.';
       // Firebase Auth error codes
-      if (error.code === 'auth/user-not-found' || 
-          error.code === 'auth/wrong-password' || 
-          error.code === 'auth/invalid-credential' || 
+      if (error.code === 'auth/user-not-found' ||
+          error.code === 'auth/wrong-password' ||
+          error.code === 'auth/invalid-credential' ||
           error.code === 'auth/invalid-email') {
         errorMessage = 'Correo electrónico o contraseña incorrectos.';
+      } else if (error.message === 'El usuario no tiene un correo electrónico asociado. Contacta al administrador.' ||
+                 error.message === 'El usuario (estudiante) no tiene un correo electrónico asociado. Contacta al administrador.' ||
+                 error.message === 'Nombre de usuario no encontrado.') {
+        errorMessage = error.message;
       }
+      console.error("Login page error:", error);
       toast({ title: 'Fallo de Ingreso', description: errorMessage, variant: 'destructive' });
     } finally {
       setIsSubmitting(false);
@@ -122,7 +87,10 @@ export default function AuthPage() {
   const handleSignupSubmit = async (data: SignupFormValues) => {
     setIsSubmitting(true);
     try {
-      await signUp(data.name, data.username, data.email, data.password);
+      // For signup, role defaults to 'student' if not specified elsewhere.
+      // If this signup form is for staff, you'd need to pass the role.
+      // Assuming general student signup here:
+      await signUp(data.name, data.username, data.email, data.password /*, 'student' if role needed here */);
       toast({ title: 'Cuenta Creada', description: "Te has registrado e iniciado sesión exitosamente." });
     } catch (error: any) {
       let errorMessage = 'Fallo al crear la cuenta. Por favor, inténtalo de nuevo.';
@@ -144,7 +112,7 @@ export default function AuthPage() {
       <div
         className={cn(
           "relative h-[650px] w-full max-w-4xl overflow-hidden rounded-2xl shadow-2xl",
-          "container" 
+          "container"
         )}
       >
         {/* Sign Up Form Container */}
@@ -305,7 +273,7 @@ export default function AuthPage() {
             <div
               className={cn(
                 "overlay-panel overlay-left absolute top-0 flex h-full w-1/2 flex-col items-center justify-center px-10 text-center transform clip-edge-right-gearish",
-                "bg-signup-panel" 
+                "bg-signup-panel"
               )}
             >
               <h1 className="text-3xl font-bold text-signup-panel-foreground">¡Bienvenido de Nuevo!</h1>
@@ -337,7 +305,7 @@ export default function AuthPage() {
                 Ingrese sus datos personales y comience su viaje con nosotros.
               </p>
               <Button
-                variant="secondary" 
+                variant="secondary"
                 className="mt-8 rounded-full px-8 py-3 text-sm font-semibold uppercase tracking-wider"
                 onClick={() => { signupForm.reset(); setIsSignUpActive(true); }}
                 disabled={currentLoadingState}
@@ -355,15 +323,14 @@ export default function AuthPage() {
         @keyframes show {
           0%, 49.99% {
             opacity: 0;
-            z-index: 10; 
+            z-index: 10;
           }
           50%, 100% {
             opacity: 1;
-            z-index: 20; 
+            z-index: 20;
           }
         }
       `}</style>
     </div>
   );
 }
-

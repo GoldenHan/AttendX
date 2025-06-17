@@ -21,12 +21,12 @@ interface AuthContextType {
   authUser: FirebaseUser | null;
   firestoreUser: FirestoreUserType | null;
   loading: boolean;
-  signIn: (identifier: string, pass: string) => Promise<void>; // Changed email to identifier
-  signUp: (name: string, username: string, email: string, initialPasswordAsUsername: string, role: FirestoreUserType['role']) => Promise<void>; // Modified for new flow
+  signIn: (identifier: string, pass: string) => Promise<void>;
+  signUp: (name: string, username: string, email: string, initialPasswordAsUsername: string, role: FirestoreUserType['role']) => Promise<void>;
   signOut: () => Promise<void>;
   reauthenticateCurrentUser: (password: string) => Promise<void>;
-  updateUserPassword: (currentPasswordFromUser: string, newPasswordFromUser: string) => Promise<void>; // New function
-  clearRequiresPasswordChangeFlag: () => Promise<void>; // New function
+  updateUserPassword: (currentPasswordFromUser: string, newPasswordFromUser: string) => Promise<void>;
+  clearRequiresPasswordChangeFlag: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -50,9 +50,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           const userData = { id: userDocSnapshot.id, ...userDocSnapshot.data() } as FirestoreUserType;
           setFirestoreUser(userData);
         } else {
-          // This case might happen if an Auth user exists but their Firestore doc was deleted or not created.
-          // Or, if students also use Firebase Auth directly and their records are only in 'students'.
-          // For simplicity, this starter assumes staff users are primarily in 'users'.
           console.warn(`Firestore document not found for authenticated user UID: ${user.uid} in 'users' collection.`);
           setFirestoreUser(null);
         }
@@ -69,45 +66,59 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const signIn = async (identifier: string, pass: string) => {
     setLoading(true);
     let emailToAuth = identifier;
+    console.log(`[AuthContext] Attempting sign in for identifier: ${identifier}`);
     try {
       if (!identifier.includes('@')) { // Assume it's a username
+        console.log(`[AuthContext] Identifier "${identifier}" is not an email. Searching for username in 'users' collection.`);
         const usersRef = collection(db, 'users');
+        // Ensure identifier.trim() is used if usernames might have leading/trailing spaces from input
         const usernameQuery = query(usersRef, where('username', '==', identifier.trim()), limit(1));
         const usernameSnapshot = await getDocs(usernameQuery);
+
         if (!usernameSnapshot.empty) {
           const userDoc = usernameSnapshot.docs[0].data();
+          console.log(`[AuthContext] Found user document for username "${identifier.trim()}":`, userDoc);
           if (userDoc.email) {
             emailToAuth = userDoc.email;
+            console.log(`[AuthContext] Using email "${emailToAuth}" for Firebase Auth.`);
           } else {
-            throw new Error('User account does not have an associated email.');
+            console.error(`[AuthContext] User document for username "${identifier.trim()}" is missing an email field.`);
+            throw new Error('El usuario no tiene un correo electrónico asociado. Contacta al administrador.');
           }
         } else {
-          // Also check students collection if usernames could be there and distinct from 'users'
+           // Check students collection as a fallback if no staff user found with username
+           console.log(`[AuthContext] Username "${identifier.trim()}" not found in 'users'. Checking 'students' collection.`);
            const studentsRef = collection(db, 'students');
            const studentUsernameQuery = query(studentsRef, where('username', '==', identifier.trim()), limit(1));
            const studentUsernameSnapshot = await getDocs(studentUsernameQuery);
            if(!studentUsernameSnapshot.empty) {
              const studentDoc = studentUsernameSnapshot.docs[0].data();
+             console.log(`[AuthContext] Found student document for username "${identifier.trim()}":`, studentDoc);
              if(studentDoc.email) {
                 emailToAuth = studentDoc.email;
+                console.log(`[AuthContext] Using email "${emailToAuth}" from student record for Firebase Auth.`);
              } else {
-                throw new Error('Student account does not have an associated email.');
+                console.error(`[AuthContext] Student document for username "${identifier.trim()}" is missing an email field.`);
+                throw new Error('El usuario (estudiante) no tiene un correo electrónico asociado. Contacta al administrador.');
              }
            } else {
-            throw new Error('Username not found.');
+            console.error(`[AuthContext] Username "${identifier.trim()}" not found in 'users' or 'students' collections.`);
+            throw new Error('Nombre de usuario no encontrado.');
            }
         }
+      } else {
+        console.log(`[AuthContext] Identifier "${identifier}" is an email. Proceeding directly with Firebase Auth.`);
       }
       await signInWithEmailAndPassword(auth, emailToAuth, pass);
+      console.log(`[AuthContext] Firebase Auth successful for email: ${emailToAuth}`);
       // Firestore user will be set by onAuthStateChanged
-    } catch (error) {
+    } catch (error: any) {
+      console.error(`[AuthContext] signIn error:`, error.code, error.message, error);
       setLoading(false);
       throw error;
     }
-    // setLoading(false) is handled by onAuthStateChanged which also sets firestoreUser
   };
 
-  // Modified signUp for username as initial password and requiresPasswordChange flag
   const signUp = async (name: string, username: string, email: string, initialPasswordAsUsername: string, role: FirestoreUserType['role']) => {
     setLoading(true);
     try {
@@ -118,10 +129,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         (error as any).code = "auth/username-already-exists";
         throw error;
       }
-      // Optionally, check username in 'students' too if they are distinct and can't overlap
-      // For now, assuming staff usernames must be unique within 'users'
 
-      const userCredential = await createUserWithEmailAndPassword(auth, email, initialPasswordAsUsername); // Use username as password
+      const userCredential = await createUserWithEmailAndPassword(auth, email, initialPasswordAsUsername);
       const firebaseUser = userCredential.user;
 
       const newUserDocData: Omit<FirestoreUserType, 'id'> = {
@@ -130,10 +139,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         username: username,
         email: firebaseUser.email || email,
         role: role,
-        requiresPasswordChange: true, // Set the flag
+        requiresPasswordChange: true,
       };
       await setDoc(doc(db, 'users', firebaseUser.uid), newUserDocData);
-      // Firestore user will be set by onAuthStateChanged
     } catch (error) {
       setLoading(false);
       throw error;
@@ -163,8 +171,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const updateUserPassword = async (currentPasswordFromUser: string, newPasswordFromUser: string) => {
     if (!authUser) throw new Error("No user is currently signed in.");
-    await reauthenticateCurrentUser(currentPasswordFromUser); // Re-authenticate first
-    await firebaseUpdatePassword(authUser, newPasswordFromUser); // Then update
+    await reauthenticateCurrentUser(currentPasswordFromUser);
+    await firebaseUpdatePassword(authUser, newPasswordFromUser);
   };
 
   const clearRequiresPasswordChangeFlag = async () => {
@@ -172,9 +180,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     try {
       const userDocRef = doc(db, 'users', authUser.uid);
       await updateDoc(userDocRef, {
-        requiresPasswordChange: false, // or delete(field)
+        requiresPasswordChange: false,
       });
-      // Update local firestoreUser state
       setFirestoreUser(prev => prev ? { ...prev, requiresPasswordChange: false } : null);
     } catch (error) {
       console.error("Error clearing requiresPasswordChange flag:", error);
@@ -191,7 +198,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         router.push('/force-password-change');
       } else if (authUser && !firestoreUser?.requiresPasswordChange && (isAuthPage || isForcePasswordChangePage)) {
         router.push('/dashboard');
-      } else if (!authUser && !isAuthPage && !isForcePasswordChangePage) { // ensure not to redirect from force-password-change if not auth'd
+      } else if (!authUser && !isAuthPage && !isForcePasswordChangePage) {
         router.push('/login');
       }
     }
