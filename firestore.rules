@@ -5,104 +5,98 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // Helper functions
-    function isUserAuthenticated() {
-      return request.auth != null;
-    }
-
-    function getUserData(userId) {
-      return get(/databases/$(database)/documents/users/$(userId)).data;
-    }
-
     function isAdmin(userId) {
-      let userData = getUserData(userId);
-      return isUserAuthenticated() && userData != null && userData.role == 'admin';
+      return exists(/databases/$(database)/documents/users/$(userId)) &&
+             get(/databases/$(database)/documents/users/$(userId)).data.role == 'admin';
     }
 
     function isTeacher(userId) {
-      let userData = getUserData(userId);
-      return isUserAuthenticated() && userData != null && userData.role == 'teacher';
+      return exists(/databases/$(database)/documents/users/$(userId)) &&
+             get(/databases/$(database)/documents/users/$(userId)).data.role == 'teacher';
     }
-    
+
+    function isSupervisor(userId) {
+      return exists(/databases/$(database)/documents/users/$(userId)) &&
+             get(/databases/$(database)/documents/users/$(userId)).data.role == 'supervisor';
+    }
+
     function isCaja(userId) {
-      let userData = getUserData(userId);
-      return isUserAuthenticated() && userData != null && userData.role == 'caja';
+      return exists(/databases/$(database)/documents/users/$(userId)) &&
+             get(/databases/$(database)/documents/users/$(userId)).data.role == 'caja';
     }
 
     function isStudent(userId) {
-      let userData = getUserData(userId);
-      return isUserAuthenticated() && userData != null && userData.role == 'student';
+      return exists(/databases/$(database)/documents/users/$(userId)) &&
+             get(/databases/$(database)/documents/users/$(userId)).data.role == 'student';
+    }
+    
+    function isOwner(userId) {
+      return request.auth.uid == userId;
     }
 
-    // USERS collection (includes staff and students who can log in)
+    // Users collection (for staff, students, admins with login)
     match /users/{userId} {
-      allow create: if isAdmin(request.auth.uid) || isTeacher(request.auth.uid); // Admins/Teachers can create new users (students/staff)
-      
-      allow read: if isAdmin(request.auth.uid) || isTeacher(request.auth.uid) || isCaja(request.auth.uid) || request.auth.uid == userId;
-                  // Admins, Teachers, Caja can read any user. Users can read their own profile.
-
-      allow update: if isAdmin(request.auth.uid) || 
-                       (isTeacher(request.auth.uid) && resource.data.role == 'student') || // Teachers can update student users
-                       (request.auth.uid == userId && // User updating their own profile
-                         !(request.resource.data.role != resource.data.role) && // Cannot change own role
-                         !(request.resource.data.email != resource.data.email && resource.data.email != null) && // Cannot change own email if already set
-                         !(request.resource.data.username != resource.data.username && resource.data.username != null) && // Cannot change own username if already set
-                         !(request.resource.data.gradesByLevel != resource.data.gradesByLevel && resource.data.role == 'student') && // Students cannot change their own grades
-                         ( // Allow self-update of requiresPasswordChange or limited profile fields
-                           (request.writeFields.size() == 1 && request.writeFields[0] == 'requiresPasswordChange' && request.resource.data.requiresPasswordChange == false) ||
-                           (request.writeFields.size() <= 3 && // Example: allow updating photo, phone, notes
-                            ('photoUrl' in request.writeFields || 'phoneNumber' in request.writeFields || 'notes' in request.writeFields)
-                           )
-                         )
+      allow read: if request.auth != null && 
+                     (isAdmin(request.auth.uid) || 
+                      isTeacher(request.auth.uid) || // Teachers might need to read student/other teacher profiles (e.g. for group assignments)
+                      isSupervisor(request.auth.uid) || // Supervisors might need to read teacher/student profiles
+                      isCaja(request.auth.uid) || // Caja might need to read student profiles
+                      isOwner(userId)); // Users can read their own profile
+      allow list: if request.auth != null && (isAdmin(request.auth.uid) || isTeacher(request.auth.uid) || isSupervisor(request.auth.uid) || isCaja(request.auth.uid)); // Allow listing for relevant staff roles
+      allow create: if request.auth != null && isAdmin(request.auth.uid); // Only admins can create new user entries (e.g. staff, students via management)
+      allow update: if request.auth != null && 
+                       (isAdmin(request.auth.uid) || // Admins can update any user
+                        (isOwner(userId) && request.writeFields.size() == 1 && request.writeFields[0] == 'requiresPasswordChange' && request.resource.data.requiresPasswordChange == false) || // User updating their own requiresPasswordChange flag
+                        (isTeacher(request.auth.uid) && resource.data.role == 'student') // Teacher can update student records they manage (more granular needed later for Sede)
                        );
-                       
-      allow delete: if isAdmin(request.auth.uid); // Only admins can delete users
-      allow list: if isAdmin(request.auth.uid) || isTeacher(request.auth.uid) || isCaja(request.auth.uid); // Admins, Teachers, Caja can list users
+      allow delete: if request.auth != null && isAdmin(request.auth.uid); // Only admins can delete user entries
     }
-    
-    // STUDENTS collection (If used for students who DO NOT log in - this might be deprecated by current changes)
-    // For now, assuming students who log in are in 'users' collection.
-    // If 'students' collection is still used for other purposes, its rules would go here.
-    // Example if it were still active for CRUD by admins/teachers:
-    // match /students/{studentId} {
-    //   allow read, list: if isAdmin(request.auth.uid) || isTeacher(request.auth.uid) || isCaja(request.auth.uid);
-    //   allow create, update, delete: if isAdmin(request.auth.uid) || isTeacher(request.auth.uid);
-    // }
 
-
-    // GROUPS collection
+    // Groups collection
     match /groups/{groupId} {
-      allow read, list: if isUserAuthenticated(); // All authenticated users can read/list groups (UI filters for teachers)
-      allow create, update, delete: if isAdmin(request.auth.uid); // Only admins can manage groups
+      allow read: if request.auth != null; // All authenticated users can read group info (students, teachers, admins)
+      allow list: if request.auth != null;
+      allow create, update, delete: if request.auth != null && (isAdmin(request.auth.uid) || isSupervisor(request.auth.uid)); // Admins and Supervisors can manage groups
+      // TODO: Add Sede based restrictions for supervisors
     }
 
-    // SESSIONS collection
-    match /sessions/{sessionId} {
-      allow read, list: if isUserAuthenticated();
-      // Allow admins or teachers assigned to the group of the session to create/update
-      // For create/update, we'd need to check group's teacherId if session.classId maps to that group.
-      // Simple rule for now:
-      allow create, update, delete: if isAdmin(request.auth.uid) || isTeacher(request.auth.uid) || isCaja(request.auth.uid);
-    }
-
-    // ATTENDANCE RECORDS collection
+    // AttendanceRecords collection
     match /attendanceRecords/{recordId} {
-      allow read, list: if isUserAuthenticated(); // Students might need to read their own, admins/teachers can read all
-      // More granular read for students: (isStudent(request.auth.uid) && resource.data.userId == request.auth.uid)
-      allow create: if isAdmin(request.auth.uid) || isTeacher(request.auth.uid) || isCaja(request.auth.uid);
-      allow update, delete: if isAdmin(request.auth.uid) || isTeacher(request.auth.uid);
+      allow read: if request.auth != null; // All authenticated users can read records (for reports, etc.)
+      allow list: if request.auth != null;
+      allow create: if request.auth != null && (isAdmin(request.auth.uid) || isTeacher(request.auth.uid) || isCaja(request.auth.uid) || isSupervisor(request.auth.uid)); // Staff can create attendance
+      allow update, delete: if request.auth != null && (isAdmin(request.auth.uid) || isSupervisor(request.auth.uid)); // Admins/Supervisors can modify/delete
+      // TODO: Add Sede based restrictions
     }
     
-    // TEACHER ATTENDANCE RECORDS collection
+    // TeacherAttendanceRecords collection
     match /teacherAttendanceRecords/{recordId} {
-      allow read, list: if isAdmin(request.auth.uid) || isCaja(request.auth.uid); // Admins and Caja can view
-      allow create: if isAdmin(request.auth.uid); // Only Admins can create these records (via the dashboard panel)
-      allow delete: if isAdmin(request.auth.uid);
+      allow read: if request.auth != null && (isAdmin(request.auth.uid) || isSupervisor(request.auth.uid));
+      allow list: if request.auth != null && (isAdmin(request.auth.uid) || isSupervisor(request.auth.uid));
+      allow create: if request.auth != null && isAdmin(request.auth.uid); // Only admin can create this via code (dashboard feature)
+      allow update, delete: if request.auth != null && isAdmin(request.auth.uid);
     }
 
-    // APP CONFIGURATION collection
+    // Sessions collection
+    match /sessions/{sessionId} {
+      allow read: if request.auth != null;
+      allow list: if request.auth != null;
+      allow create: if request.auth != null && (isAdmin(request.auth.uid) || isTeacher(request.auth.uid) || isSupervisor(request.auth.uid)); // Staff can create sessions
+      allow update, delete: if request.auth != null && isAdmin(request.auth.uid);
+      // TODO: Add Sede based restrictions
+    }
+    
+    // AppConfiguration collection
     match /appConfiguration/{configId} {
-      allow read: if isUserAuthenticated();
-      allow create, update, delete: if isAdmin(request.auth.uid);
+        allow read: if request.auth != null; // All authenticated users can read configuration
+        allow create, update, delete: if request.auth != null && isAdmin(request.auth.uid); // Only admins can change config
+    }
+
+    // Sedes collection
+    match /sedes/{sedeId} {
+      allow read: if request.auth != null; // All authenticated users can read Sede info
+      allow list: if request.auth != null;
+      allow create, update, delete: if request.auth != null && isAdmin(request.auth.uid); // Only Admins can manage Sedes
     }
   }
 }

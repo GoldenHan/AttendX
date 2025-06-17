@@ -14,8 +14,8 @@ import {
   updatePassword as firebaseUpdatePassword, 
 } from 'firebase/auth';
 import { doc, getDoc, collection, query, where, getDocs, setDoc, limit, updateDoc } from 'firebase/firestore';
-import type { User as FirestoreUserType, GradingConfiguration } from '@/types'; // Import GradingConfiguration
-import { DEFAULT_GRADING_CONFIG, getDefaultStudentGradeStructure } from '@/types'; // Import defaults
+import type { User as FirestoreUserType, GradingConfiguration, Sede } from '@/types'; // Import Sede
+import { DEFAULT_GRADING_CONFIG, getDefaultStudentGradeStructure } from '@/types'; 
 import { useRouter, usePathname } from 'next/navigation';
 
 interface AuthContextType {
@@ -29,7 +29,8 @@ interface AuthContextType {
     email: string, 
     initialPasswordAsUsername: string, 
     role: FirestoreUserType['role'],
-    studentDetails?: { level: FirestoreUserType['level'] } // Optional student details for signup
+    studentDetails?: { level: FirestoreUserType['level'] },
+    staffDetails?: Partial<Pick<FirestoreUserType, 'sedeId' | 'attendanceCode'>> // For staff (teacher/supervisor) details like sedeId
   ) => Promise<void>;
   signOut: () => Promise<void>;
   reauthenticateCurrentUser: (password: string) => Promise<void>;
@@ -49,7 +50,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   useEffect(() => {
     const fetchGradingConfig = async () => {
-      // Fetch grading config to be used by signUp if creating a student
       try {
         const configDocRef = doc(db, 'appConfiguration', 'currentGradingConfig');
         const docSnap = await getDoc(configDocRef);
@@ -71,7 +71,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setLoading(true);
       if (user) {
         setAuthUser(user);
-        // All login-able users (staff and students) will be in the 'users' collection.
         const userDocRef = doc(db, 'users', user.uid);
         const userDocSnapshot = await getDoc(userDocRef);
 
@@ -80,12 +79,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           setFirestoreUser(userData);
         } else {
           console.warn(`Firestore document not found for authenticated user UID: ${user.uid} in 'users' collection.`);
-          // This could happen if a user was deleted from Firestore but not from Auth, or during signup race conditions.
-          // Or if a student logs in but their record is in 'students' collection (which we are moving away from for login-able students).
           setFirestoreUser(null);
-          // Optionally sign out the user if their Firestore record is essential and missing
-           await firebaseSignOut(auth); 
-           setAuthUser(null);
+          await firebaseSignOut(auth); 
+          setAuthUser(null);
         }
       } else {
         setAuthUser(null);
@@ -102,7 +98,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     let emailToAuth = identifier;
     console.log(`[AuthContext] Attempting sign in for identifier: ${identifier}`);
     try {
-      if (!identifier.includes('@')) { // Assume it's a username
+      if (!identifier.includes('@')) { 
         console.log(`[AuthContext] Identifier "${identifier}" is not an email. Searching for username in 'users' collection.`);
         const usersRef = collection(db, 'users');
         const usernameQuery = query(usersRef, where('username', '==', identifier.trim()), limit(1));
@@ -119,7 +115,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             throw new Error('El usuario no tiene un correo electrónico asociado. Contacta al administrador.');
           }
         } else {
-          // No need to check 'students' collection anymore if all login-able students are in 'users'.
           console.error(`[AuthContext] Username "${identifier.trim()}" not found in 'users' collection.`);
           throw new Error('Nombre de usuario no encontrado.');
         }
@@ -141,25 +136,22 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     email: string, 
     initialPasswordAsUsername: string, 
     role: FirestoreUserType['role'],
-    studentDetails?: { level: FirestoreUserType['level'] }
+    studentDetails?: { level: FirestoreUserType['level'] },
+    staffDetails?: Partial<Pick<FirestoreUserType, 'sedeId' | 'attendanceCode'>>
   ) => {
     setLoading(true);
     try {
-      // Check if username already exists in 'users' collection
       const usernameQueryUsers = query(collection(db, 'users'), where('username', '==', username.trim()), limit(1));
       const usernameSnapshotUsers = await getDocs(usernameQueryUsers);
       if (!usernameSnapshotUsers.empty) {
         const error = new Error("Username already exists. Please choose a different one.");
-        (error as any).code = "auth/username-already-exists"; // Custom code for UI handling
+        (error as any).code = "auth/username-already-exists"; 
         throw error;
       }
       
-      // Check if email already exists in 'users' collection (for Auth check, Firebase handles actual Auth uniqueness)
       const emailQueryUsers = query(collection(db, 'users'), where('email', '==', email.trim()), limit(1));
       const emailSnapshotUsers = await getDocs(emailQueryUsers);
       if (!emailSnapshotUsers.empty) {
-         // Firebase Auth will throw 'auth/email-already-in-use' if it truly exists in Auth.
-         // This pre-check is for Firestore data consistency, but Auth is the source of truth for email uniqueness.
          console.warn(`[AuthContext] Email pre-check found '${email}' in Firestore 'users' collection. Firebase Auth will make final determination.`);
       }
 
@@ -170,32 +162,23 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         uid: firebaseUser.uid,
         name: name,
         username: username.trim(),
-        email: firebaseUser.email || email.trim(), // Use email from Auth if available
+        email: firebaseUser.email || email.trim(), 
         role: role,
         requiresPasswordChange: true,
-        // Initialize student-specific fields if role is student
         ...(role === 'student' && studentDetails?.level && {
           level: studentDetails.level,
           gradesByLevel: {
             [studentDetails.level]: getDefaultStudentGradeStructure(gradingConfig)
           },
-          // Initialize other student fields to null/undefined or defaults
-          phoneNumber: null,
-          photoUrl: null,
-          notes: null,
-          age: undefined,
-          gender: undefined,
-          preferredShift: undefined,
+          phoneNumber: null, photoUrl: null, notes: null, age: undefined, gender: undefined, preferredShift: undefined,
         }),
-        // Initialize staff-specific fields to null/undefined or defaults if not student
-        ...(role !== 'student' && {
-            attendanceCode: null, // Staff might have this, students don't
+        ...( (role === 'teacher' || role === 'supervisor' || role === 'admin') && staffDetails && {
+            sedeId: staffDetails.sedeId || null,
+            attendanceCode: staffDetails.attendanceCode || null,
         })
       };
-      // All users (staff and students) go into the 'users' collection, document ID is their UID.
       await setDoc(doc(db, 'users', firebaseUser.uid), newUserDocData);
       
-      // Update local state immediately for a smoother UX, onAuthStateChanged will also fire.
       setAuthUser(firebaseUser);
       setFirestoreUser({ id: firebaseUser.uid, ...newUserDocData } as FirestoreUserType);
 
@@ -235,7 +218,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const clearRequiresPasswordChangeFlag = async () => {
     if (!authUser || !firestoreUser) throw new Error("No user or Firestore user data available.");
     try {
-      // All login-able users are in 'users' collection
       const userDocRef = doc(db, 'users', authUser.uid);
       await updateDoc(userDocRef, {
         requiresPasswordChange: false,

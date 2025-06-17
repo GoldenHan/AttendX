@@ -31,17 +31,24 @@ export interface StudentGradeStructure {
   certificateCode?: string; // For physical certificate codes per level
 }
 
+export interface Sede {
+  id: string;
+  name: string;
+  supervisorId?: string | null; // UID of the user with role 'supervisor' assigned to this Sede
+}
+
 export interface User {
   id: string; // Firestore document ID (for users collection, this will be the Firebase Auth UID)
   uid?: string; // Firebase Auth UID (explicitly ensure it's here, often same as id for 'users' collection)
   name: string;
   username?: string | null; 
-  role: 'student' | 'teacher' | 'admin' | 'caja';
+  role: 'student' | 'teacher' | 'admin' | 'caja' | 'supervisor'; // Added 'supervisor' role
   email?: string | null; 
   phoneNumber?: string | null;
   photoUrl?: string | null;
   attendanceCode?: string | null; 
   requiresPasswordChange?: boolean; 
+  sedeId?: string | null; // For teachers and supervisors to link them to a Sede
 
   // Student-specific fields (will be part of the User document if role is 'student')
   level?: 'Beginner' | 'Intermediate' | 'Advanced' | 'Other'; 
@@ -85,6 +92,7 @@ export interface Group {
   endDate?: string | null; 
   studentIds: string[]; // Array of User.id (UIDs from 'users' collection for students)
   teacherId?: string | null; // User.id of the assigned teacher (from 'users' collection)
+  sedeId?: string | null; // ID of the Sede this group belongs to
 }
 
 // Configuration for the grading system
