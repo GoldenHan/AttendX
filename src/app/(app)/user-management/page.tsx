@@ -1,7 +1,7 @@
 
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import {
   Table,
@@ -13,11 +13,11 @@ import {
 } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Loader2, Pencil, Trash2, UserPlus, FolderKanban, Briefcase, KeyRound, MailIcon } from 'lucide-react'; 
+import { Loader2, Pencil, Trash2, UserPlus, FolderKanban, Briefcase, KeyRound, MailIcon, AlertTriangle } from 'lucide-react';
 import type { User, Group } from '@/types';
-import { db, auth } from '@/lib/firebase'; 
-import { collection, getDocs, deleteDoc, doc, addDoc, updateDoc, query, where, writeBatch } from 'firebase/firestore';
-import { sendPasswordResetEmail } from 'firebase/auth'; 
+import { db, auth } from '@/lib/firebase';
+import { collection, getDocs, deleteDoc, doc, addDoc, updateDoc, query, where, writeBatch, limit } from 'firebase/firestore';
+import { sendPasswordResetEmail } from 'firebase/auth';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -25,7 +25,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogDescription,
+  DialogDescription as DialogPrimitiveDescription,
   DialogFooter,
   DialogTrigger,
   DialogClose,
@@ -60,6 +60,18 @@ type StaffFormValues = z.infer<typeof staffFormSchema>;
 
 const UNASSIGN_VALUE_KEY = "##UNASSIGNED##";
 
+// Debounce function
+function debounce<F extends (...args: any[]) => any>(func: F, waitFor: number) {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  return (...args: Parameters<F>): Promise<ReturnType<F>> =>
+    new Promise((resolve) => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+      timeoutId = setTimeout(() => resolve(func(...args)), waitFor);
+    });
+}
+
 export default function StaffManagementPage() {
   const [staffUsers, setStaffUsers] = useState<User[]>([]);
   const [allGroups, setAllGroups] = useState<Group[]>([]);
@@ -67,13 +79,15 @@ export default function StaffManagementPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSendingResetEmail, setIsSendingResetEmail] = useState<string | null>(null);
 
-
   const [isStaffFormDialogOpen, setIsStaffFormDialogOpen] = useState(false);
   const [editingStaff, setEditingStaff] = useState<User | null>(null);
 
   const [isDeleteStaffDialogOpen, setIsDeleteStaffDialogOpen] = useState(false);
   const [staffToDelete, setStaffToDelete] = useState<User | null>(null);
   const [deleteAdminPassword, setDeleteAdminPassword] = useState('');
+
+  const [emailCheckStatus, setEmailCheckStatus] = useState<'idle' | 'checking' | 'exists' | 'not_found' | 'error'>('idle');
+  const [emailCheckMessage, setEmailCheckMessage] = useState<string | null>(null);
 
   const { toast } = useToast();
   const { reauthenticateCurrentUser, authUser } = useAuth();
@@ -115,11 +129,44 @@ export default function StaffManagementPage() {
     fetchData();
   }, []);
 
+  const checkEmailExistence = useCallback(async (email: string) => {
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setEmailCheckStatus('idle');
+      setEmailCheckMessage(null);
+      return;
+    }
+    setEmailCheckStatus('checking');
+    setEmailCheckMessage('Verifying email...');
+    try {
+      const q = query(collection(db, 'users'), where('email', '==', email.trim()), limit(1));
+      const querySnapshot = await getDocs(q);
+      if (!querySnapshot.empty) {
+        setEmailCheckStatus('exists');
+        setEmailCheckMessage('An account with this email already exists in Firestore.');
+      } else {
+        setEmailCheckStatus('not_found');
+        setEmailCheckMessage('No account found with this email in Firestore. User may need to sign up for Firebase Auth access.');
+      }
+    } catch (error) {
+      console.error("Error checking email existence:", error);
+      setEmailCheckStatus('error');
+      setEmailCheckMessage('Error verifying email. Please try again.');
+    }
+  }, []);
+
+  const debouncedCheckEmail = useMemo(() => debounce(checkEmailExistence, 700), [checkEmailExistence]);
+
+  const resetEmailCheck = () => {
+    setEmailCheckStatus('idle');
+    setEmailCheckMessage(null);
+  };
+
   const handleOpenAddDialog = () => {
     setEditingStaff(null);
     form.reset({
       name: '', username: '', email: '', phoneNumber: '', role: 'teacher', photoUrl: '', assignedGroupId: undefined, attendanceCode: '',
     });
+    resetEmailCheck();
     setIsStaffFormDialogOpen(true);
   };
 
@@ -136,6 +183,10 @@ export default function StaffManagementPage() {
       assignedGroupId: currentGroupAssignment ? currentGroupAssignment.id : undefined,
       attendanceCode: staffToEdit.attendanceCode || '',
     });
+    resetEmailCheck(); // Reset on open, or trigger check if email exists
+    if (staffToEdit.email) {
+      checkEmailExistence(staffToEdit.email); // Check existing email on edit
+    }
     setIsStaffFormDialogOpen(true);
   };
 
@@ -168,7 +219,6 @@ export default function StaffManagementPage() {
         });
       }
 
-      // Handle group assignment for teachers or admins acting as teachers
       if ((data.role === 'teacher' || data.role === 'admin') && staffMemberId) {
         const newlySelectedGroupId = data.assignedGroupId === UNASSIGN_VALUE_KEY ? null : data.assignedGroupId || null;
         const previouslyAssignedGroup = allGroups.find(g => g.teacherId === staffMemberId);
@@ -195,8 +245,7 @@ export default function StaffManagementPage() {
           await batch.commit();
           toast({ title: 'Group Assignment Updated', description: `${data.name}'s group assignment has been updated.` });
         }
-      } else if (data.role !== 'teacher' && data.role !== 'admin' && staffMemberId) { 
-        // If role is not teacher or admin, unassign from any group
+      } else if (data.role !== 'teacher' && data.role !== 'admin' && staffMemberId) {
         const previouslyAssignedGroup = allGroups.find(g => g.teacherId === staffMemberId);
         if (previouslyAssignedGroup) {
           const groupRef = doc(db, 'groups', previouslyAssignedGroup.id);
@@ -208,6 +257,7 @@ export default function StaffManagementPage() {
       form.reset({ name: '', username:'', email: '', phoneNumber: '', role: 'teacher', photoUrl: '', assignedGroupId: undefined, attendanceCode: '' });
       setEditingStaff(null);
       setIsStaffFormDialogOpen(false);
+      resetEmailCheck();
       await fetchData();
     } catch (error: any) {
       toast({
@@ -220,7 +270,6 @@ export default function StaffManagementPage() {
       setIsSubmitting(false);
     }
   };
-
 
   const handleOpenDeleteDialog = (staffMember: User) => {
     setStaffToDelete(staffMember);
@@ -242,21 +291,23 @@ export default function StaffManagementPage() {
       await sendPasswordResetEmail(auth, staffEmail);
       toast({
         title: 'Password Reset Email Sent',
-        description: `A password reset email has been sent to ${staffEmail}.`,
+        description: `A password reset email has been sent to ${staffEmail}. Please check spam/junk folders if not received.`,
       });
     } catch (error: any) {
+      console.error("Password reset error:", error);
       let errorMessage = "Failed to send password reset email.";
       if (error.code === 'auth/user-not-found') {
-        errorMessage = `No Firebase Authentication account found for ${staffEmail}. This user might only have a Firestore record.`;
+        errorMessage = `No Firebase Authentication account found for ${staffEmail}. This user might only have a Firestore record or needs to sign up first.`;
       } else if (error.code === 'auth/invalid-email') {
         errorMessage = `The email address ${staffEmail} is not valid.`;
+      } else {
+        errorMessage = `Error: ${error.message} (Code: ${error.code})`;
       }
       toast({
         title: 'Password Reset Failed',
         description: errorMessage,
         variant: 'destructive',
       });
-      console.error("Password reset error:", error);
     } finally {
       setIsSendingResetEmail(null);
     }
@@ -294,7 +345,7 @@ export default function StaffManagementPage() {
           batch.update(groupRef, { teacherId: null });
         }
       }
-      
+
       await batch.commit();
 
       toast({ title: 'Staff User Record Deleted', description: `${staffToDelete.name}'s Firestore record removed and unassigned from groups if applicable. Auth account (if any) not affected.` });
@@ -322,7 +373,7 @@ export default function StaffManagementPage() {
          setIsDeleteStaffDialogOpen(false);
          setDeleteAdminPassword('');
        } else {
-         setIsDeleteStaffDialogOpen(true); 
+         setIsDeleteStaffDialogOpen(true);
        }
     } finally {
       setIsSubmitting(false);
@@ -330,6 +381,17 @@ export default function StaffManagementPage() {
   };
 
   const watchedRole = form.watch('role');
+  const watchedEmail = form.watch('email'); // Watch email for debounced check
+
+  // Effect for debounced email check (only when dialog is open)
+  useEffect(() => {
+    if (isStaffFormDialogOpen && watchedEmail) {
+      debouncedCheckEmail(watchedEmail);
+    } else if (!watchedEmail && isStaffFormDialogOpen) {
+      resetEmailCheck(); // Clear status if email is cleared
+    }
+  }, [watchedEmail, debouncedCheckEmail, isStaffFormDialogOpen]);
+
 
   if (isLoading && staffUsers.length === 0 && allGroups.length === 0) {
     return (
@@ -345,6 +407,16 @@ export default function StaffManagementPage() {
       </Card>
     );
   }
+
+  const getEmailCheckMessageColor = () => {
+    switch (emailCheckStatus) {
+      case 'checking': return 'text-muted-foreground';
+      case 'exists': return 'text-green-600 dark:text-green-400';
+      case 'not_found': return 'text-amber-600 dark:text-amber-400';
+      case 'error': return 'text-destructive';
+      default: return 'text-muted-foreground';
+    }
+  };
 
   return (
     <>
@@ -368,6 +440,7 @@ export default function StaffManagementPage() {
               form.reset({
                   name: '', username: '', email: '', phoneNumber: '', role: 'teacher', photoUrl: '', assignedGroupId: undefined, attendanceCode: '',
               });
+              resetEmailCheck();
             }
           }}>
             <DialogTrigger asChild>
@@ -379,10 +452,10 @@ export default function StaffManagementPage() {
             <DialogContent className="sm:max-w-md">
               <DialogHeader>
                 <DialogTitle>{editingStaff ? 'Edit Staff Record' : 'Add New Staff Record'}</DialogTitle>
-                <DialogDescription>
+                <DialogPrimitiveDescription>
                   {editingStaff ? 'Update staff details in Firestore.' : 'Fill in staff details to add to Firestore.'}
                   {' '}Usernames are for login. Passwords are managed by users via Firebase Auth (admin can send reset email).
-                </DialogDescription>
+                </DialogPrimitiveDescription>
               </DialogHeader>
               <Form {...form}>
                 <form onSubmit={form.handleSubmit(handleStaffFormSubmit)} className="space-y-4 py-4 max-h-[70vh] overflow-y-auto pr-2">
@@ -414,7 +487,23 @@ export default function StaffManagementPage() {
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Email (for Firebase Auth & Password Resets)</FormLabel>
-                        <FormControl><Input type="email" placeholder="jane.doe@example.com" {...field} /></FormControl>
+                        <FormControl>
+                          <Input
+                            type="email"
+                            placeholder="jane.doe@example.com"
+                            {...field}
+                            onBlur={(e) => {
+                              field.onBlur(); // Keep RHF's onBlur
+                              debouncedCheckEmail(e.target.value);
+                            }}
+                          />
+                        </FormControl>
+                        {emailCheckMessage && (
+                          <p className={`text-xs mt-1 ${getEmailCheckMessageColor()}`}>
+                            {emailCheckStatus === 'checking' && <Loader2 className="inline h-3 w-3 mr-1 animate-spin" />}
+                            {emailCheckMessage}
+                          </p>
+                        )}
                         <FormMessage />
                       </FormItem>
                     )}
@@ -471,7 +560,9 @@ export default function StaffManagementPage() {
                                 <SelectItem value={UNASSIGN_VALUE_KEY}>Unassigned</SelectItem>
                                 {allGroups.map((group) => (
                                   <SelectItem key={group.id} value={group.id}>
-                                    {group.name} ({group.studentIds?.length || 0} students, Teacher: {group.teacherId ? allGroups.find(g=>g.id === group.id)?.name || 'Assigned' : 'None'})
+                                    {group.name} ({group.studentIds?.length || 0} students, Teacher: {
+                                      allGroups.find(g=>g.id === group.id)?.teacherId ? (staffUsers.find(su => su.id === allGroups.find(g=>g.id === group.id)?.teacherId)?.name || 'Assigned') : 'None'
+                                    })
                                   </SelectItem>
                                 ))}
                               </SelectContent>
@@ -485,8 +576,14 @@ export default function StaffManagementPage() {
                         name="attendanceCode"
                         render={({ field }) => (
                           <FormItem>
-                            <FormLabel>Attendance Code (for Teacher/Admin acting as Teacher)</FormLabel>
+                            <FormLabel>Attendance Code (for Teacher/Admin)</FormLabel>
                             <FormControl><Input placeholder="e.g., TCH001" {...field} /></FormControl>
+                             {field.value && field.value.includes(' ') && (
+                                <p className="text-xs text-destructive mt-1">
+                                    <AlertTriangle className="inline h-3 w-3 mr-1" />
+                                    Attendance code should not contain spaces.
+                                </p>
+                            )}
                             <FormMessage />
                           </FormItem>
                         )}
@@ -505,7 +602,7 @@ export default function StaffManagementPage() {
                     )}
                   />
                   <DialogFooter className="pt-4">
-                    <DialogClose asChild><Button type="button" variant="outline">Cancel</Button></DialogClose>
+                    <DialogClose asChild><Button type="button" variant="outline" onClick={resetEmailCheck}>Cancel</Button></DialogClose>
                     <Button type="submit" disabled={isSubmitting}>
                       {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                       {editingStaff ? 'Save Changes' : 'Add Staff Record'}
@@ -561,11 +658,11 @@ export default function StaffManagementPage() {
                     <Pencil className="h-4 w-4" />
                     <span className="sr-only">Edit</span>
                   </Button>
-                  <Button 
-                    variant="ghost" 
-                    size="icon" 
-                    className="mr-1" 
-                    onClick={() => handleSendPasswordReset(staff.email, staff.name)} 
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="mr-1"
+                    onClick={() => handleSendPasswordReset(staff.email, staff.name)}
                     disabled={!staff.email || isSendingResetEmail === staff.email}
                     title={staff.email ? "Send Password Reset Email" : "Cannot reset password without an email"}
                   >
@@ -605,11 +702,11 @@ export default function StaffManagementPage() {
         <DialogContent className="sm:max-w-md">
             <DialogHeader>
                 <DialogTitle>Delete Staff User Record</DialogTitle>
-                <DialogDescription>
+                <DialogPrimitiveDescription>
                     Are you sure you want to delete the Firestore record for {staffToDelete?.name}?
                     This action cannot be undone. Enter your admin password to confirm.
                     Auth account (if any) will NOT be deleted. The user will also be unassigned from any group.
-                </DialogDescription>
+                </DialogPrimitiveDescription>
             </DialogHeader>
             <div className="space-y-4 py-4">
                  <div className="space-y-1.5">
@@ -642,4 +739,3 @@ export default function StaffManagementPage() {
     </>
   );
 }
-
