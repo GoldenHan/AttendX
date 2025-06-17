@@ -13,10 +13,11 @@ import {
 } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Loader2, Pencil, Trash2, UserPlus, FolderKanban, Briefcase, KeyRound } from 'lucide-react'; // Added KeyRound
+import { Loader2, Pencil, Trash2, UserPlus, FolderKanban, Briefcase, KeyRound, MailIcon } from 'lucide-react'; // Added KeyRound, MailIcon
 import type { User, Group } from '@/types';
-import { db } from '@/lib/firebase';
+import { db, auth } from '@/lib/firebase'; // Import auth
 import { collection, getDocs, deleteDoc, doc, addDoc, updateDoc, query, where, writeBatch } from 'firebase/firestore';
+import { sendPasswordResetEmail } from 'firebase/auth'; // Import sendPasswordResetEmail
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -46,6 +47,7 @@ import { Label } from "@/components/ui/label";
 
 const staffFormSchema = z.object({
   name: z.string().min(2, { message: "Name must be at least 2 characters." }),
+  username: z.string().min(3, "Username must be at least 3 characters.").regex(/^[a-zA-Z0-9_.-]+$/, "Username can only contain letters, numbers, dots, underscores, or hyphens.").optional().or(z.literal('')),
   email: z.string().email({ message: "Invalid email address." }).optional().or(z.literal('')),
   phoneNumber: z.string().optional().or(z.literal('')),
   role: z.enum(['teacher', 'admin', 'caja'], { required_error: "Role is required." }),
@@ -63,6 +65,8 @@ export default function StaffManagementPage() {
   const [allGroups, setAllGroups] = useState<Group[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSendingResetEmail, setIsSendingResetEmail] = useState<string | null>(null);
+
 
   const [isStaffFormDialogOpen, setIsStaffFormDialogOpen] = useState(false);
   const [editingStaff, setEditingStaff] = useState<User | null>(null);
@@ -78,6 +82,7 @@ export default function StaffManagementPage() {
     resolver: zodResolver(staffFormSchema),
     defaultValues: {
       name: '',
+      username: '',
       email: '',
       phoneNumber: '',
       role: 'teacher',
@@ -113,7 +118,7 @@ export default function StaffManagementPage() {
   const handleOpenAddDialog = () => {
     setEditingStaff(null);
     form.reset({
-      name: '', email: '', phoneNumber: '', role: 'teacher', photoUrl: '', assignedGroupId: undefined, attendanceCode: '',
+      name: '', username: '', email: '', phoneNumber: '', role: 'teacher', photoUrl: '', assignedGroupId: undefined, attendanceCode: '',
     });
     setIsStaffFormDialogOpen(true);
   };
@@ -123,6 +128,7 @@ export default function StaffManagementPage() {
     const currentGroupAssignment = allGroups.find(g => g.teacherId === staffToEdit.id);
     form.reset({
       name: staffToEdit.name,
+      username: staffToEdit.username || '',
       email: staffToEdit.email || '',
       phoneNumber: staffToEdit.phoneNumber || '',
       role: staffToEdit.role as 'teacher' | 'admin' | 'caja',
@@ -138,6 +144,7 @@ export default function StaffManagementPage() {
 
     const firestoreUserData: Partial<User> = {
       name: data.name,
+      username: data.username || null,
       email: data.email || null,
       phoneNumber: data.phoneNumber || null,
       role: data.role,
@@ -153,11 +160,15 @@ export default function StaffManagementPage() {
         await updateDoc(staffRef, firestoreUserData);
         toast({ title: 'Staff User Updated', description: `${data.name}'s record updated successfully.` });
       } else {
+        // Note: Creating a Firebase Auth user is separate. This only creates the Firestore record.
+        // For users to log in, they need an Auth account, usually created via the /login page's signup.
+        // If an admin creates a user here, they would need to tell the user to sign up with the SAME email
+        // or the admin would need a more advanced tool to create Firebase Auth users (e.g., via Admin SDK).
         const docRef = await addDoc(collection(db, 'users'), firestoreUserData);
         staffMemberId = docRef.id;
         toast({
           title: 'Staff User Record Added',
-          description: `${data.name} added to Firestore. No Auth account created by default.`
+          description: `${data.name} added to Firestore. If this user needs to log in, ensure they have a Firebase Authentication account (usually created via sign-up on the login page with the same email).`
         });
       }
 
@@ -188,7 +199,6 @@ export default function StaffManagementPage() {
           toast({ title: 'Group Assignment Updated', description: `Teacher ${data.name}'s group assignment has been updated.` });
         }
       } else if (data.role !== 'teacher' && staffMemberId) {
-        // If role changed from teacher to non-teacher, unassign from any group
         const previouslyAssignedGroup = allGroups.find(g => g.teacherId === staffMemberId);
         if (previouslyAssignedGroup) {
           const groupRef = doc(db, 'groups', previouslyAssignedGroup.id);
@@ -197,7 +207,7 @@ export default function StaffManagementPage() {
         }
       }
 
-      form.reset({ name: '', email: '', phoneNumber: '', role: 'teacher', photoUrl: '', assignedGroupId: undefined, attendanceCode: '' });
+      form.reset({ name: '', username:'', email: '', phoneNumber: '', role: 'teacher', photoUrl: '', assignedGroupId: undefined, attendanceCode: '' });
       setEditingStaff(null);
       setIsStaffFormDialogOpen(false);
       await fetchData();
@@ -218,6 +228,40 @@ export default function StaffManagementPage() {
     setStaffToDelete(staffMember);
     setDeleteAdminPassword('');
     setIsDeleteStaffDialogOpen(true);
+  };
+
+  const handleSendPasswordReset = async (staffEmail: string | null | undefined, staffName: string) => {
+    if (!staffEmail) {
+      toast({
+        title: 'Cannot Reset Password',
+        description: `User ${staffName} does not have an email address registered. Password reset email cannot be sent.`,
+        variant: 'destructive',
+      });
+      return;
+    }
+    setIsSendingResetEmail(staffEmail);
+    try {
+      await sendPasswordResetEmail(auth, staffEmail);
+      toast({
+        title: 'Password Reset Email Sent',
+        description: `A password reset email has been sent to ${staffEmail}.`,
+      });
+    } catch (error: any) {
+      let errorMessage = "Failed to send password reset email.";
+      if (error.code === 'auth/user-not-found') {
+        errorMessage = `No Firebase Authentication account found for ${staffEmail}. This user might only have a Firestore record.`;
+      } else if (error.code === 'auth/invalid-email') {
+        errorMessage = `The email address ${staffEmail} is not valid.`;
+      }
+      toast({
+        title: 'Password Reset Failed',
+        description: errorMessage,
+        variant: 'destructive',
+      });
+      console.error("Password reset error:", error);
+    } finally {
+      setIsSendingResetEmail(null);
+    }
   };
 
   const confirmDeleteStaffUser = async () => {
@@ -252,6 +296,12 @@ export default function StaffManagementPage() {
           batch.update(groupRef, { teacherId: null });
         }
       }
+      // IMPORTANT: Deleting Firebase Auth user is a separate, more sensitive operation.
+      // This only deletes the Firestore record.
+      // To delete the Auth user, you'd typically use Firebase Admin SDK on a backend.
+      // Or, if the admin IS the user they want to delete (not typical for staff management),
+      // they could call deleteUser(auth.currentUser).
+      // For now, we only delete the Firestore record.
 
       await batch.commit();
 
@@ -280,7 +330,7 @@ export default function StaffManagementPage() {
          setIsDeleteStaffDialogOpen(false);
          setDeleteAdminPassword('');
        } else {
-         setIsDeleteStaffDialogOpen(true);
+         setIsDeleteStaffDialogOpen(true); // Keep dialog open if re-auth fails to allow retry
        }
     } finally {
       setIsSubmitting(false);
@@ -310,7 +360,7 @@ export default function StaffManagementPage() {
       <CardHeader className="flex flex-row items-center justify-between">
         <div>
           <CardTitle className="flex items-center gap-2"><Briefcase className="h-6 w-6 text-primary" /> Staff Management</CardTitle>
-          <CardDescription>Manage teacher, admin, and cashier accounts. Assign teachers to groups and set attendance codes.</CardDescription>
+          <CardDescription>Manage teacher, admin, and cashier accounts. Assign teachers to groups, set attendance codes, and manage usernames.</CardDescription>
         </div>
         <div className="flex gap-2">
           <Button asChild size="sm" variant="outline" className="gap-1.5 text-sm">
@@ -324,7 +374,7 @@ export default function StaffManagementPage() {
             if (!isOpen) {
               setEditingStaff(null);
               form.reset({
-                  name: '', email: '', phoneNumber: '', role: 'teacher', photoUrl: '', assignedGroupId: undefined, attendanceCode: '',
+                  name: '', username: '', email: '', phoneNumber: '', role: 'teacher', photoUrl: '', assignedGroupId: undefined, attendanceCode: '',
               });
             }
           }}>
@@ -339,6 +389,7 @@ export default function StaffManagementPage() {
                 <DialogTitle>{editingStaff ? 'Edit Staff Record' : 'Add New Staff Record'}</DialogTitle>
                 <DialogDescription>
                   {editingStaff ? 'Update staff details in Firestore.' : 'Fill in staff details to add to Firestore.'}
+                  {' '}Usernames are for login. Passwords are managed by users via Firebase Auth (admin can send reset email).
                 </DialogDescription>
               </DialogHeader>
               <Form {...form}>
@@ -356,10 +407,21 @@ export default function StaffManagementPage() {
                   />
                   <FormField
                     control={form.control}
+                    name="username"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Username (for login)</FormLabel>
+                        <FormControl><Input placeholder="janedoe_teacher" {...field} /></FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
                     name="email"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Email (Optional)</FormLabel>
+                        <FormLabel>Email (for Firebase Auth & Password Resets)</FormLabel>
                         <FormControl><Input type="email" placeholder="jane.doe@example.com" {...field} /></FormControl>
                         <FormMessage />
                       </FormItem>
@@ -474,6 +536,7 @@ export default function StaffManagementPage() {
           <TableHeader>
             <TableRow>
               <TableHead>Name</TableHead>
+              <TableHead>Username</TableHead>
               <TableHead>Email</TableHead>
               <TableHead>Role</TableHead>
               <TableHead>Assigned Group</TableHead>
@@ -487,6 +550,7 @@ export default function StaffManagementPage() {
               return (
               <TableRow key={staff.id}>
                 <TableCell>{staff.name}</TableCell>
+                <TableCell>{staff.username || 'N/A'}</TableCell>
                 <TableCell>{staff.email || 'N/A'}</TableCell>
                 <TableCell>
                   <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
@@ -500,12 +564,23 @@ export default function StaffManagementPage() {
                 </TableCell>
                 <TableCell>{assignedGroup ? assignedGroup.name : (staff.role === 'teacher' ? 'Unassigned' : 'N/A')}</TableCell>
                 <TableCell>{staff.role === 'teacher' ? (staff.attendanceCode || <span className="text-muted-foreground text-xs">Not set</span>) : 'N/A'}</TableCell>
-                <TableCell>
-                  <Button variant="ghost" size="icon" className="mr-2" onClick={() => handleOpenEditDialog(staff)}>
+                <TableCell className="space-x-0.5">
+                  <Button variant="ghost" size="icon" className="mr-1" onClick={() => handleOpenEditDialog(staff)} title="Edit User">
                     <Pencil className="h-4 w-4" />
                     <span className="sr-only">Edit</span>
                   </Button>
-                  <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => handleOpenDeleteDialog(staff)}>
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    className="mr-1" 
+                    onClick={() => handleSendPasswordReset(staff.email, staff.name)} 
+                    disabled={!staff.email || isSendingResetEmail === staff.email}
+                    title={staff.email ? "Send Password Reset Email" : "Cannot reset password without an email"}
+                  >
+                    {isSendingResetEmail === staff.email ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
+                    <span className="sr-only">Send Password Reset</span>
+                  </Button>
+                  <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => handleOpenDeleteDialog(staff)} title="Delete User">
                     <Trash2 className="h-4 w-4" />
                     <span className="sr-only">Delete</span>
                   </Button>
@@ -514,7 +589,7 @@ export default function StaffManagementPage() {
             )}) : (
               !isLoading && (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center">No staff users found.</TableCell>
+                  <TableCell colSpan={7} className="text-center">No staff users found.</TableCell>
                 </TableRow>
               )
             )}
@@ -575,3 +650,4 @@ export default function StaffManagementPage() {
     </>
   );
 }
+
