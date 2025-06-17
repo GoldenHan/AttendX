@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/tooltip";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
+import { useAuth } from '@/contexts/AuthContext'; // Import useAuth
 
 const MAX_ACCUMULATED_ACTIVITIES_DISPLAY = 5;
 
@@ -71,8 +72,9 @@ export default function PartialGradesReportPage() {
 
   const { toast } = useToast();
   const router = useRouter();
+  const { firestoreUser } = useAuth(); // Get current user
 
-  const isLoading = isLoadingStudents || isLoadingGroups || isLoadingGradingConfig;
+  const isLoading = isLoadingStudents || isLoadingGroups || isLoadingGradingConfig || !firestoreUser;
 
   useEffect(() => {
     const fetchGradingConfig = async () => {
@@ -106,7 +108,7 @@ export default function PartialGradesReportPage() {
   }, [toast]);
 
   const fetchStudentAndGroupData = useCallback(async () => {
-    if (isLoadingGradingConfig) {
+    if (isLoadingGradingConfig || !firestoreUser) {
         return;
     }
 
@@ -147,7 +149,17 @@ export default function PartialGradesReportPage() {
       setIsLoadingStudents(false);
 
       const groupsSnapshot = await getDocs(collection(db, 'groups'));
-      setAllGroupsData(groupsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as Group)));
+      const fetchedGroups = groupsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as Group));
+      setAllGroupsData(fetchedGroups);
+      
+      if (firestoreUser.role === 'teacher') {
+        const teacherGroups = fetchedGroups.filter(g => g.teacherId === firestoreUser.id);
+        if (teacherGroups.length > 0) {
+          setSelectedGroupId(teacherGroups[0].id); // Pre-select first assigned group
+        } else {
+          setSelectedGroupId('none'); // Special value if teacher has no groups
+        }
+      }
       setIsLoadingGroups(false);
 
     } catch (error) {
@@ -156,34 +168,70 @@ export default function PartialGradesReportPage() {
       setIsLoadingStudents(false);
       setIsLoadingGroups(false);
     }
-  }, [toast, gradingConfig, isLoadingGradingConfig]);
+  }, [toast, gradingConfig, isLoadingGradingConfig, firestoreUser]);
 
   useEffect(() => {
-    if (!isLoadingGradingConfig) {
+    if (!isLoadingGradingConfig && firestoreUser) {
         fetchStudentAndGroupData();
     }
-  }, [fetchStudentAndGroupData, isLoadingGradingConfig]);
+  }, [fetchStudentAndGroupData, isLoadingGradingConfig, firestoreUser]);
 
-  const studentsForFilterDropdown = useMemo(() => {
-    if (selectedGroupId === 'all') {
-      return allStudentsData;
+  const availableGroupsForFilter = useMemo(() => {
+    if (!firestoreUser) return [];
+    if (firestoreUser.role === 'teacher') {
+      return allGroupsData.filter(g => g.teacherId === firestoreUser.id);
     }
+    return allGroupsData; // Admins/Caja see all
+  }, [allGroupsData, firestoreUser]);
+
+  const studentsForStudentFilterDropdown = useMemo(() => {
+    if (!firestoreUser) return [];
+    
+    // If "All Groups" is selected by an admin/caja OR if a teacher selected "All My Groups" (which is value 'all')
+    if (selectedGroupId === 'all') {
+        if (firestoreUser.role === 'teacher') {
+            // Collect all students from all groups taught by this teacher
+            const studentIdsInTeacherGroups = availableGroupsForFilter.reduce((acc, group) => {
+                if (Array.isArray(group.studentIds)) {
+                    group.studentIds.forEach(id => acc.add(id));
+                }
+                return acc;
+            }, new Set<string>());
+            return allStudentsData.filter(s => studentIdsInTeacherGroups.has(s.id));
+        }
+        return allStudentsData; // Admin/Caja sees all students if "All Groups"
+    }
+
+    // If a specific group is selected (or teacher has no groups and 'none' is selected)
+    if (selectedGroupId === 'none' && firestoreUser.role === 'teacher') return [];
+    
     const group = allGroupsData.find(g => g.id === selectedGroupId);
     if (group?.studentIds) {
+      // Ensure teacher can only see students from their own selected group
+      if (firestoreUser.role === 'teacher' && group.teacherId !== firestoreUser.id) {
+        return [];
+      }
       return allStudentsData.filter(s => group.studentIds.includes(s.id));
     }
     return [];
-  }, [allStudentsData, allGroupsData, selectedGroupId]);
+  }, [allStudentsData, allGroupsData, selectedGroupId, firestoreUser, availableGroupsForFilter]);
 
   const studentsToDisplayInTable = useMemo(() => {
     if (selectedStudentId !== 'all') {
-      const student = allStudentsData.find(s => s.id === selectedStudentId);
+      const student = studentsForStudentFilterDropdown.find(s => s.id === selectedStudentId);
       return student ? [student] : [];
     }
-    return studentsForFilterDropdown;
-  }, [allStudentsData, selectedStudentId, studentsForFilterDropdown]);
+    return studentsForStudentFilterDropdown; // Show all students from the (potentially filtered) dropdown
+  }, [selectedStudentId, studentsForStudentFilterDropdown]);
 
   const handleOpenEditGrades = (studentId: string) => {
+     if (firestoreUser?.role === 'teacher') {
+        const isStudentInTheirGroup = studentsToDisplayInTable.some(s => s.id === studentId);
+        if (!isStudentInTheirGroup) {
+            toast({ title: 'Access Denied', description: 'You can only manage grades for students in your assigned groups.', variant: 'destructive'});
+            return;
+        }
+    }
     router.push(`/grades-management?studentId=${studentId}`);
   };
 
@@ -246,15 +294,15 @@ export default function PartialGradesReportPage() {
   };
 
   const getScoreCellStyle = (scoreValue?: number | null, isTotal: boolean = false, isFinalGrade: boolean = false) => {
-    let style = 'text-align: center; padding: 4px; border: 1px solid #e2e8f0;'; // 기본 스타일 (tailwind border-gray-300)
+    let style = 'text-align: center; padding: 4px; border: 1px solid #e2e8f0;'; 
     if (typeof scoreValue !== 'number') {
-      style += 'background-color: #f3f4f6; color: #6b7280;'; // gray-100 text-gray-500
+      style += 'background-color: #f3f4f6; color: #6b7280;'; 
     } else if (isTotal || isFinalGrade) {
       style += scoreValue >= gradingConfig.passingGrade
-        ? 'background-color: #d1fae5; color: #065f46;' // green-100 text-green-700
-        : 'background-color: #fee2e2; color: #991b1b;'; // red-100 text-red-700
+        ? 'background-color: #d1fae5; color: #065f46;' 
+        : 'background-color: #fee2e2; color: #991b1b;'; 
     } else {
-      style += 'background-color: #dbeafe; color: #1d4ed8;'; // blue-100 text-blue-700
+      style += 'background-color: #dbeafe; color: #1d4ed8;'; 
     }
     return style;
   };
@@ -279,16 +327,15 @@ export default function PartialGradesReportPage() {
           table { border-collapse: collapse; width: 100%; font-size: 0.875rem; box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06); background-color: white; }
           th, td { border: 1px solid #e5e7eb; padding: 8px 10px; text-align: left; }
           th { background-color: #f3f4f6; font-weight: 600; }
-          .header-partial-1 { background-color: #fef9c3; color: #713f12; } /* yellow-100 text-yellow-800 */
-          .header-partial-2 { background-color: #dcfce7; color: #14532d; } /* green-100 text-green-800 */
-          .header-partial-3 { background-color: #ffedd5; color: #7c2d12; } /* orange-100 text-orange-800 */
-          .header-partial-4 { background-color: #ede9fe; color: #5b21b6; } /* purple-100 text-purple-800 */
-          .header-final-grade { background-color: #dbeafe; color: #1e3a8a; } /* blue-100 text-blue-800 */
+          .header-partial-1 { background-color: #fef9c3; color: #713f12; } 
+          .header-partial-2 { background-color: #dcfce7; color: #14532d; } 
+          .header-partial-3 { background-color: #ffedd5; color: #7c2d12; } 
+          .header-partial-4 { background-color: #ede9fe; color: #5b21b6; } 
+          .header-final-grade { background-color: #dbeafe; color: #1e3a8a; } 
           .text-center { text-align: center; }
           .font-bold { font-weight: bold; }
           .whitespace-nowrap { white-space: nowrap; }
           .sticky-col { position: sticky; left: 0; background-color: white; z-index: 10; }
-          .sticky-col-action { position: sticky; left: 150px; background-color: white; z-index: 10; } /* Estimate for name column width */
         </style>
       </head>
       <body>
@@ -301,7 +348,7 @@ export default function PartialGradesReportPage() {
     `;
 
     for (let i = 1; i <= numPartials; i++) {
-      const partialHeaderClass = `header-partial-${i > 4 ? 4 : i}`; // Cycle colors if more than 4
+      const partialHeaderClass = `header-partial-${i > 4 ? 4 : i}`; 
       htmlString += `<th colspan="${MAX_ACCUMULATED_ACTIVITIES_DISPLAY + 2}" class="text-center ${partialHeaderClass}">${i}${i === 1 ? 'er' : i === 2 ? 'do' : i === 3 ? 'er' : 'to'} Parcial</th>`;
     }
     htmlString += `<th rowspan="2" class="text-center header-final-grade">Nota Final</th></tr><tr>`;
@@ -416,7 +463,7 @@ export default function PartialGradesReportPage() {
         }`}>Total Parcial</TableHead>
     );
   }
-  const totalColumns = 1 + (currentNumberOfPartials * (MAX_ACCUMULATED_ACTIVITIES_DISPLAY + 2)) + 1; // Changed 2 to 1 for student name (no phone here)
+  const totalColumns = 1 + (currentNumberOfPartials * (MAX_ACCUMULATED_ACTIVITIES_DISPLAY + 2)) + 1; 
 
   return (
     <TooltipProvider>
@@ -426,7 +473,9 @@ export default function PartialGradesReportPage() {
             <div>
               <CardTitle className="flex items-center gap-2"><ClipboardList className="h-6 w-6 text-primary" /> Partial Grades Report</CardTitle>
               <CardDescription>
-                View partial grades for students. Filter by group and/or individual student.
+                View partial grades for students.
+                {firestoreUser?.role === 'teacher' ? " Showing students from your assigned groups." : " Filter by group and/or individual student."}
+                <br/>
                 Configuration: {currentNumberOfPartials} partials, passing with {gradingConfig.passingGrade}pts.
               </CardDescription>
             </div>
@@ -456,14 +505,16 @@ export default function PartialGradesReportPage() {
                   setSelectedGroupId(value);
                   setSelectedStudentId('all'); 
                 }}
-                disabled={isLoadingGroups}
+                disabled={isLoadingGroups || (firestoreUser?.role === 'teacher' && availableGroupsForFilter.length === 0)}
               >
                 <SelectTrigger id="group-filter-report">
                   <SelectValue placeholder="Select a group" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All Groups</SelectItem>
-                  {allGroupsData.map((group) => (
+                  {firestoreUser?.role !== 'teacher' && <SelectItem value="all">All Groups</SelectItem>}
+                  {firestoreUser?.role === 'teacher' && availableGroupsForFilter.length === 0 && <SelectItem value="none" disabled>No tienes grupos asignados</SelectItem>}
+                  {firestoreUser?.role === 'teacher' && availableGroupsForFilter.length > 1 && <SelectItem value="all">All My Groups</SelectItem>}
+                  {availableGroupsForFilter.map((group) => (
                     <SelectItem key={group.id} value={group.id}>
                       {group.name}
                     </SelectItem>
@@ -476,16 +527,19 @@ export default function PartialGradesReportPage() {
               <Select
                 value={selectedStudentId}
                 onValueChange={setSelectedStudentId}
-                disabled={isLoadingStudents || studentsForFilterDropdown.length === 0}
+                disabled={isLoadingStudents || studentsForStudentFilterDropdown.length === 0}
               >
                 <SelectTrigger id="student-filter-report">
                   <SelectValue placeholder="Select a student" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">
-                    {selectedGroupId === 'all' ? 'All Students (Global)' : 'All Students in Selected Group'}
+                    {selectedGroupId === 'all' && firestoreUser?.role !== 'teacher' ? 'All Students (Global)' : 
+                     selectedGroupId === 'all' && firestoreUser?.role === 'teacher' ? 'All Students in My Groups' :
+                     selectedGroupId === 'none' && firestoreUser?.role === 'teacher' ? 'No Students (No Group)' :
+                     'All Students in Selected Group'}
                   </SelectItem>
-                  {studentsForFilterDropdown.map((student) => (
+                  {studentsForStudentFilterDropdown.map((student) => (
                     <SelectItem key={student.id} value={student.id}>
                       {student.name}
                     </SelectItem>
@@ -500,7 +554,6 @@ export default function PartialGradesReportPage() {
             <TableHeader className="sticky top-0 bg-card z-20">
               <TableRow>
                 <TableHead rowSpan={2} className="align-bottom min-w-[150px] sticky left-0 bg-card z-30">Student Name</TableHead>
-                {/* Action column removed from this view, only student name is sticky */}
                 {partialHeaders}
                 <TableHead rowSpan={2} className={`text-center align-bottom min-w-[100px] bg-blue-100 dark:bg-blue-800/50 text-blue-800 dark:text-blue-200 sticky top-0 z-20`}>Final Grade</TableHead>
               </TableRow>
@@ -553,7 +606,10 @@ export default function PartialGradesReportPage() {
               )) : (
                  <TableRow>
                     <TableCell colSpan={totalColumns} className="text-center h-24">
-                      No students found matching your criteria, or no grades recorded for them.
+                       {firestoreUser?.role === 'teacher' && availableGroupsForFilter.length === 0 
+                        ? "No estás asignado a ningún grupo para ver reportes."
+                        : "No hay estudiantes que coincidan con tus criterios o no tienen calificaciones registradas."
+                      }
                     </TableCell>
                 </TableRow>
               )}
@@ -564,4 +620,7 @@ export default function PartialGradesReportPage() {
     </TooltipProvider>
   );
 }
+    
+
+
     

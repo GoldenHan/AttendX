@@ -29,6 +29,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { useAuth } from '@/contexts/AuthContext'; // Import useAuth
 
 interface StudentWithDetailedGrades extends User {
   calculatedAccumulatedTotalP1?: number | null;
@@ -85,13 +86,13 @@ export default function StudentGradesPage() {
 
   const { toast } = useToast();
   const router = useRouter();
+  const { firestoreUser } = useAuth(); // Get current user
 
-  const isLoading = isLoadingStudents || isLoadingGroups || isLoadingGradingConfig;
+  const isLoading = isLoadingStudents || isLoadingGroups || isLoadingGradingConfig || !firestoreUser;
 
   useEffect(() => {
     const fetchGradingConfig = async () => {
       setIsLoadingGradingConfig(true);
-      console.log("[StudentGradesPage] Fetching grading config...");
       try {
         const configDocRef = doc(db, 'appConfiguration', 'currentGradingConfig');
         const docSnap = await getDoc(configDocRef);
@@ -106,11 +107,8 @@ export default function StudentGradesPage() {
             maxExamScore: typeof loadedConfig.maxExamScore === 'number' ? loadedConfig.maxExamScore : DEFAULT_GRADING_CONFIG.maxExamScore,
           };
           setGradingConfig(validatedConfig);
-          console.log("[StudentGradesPage] Loaded grading config from Firestore:", loadedConfig);
-          console.log("[StudentGradesPage] Validated and setting gradingConfig:", validatedConfig);
         } else {
           setGradingConfig(DEFAULT_GRADING_CONFIG);
-          console.log("[StudentGradesPage] No grading config found, using default:", DEFAULT_GRADING_CONFIG);
         }
       } catch (error) {
         console.error("Error fetching grading configuration:", error);
@@ -125,11 +123,9 @@ export default function StudentGradesPage() {
 
 
   const fetchData = useCallback(async () => {
-    if (isLoadingGradingConfig) {
-      console.log("[StudentGradesPage] fetchData skipped, gradingConfig still loading.");
+    if (isLoadingGradingConfig || !firestoreUser) {
       return;
     }
-    console.log("[StudentGradesPage] fetchData executing with gradingConfig:", gradingConfig);
 
     setIsLoadingStudents(true);
     setIsLoadingGroups(true);
@@ -160,7 +156,6 @@ export default function StudentGradesPage() {
           }
         }
         
-        // Calculate final grade only if all *configured* partials have numeric scores
         const relevantPartialTotals = partialTotalsArray.slice(0, gradingConfig.numberOfPartials);
         if (relevantPartialTotals.length === gradingConfig.numberOfPartials && relevantPartialTotals.every(t => typeof t === 'number')) {
             studentCalculatedGrades.calculatedFinalGrade = (relevantPartialTotals.reduce((sum, current) => sum + (current as number), 0) / gradingConfig.numberOfPartials);
@@ -178,7 +173,19 @@ export default function StudentGradesPage() {
       setIsLoadingStudents(false);
 
       const groupsSnapshot = await getDocs(collection(db, 'groups'));
-      setAllGroups(groupsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as Group)));
+      const fetchedGroups = groupsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as Group));
+      setAllGroups(fetchedGroups);
+      
+      // If user is teacher, pre-select their first assigned group if available
+      if (firestoreUser.role === 'teacher') {
+        const teacherGroups = fetchedGroups.filter(g => g.teacherId === firestoreUser.id);
+        if (teacherGroups.length > 0) {
+          setSelectedGroupId(teacherGroups[0].id);
+        } else {
+          setSelectedGroupId('none'); // Special value if teacher has no groups
+        }
+      }
+
       setIsLoadingGroups(false);
 
     } catch (error) {
@@ -187,27 +194,67 @@ export default function StudentGradesPage() {
       setIsLoadingStudents(false);
       setIsLoadingGroups(false);
     }
-  }, [toast, gradingConfig, isLoadingGradingConfig]);
+  }, [toast, gradingConfig, isLoadingGradingConfig, firestoreUser]);
 
   useEffect(() => {
-     console.log("[StudentGradesPage] useEffect for fetchData triggered. isLoadingGradingConfig:", isLoadingGradingConfig, "gradingConfig.numberOfPartials:", gradingConfig?.numberOfPartials);
-    if (!isLoadingGradingConfig) {
+    if (!isLoadingGradingConfig && firestoreUser) {
         fetchData();
     }
-  }, [fetchData, isLoadingGradingConfig, gradingConfig.numberOfPartials]); // Re-fetch if numberOfPartials changes
+  }, [fetchData, isLoadingGradingConfig, firestoreUser, gradingConfig.numberOfPartials]);
+
+  const availableGroupsForFilter = useMemo(() => {
+    if (!firestoreUser) return [];
+    if (firestoreUser.role === 'teacher') {
+      return allGroups.filter(g => g.teacherId === firestoreUser.id);
+    }
+    return allGroups; // Admins/Caja see all groups
+  }, [allGroups, firestoreUser]);
+
 
   const studentsToDisplay = useMemo(() => {
-    if (isLoading) return [];
+    if (isLoading || !firestoreUser) return [];
 
     let filtered = allStudents;
 
-    if (selectedGroupId && selectedGroupId !== 'all') {
-      const group = allGroups.find(g => g.id === selectedGroupId);
-      if (group?.studentIds) {
-        filtered = filtered.filter(s => group.studentIds.includes(s.id));
+    if (firestoreUser.role === 'teacher') {
+      // Teachers always see students from their selected group, or all their students if 'all' of their groups is selected (which is one specific group ID or 'none')
+      if (selectedGroupId === 'none') return []; // Teacher has no groups or selected "none"
+
+      const teacherActualSelectedGroupId = selectedGroupId === 'all' // 'all' for teacher means their specific assigned group if only one, or prompts selection
+        ? (availableGroupsForFilter.length === 1 ? availableGroupsForFilter[0].id : 'requires_selection')
+        : selectedGroupId;
+
+      if (teacherActualSelectedGroupId === 'requires_selection' && availableGroupsForFilter.length > 1){
+         // If teacher has multiple groups and "All Groups" (their all) is selected, show all students from all their groups.
+         const studentIdsInTeacherGroups = availableGroupsForFilter.reduce((acc, group) => {
+            if (Array.isArray(group.studentIds)) {
+                group.studentIds.forEach(id => acc.add(id));
+            }
+            return acc;
+        }, new Set<string>());
+        filtered = filtered.filter(s => studentIdsInTeacherGroups.has(s.id));
+
+      } else if (teacherActualSelectedGroupId !== 'requires_selection') {
+        const group = allGroups.find(g => g.id === teacherActualSelectedGroupId);
+        if (group?.studentIds && group.teacherId === firestoreUser.id) {
+            filtered = filtered.filter(s => group.studentIds.includes(s.id));
+        } else {
+            filtered = []; // Teacher selected a group not theirs or group has no students
+        }
       } else {
-        filtered = [];
+        filtered = []; // Teacher has multiple groups but hasn't selected one.
       }
+
+
+    } else { // Admin or Caja
+        if (selectedGroupId && selectedGroupId !== 'all') {
+            const group = allGroups.find(g => g.id === selectedGroupId);
+            if (group?.studentIds) {
+                filtered = filtered.filter(s => group.studentIds.includes(s.id));
+            } else {
+                filtered = [];
+            }
+        }
     }
     
     if (searchTerm.trim()) {
@@ -216,10 +263,17 @@ export default function StudentGradesPage() {
       );
     }
     return filtered;
-  }, [allStudents, allGroups, selectedGroupId, searchTerm, isLoading]);
+  }, [allStudents, allGroups, selectedGroupId, searchTerm, isLoading, firestoreUser, availableGroupsForFilter]);
 
 
   const handleOpenEditGrades = (studentId: string) => {
+    if (firestoreUser?.role === 'teacher') {
+        const isStudentInTheirGroup = studentsToDisplay.some(s => s.id === studentId);
+        if (!isStudentInTheirGroup) {
+            toast({ title: 'Access Denied', description: 'You can only manage grades for students in your assigned groups.', variant: 'destructive'});
+            return;
+        }
+    }
     router.push(`/grades-management?studentId=${studentId}`);
   };
 
@@ -291,8 +345,7 @@ export default function StudentGradesPage() {
     );
   }
 
-  const currentNumberOfPartials = Math.max(1, gradingConfig.numberOfPartials); // Ensure at least 1 for loop bounds
-  console.log(`[StudentGradesPage] Rendering table with ${currentNumberOfPartials} partials configured.`);
+  const currentNumberOfPartials = Math.max(1, gradingConfig.numberOfPartials);
 
   const partialHeaders = [];
   for (let i = 1; i <= currentNumberOfPartials; i++) {
@@ -367,14 +420,16 @@ export default function StudentGradesPage() {
               <Select
                 value={selectedGroupId}
                 onValueChange={setSelectedGroupId}
-                disabled={isLoadingGroups}
+                disabled={isLoadingGroups || (firestoreUser?.role === 'teacher' && availableGroupsForFilter.length === 0)}
               >
                 <SelectTrigger id="group-filter-grades">
                   <SelectValue placeholder="Select a group or 'All'" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All Groups</SelectItem>
-                  {allGroups.map((group) => (
+                  {firestoreUser?.role !== 'teacher' && <SelectItem value="all">All Groups</SelectItem>}
+                  {firestoreUser?.role === 'teacher' && availableGroupsForFilter.length === 0 && <SelectItem value="none" disabled>No tienes grupos asignados</SelectItem>}
+                  {firestoreUser?.role === 'teacher' && availableGroupsForFilter.length > 1 && <SelectItem value="all">All My Groups</SelectItem>}
+                  {availableGroupsForFilter.map((group) => (
                     <SelectItem key={group.id} value={group.id}>
                       {group.name}
                     </SelectItem>
@@ -425,10 +480,10 @@ export default function StudentGradesPage() {
                   
                   {Array.from({ length: currentNumberOfPartials }).map((_, index) => {
                     const pNum = index + 1;
-                    const partialKeyFirestore = `partial${pNum}` as keyof NonNullable<User['grades']>; // e.g. 'partial1'
+                    const partialKeyFirestore = `partial${pNum}` as keyof NonNullable<User['grades']>; 
                     const partialData = student.grades?.[partialKeyFirestore];
                     
-                    const calculatedPartialTotalKey = `calculatedPartial${pNum}Total` as keyof StudentWithDetailedGrades; // e.g. 'calculatedPartial1Total'
+                    const calculatedPartialTotalKey = `calculatedPartial${pNum}Total` as keyof StudentWithDetailedGrades; 
                     const studentPartialTotal = (student as any)[calculatedPartialTotalKey];
 
                     return (
@@ -451,9 +506,9 @@ export default function StudentGradesPage() {
               )) : (
                  <TableRow>
                     <TableCell colSpan={totalColumns} className="text-center h-24">
-                      {(!selectedGroupId || selectedGroupId === 'all') && !searchTerm.trim()
-                        ? "Select a group or search for a student to view grades."
-                        : "No students found matching your criteria."
+                      {(!selectedGroupId || selectedGroupId === 'all' || (firestoreUser?.role === 'teacher' && availableGroupsForFilter.length > 1 && selectedGroupId === 'all')) && !searchTerm.trim()
+                        ? (firestoreUser?.role === 'teacher' && availableGroupsForFilter.length === 0 ? "No estás asignado a ningún grupo." : "Selecciona un grupo o busca un estudiante para ver las calificaciones.")
+                        : "No se encontraron estudiantes que coincidan con tus criterios."
                       }
                     </TableCell>
                 </TableRow>
@@ -471,3 +526,6 @@ export default function StudentGradesPage() {
     
 
 
+
+
+    

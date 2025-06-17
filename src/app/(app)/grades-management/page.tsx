@@ -26,11 +26,11 @@ import {
   FormMessage,
 } from '@/components/ui/form';
 import { Label } from '@/components/ui/label';
+import { useAuth } from '@/contexts/AuthContext'; // Import useAuth
 
-const MAX_ACCUMULATED_ACTIVITIES = 5; // Max activities per partial UI-wise
+const MAX_ACCUMULATED_ACTIVITIES = 5; 
 const DEBOUNCE_DELAY = 2500;
 
-// Helper debounce function
 function debounce<F extends (...args: any[]) => void>(func: F, waitFor: number) {
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
   const debounced = (...args: Parameters<F>): void => {
@@ -117,6 +117,7 @@ export default function GradesManagementPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { toast } = useToast();
+  const { firestoreUser } = useAuth(); // Get current user
 
   const [allStudents, setAllStudents] = useState<User[]>([]);
   const [allGroups, setAllGroups] = useState<GroupType[]>([]);
@@ -157,7 +158,6 @@ export default function GradesManagementPage() {
   useEffect(() => {
     const fetchGradingConfig = async () => {
       setIsLoadingGradingConfig(true);
-      console.log("[GradesManagementPage] Fetching grading config...");
       try {
         const configDocRef = doc(db, 'appConfiguration', 'currentGradingConfig');
         const docSnap = await getDoc(configDocRef);
@@ -172,11 +172,8 @@ export default function GradesManagementPage() {
             maxExamScore: typeof loadedConfig.maxExamScore === 'number' ? loadedConfig.maxExamScore : DEFAULT_GRADING_CONFIG.maxExamScore,
           };
           setGradingConfig(validatedConfig);
-          console.log("[GradesManagementPage] Loaded grading config from Firestore:", loadedConfig);
-          console.log("[GradesManagementPage] Validated and setting gradingConfig:", validatedConfig);
         } else {
           setGradingConfig(DEFAULT_GRADING_CONFIG);
-          console.log("[GradesManagementPage] No grading config found in Firestore, using default:", DEFAULT_GRADING_CONFIG);
           toast({ title: "Default Config", description: "Using default grading configuration. Please set in App Settings if needed.", variant: "default" });
         }
       } catch (error) {
@@ -201,13 +198,37 @@ export default function GradesManagementPage() {
       setAllStudents(studentList);
 
       const groupsSnapshot = await getDocs(collection(db, 'groups'));
-      setAllGroups(groupsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as GroupType)));
+      const fetchedGroups = groupsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as GroupType));
+      setAllGroups(fetchedGroups);
+      
+      // If user is teacher, pre-select their first assigned group if available
+      if (firestoreUser?.role === 'teacher') {
+        const teacherGroups = fetchedGroups.filter(g => g.teacherId === firestoreUser.id);
+        if (teacherGroups.length > 0) {
+          setSelectedGroupIdForFilter(teacherGroups[0].id);
+        } else {
+          setSelectedGroupIdForFilter('none'); // Special value if teacher has no groups
+        }
+      }
+
 
       const studentIdFromParams = searchParams.get('studentId');
       if (studentIdFromParams) {
         const preselectedStudent = studentList.find(s => s.id === studentIdFromParams);
         if (preselectedStudent) {
-          setSelectedStudent(preselectedStudent);
+           // Ensure teacher can only select students from their groups
+          if (firestoreUser?.role === 'teacher') {
+            const teacherGroups = fetchedGroups.filter(g => g.teacherId === firestoreUser.id);
+            const isStudentInTeacherGroup = teacherGroups.some(g => g.studentIds.includes(preselectedStudent.id));
+            if (isStudentInTeacherGroup) {
+              setSelectedStudent(preselectedStudent);
+            } else {
+              toast({ title: 'Access Denied', description: 'You can only manage grades for students in your assigned groups.', variant: 'destructive' });
+              router.replace('/grades-management', { scroll: false });
+            }
+          } else { // Admins can select any student
+            setSelectedStudent(preselectedStudent);
+          }
         } else {
           toast({ title: 'Error', description: 'Estudiante de URL no encontrado.', variant: 'destructive' });
           router.replace('/grades-management', { scroll: false });
@@ -218,7 +239,7 @@ export default function GradesManagementPage() {
       toast({ title: 'Error', description: 'No se pudieron cargar estudiantes o grupos.', variant: 'destructive' });
     }
     setIsLoadingData(false);
-  }, [searchParams, toast, router, isLoadingGradingConfig]);
+  }, [searchParams, toast, router, isLoadingGradingConfig, firestoreUser]);
 
   useEffect(() => {
     fetchInitialData();
@@ -295,28 +316,67 @@ export default function GradesManagementPage() {
     }
   }, [selectedStudent, reset, gradingConfig, debouncedSave, mapActivities]);
 
+  const availableGroupsForFilter = useMemo(() => {
+    if (firestoreUser?.role === 'teacher') {
+      return allGroups.filter(g => g.teacherId === firestoreUser.id);
+    }
+    return allGroups; // Admins/Caja see all groups
+  }, [allGroups, firestoreUser]);
+
   const filteredStudentsList = useMemo(() => {
     let studentsToDisplay = allStudents;
-    if (selectedGroupIdForFilter !== 'all') {
+    
+    // If teacher, initial filter is by their groups
+    if (firestoreUser?.role === 'teacher') {
+        const teacherGroupIds = availableGroupsForFilter.map(g => g.id);
+        if (selectedGroupIdForFilter !== 'all' && !teacherGroupIds.includes(selectedGroupIdForFilter)) {
+             // If selected group is not one of teacher's groups (e.g. due to URL param), don't show students.
+            return [];
+        }
+        const studentIdsInTeacherGroups = availableGroupsForFilter.reduce((acc, group) => {
+            if (Array.isArray(group.studentIds)) {
+                group.studentIds.forEach(id => acc.add(id));
+            }
+            return acc;
+        }, new Set<string>());
+        studentsToDisplay = studentsToDisplay.filter(student => studentIdsInTeacherGroups.has(student.id));
+    }
+    
+    // Then, apply group filter selection (if not 'all' or 'none')
+    if (selectedGroupIdForFilter !== 'all' && selectedGroupIdForFilter !== 'none') {
       const group = allGroups.find(g => g.id === selectedGroupIdForFilter);
       if (group && Array.isArray(group.studentIds)) {
         studentsToDisplay = studentsToDisplay.filter(student => group.studentIds.includes(student.id));
       } else if (group) {
-        studentsToDisplay = [];
+        studentsToDisplay = []; // Group selected but has no studentIds array (should not happen)
       }
+    } else if (selectedGroupIdForFilter === 'none' && firestoreUser?.role === 'teacher') {
+         // Teacher has no groups assigned, show no students.
+        return [];
     }
+
+
     if (searchTerm.trim() !== '') {
       studentsToDisplay = studentsToDisplay.filter(student =>
         student.name.toLowerCase().includes(searchTerm.toLowerCase())
       );
     }
     return studentsToDisplay;
-  }, [allStudents, allGroups, selectedGroupIdForFilter, searchTerm]);
+  }, [allStudents, allGroups, selectedGroupIdForFilter, searchTerm, firestoreUser, availableGroupsForFilter]);
 
   const handleSelectStudentForGrading = useCallback((student: User) => {
+    // Additional check for teachers
+    if (firestoreUser?.role === 'teacher') {
+      const teacherGroups = allGroups.filter(g => g.teacherId === firestoreUser.id);
+      const isStudentInTheirGroup = teacherGroups.some(g => Array.isArray(g.studentIds) && g.studentIds.includes(student.id));
+      if (!isStudentInTheirGroup) {
+        toast({ title: 'Access Denied', description: 'You can only manage grades for students in your assigned groups.', variant: 'destructive' });
+        return;
+      }
+    }
     setSelectedStudent(student);
     router.push(`/grades-management?studentId=${student.id}`, { scroll: false });
-  }, [router]);
+  }, [router, firestoreUser, allGroups, toast]);
 
 
   const watchedFormValues = watch();
@@ -339,6 +399,15 @@ export default function GradesManagementPage() {
       toast({ title: "Error", description: isLoadingGradingConfig ? "Configuración de calificación aún cargando." : "Ningún estudiante seleccionado.", variant: "destructive" });
       return;
     }
+    if (firestoreUser?.role === 'teacher') {
+      const teacherGroups = allGroups.filter(g => g.teacherId === firestoreUser.id);
+      const isStudentInTheirGroup = teacherGroups.some(g => Array.isArray(g.studentIds) && g.studentIds.includes(selectedStudent.id));
+      if (!isStudentInTheirGroup) {
+        toast({ title: 'Permission Denied', description: 'You can only save grades for students in your assigned groups.', variant: 'destructive' });
+        return;
+      }
+    }
+
     setIsSubmitting(true);
     if (debouncedSave && typeof debouncedSave.cancel === 'function') {
       debouncedSave.cancel();
@@ -363,7 +432,7 @@ export default function GradesManagementPage() {
         const updatedStudentData = { id: updatedStudentDoc.id, ...updatedStudentDoc.data() } as User;
         setSelectedStudent(updatedStudentData);
         setAllStudents(prev => prev.map(s => s.id === updatedStudentData.id ? updatedStudentData : s));
-        reset(data);
+        reset(data); // Resets form state, making it not dirty
       }
 
     } catch (error: any) {
@@ -485,7 +554,7 @@ export default function GradesManagementPage() {
   };
 
   const renderAutoSaveStatus = () => {
-    if (isSubmitting && autoSaveStatus !== 'saving') return null;
+    if (isSubmitting && autoSaveStatus !== 'saving') return null; // If manually submitting, don't show autosave status unless it's already saving
     switch (autoSaveStatus) {
       case 'saving':
         return <span className="text-xs text-muted-foreground ml-2 flex items-center"><Loader2 className="h-3 w-3 animate-spin mr-1" />Guardando automáticamente...</span>;
@@ -494,7 +563,7 @@ export default function GradesManagementPage() {
       case 'error_saving':
         return <span className="text-xs text-red-600 ml-2">Error al autoguardar. Intentar guardado manual.</span>;
       default:
-        if (selectedStudent && formState.isDirty) {
+        if (selectedStudent && formState.isDirty) { // Only show "unsaved changes" if a student is selected and form is dirty
              return <span className="text-xs text-muted-foreground ml-2">Cambios sin guardar...</span>;
         }
         return null;
@@ -529,7 +598,10 @@ export default function GradesManagementPage() {
             Grades Management
           </CardTitle>
           <CardDescription>
-            Filtra estudiantes por grupo o busca por nombre. Selecciona un estudiante para editar sus calificaciones.
+            {firestoreUser?.role === 'teacher'
+              ? "Selecciona uno de tus grupos, luego un estudiante para editar sus calificaciones."
+              : "Filtra estudiantes por grupo o busca por nombre. Selecciona un estudiante para editar sus calificaciones."}
+            <br />
             Configuración actual: {gradingConfig.numberOfPartials} parciales, aprobación con {gradingConfig.passingGrade}pts.
             Máx. {MAX_ACCUMULATED_ACTIVITIES} actividades de acumulación (total {gradingConfig.maxTotalAccumulatedScore}pts) y 1 examen ({gradingConfig.maxExamScore}pts) por parcial.
             Nota parcial total {gradingConfig.maxTotalAccumulatedScore + gradingConfig.maxExamScore}pts.
@@ -549,17 +621,18 @@ export default function GradesManagementPage() {
                 value={selectedGroupIdForFilter}
                 onValueChange={(value) => {
                   setSelectedGroupIdForFilter(value);
-                  setSelectedStudent(null);
+                  setSelectedStudent(null); 
                   router.push('/grades-management', { scroll: false });
                 }}
-                disabled={isLoadingData}
+                disabled={isLoadingData || (firestoreUser?.role === 'teacher' && availableGroupsForFilter.length <= 1)}
               >
                 <SelectTrigger id="group-filter">
                   <SelectValue placeholder="Todos los Grupos" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">Todos los Grupos</SelectItem>
-                  {allGroups.map((group) => (
+                  {firestoreUser?.role !== 'teacher' && <SelectItem value="all">Todos los Grupos</SelectItem>}
+                  {firestoreUser?.role === 'teacher' && availableGroupsForFilter.length === 0 && <SelectItem value="none" disabled>No tienes grupos asignados</SelectItem>}
+                  {availableGroupsForFilter.map((group) => (
                     <SelectItem key={group.id} value={group.id}>
                       {group.name}
                     </SelectItem>
@@ -622,12 +695,17 @@ export default function GradesManagementPage() {
               No se encontraron estudiantes que coincidan con tus criterios de filtro/búsqueda.
             </p>
           )}
-           {!isLoadingData && filteredStudentsList.length === 0 && selectedGroupIdForFilter === 'all' && searchTerm.trim() === '' && allStudents.length > 0 &&(
+           {!isLoadingData && filteredStudentsList.length === 0 && selectedGroupIdForFilter === 'all' && searchTerm.trim() === '' && allStudents.length > 0 && firestoreUser?.role !== 'teacher' &&(
              <p className="text-muted-foreground text-center py-6">
               Todos los estudiantes están listados. Usa los filtros para acotar o selecciona de arriba si la lista es muy larga.
             </p>
            )}
-           {!isLoadingData && allStudents.length === 0 && (
+            {!isLoadingData && availableGroupsForFilter.length === 0 && firestoreUser?.role === 'teacher' && (
+               <p className="text-muted-foreground text-center py-6">
+                 No tienes grupos asignados. No puedes gestionar calificaciones.
+               </p>
+            )}
+           {!isLoadingData && allStudents.length === 0 && firestoreUser?.role !== 'teacher' && (
               <p className="text-muted-foreground text-center py-6">
                 No hay estudiantes registrados en el sistema.
               </p>
@@ -680,7 +758,9 @@ export default function GradesManagementPage() {
 
               {!selectedStudent && !isLoadingData && !isLoadingGradingConfig && (
                 <p className="text-muted-foreground text-center py-6">
-                  Por favor, selecciona un estudiante usando los filtros de arriba para gestionar sus calificaciones.
+                  {firestoreUser?.role === 'teacher' && availableGroupsForFilter.length === 0 
+                    ? "No tienes grupos asignados para gestionar calificaciones."
+                    : "Por favor, selecciona un grupo y un estudiante usando los filtros de arriba para gestionar sus calificaciones."}
                 </p>
               )}
             </form>
@@ -690,3 +770,6 @@ export default function GradesManagementPage() {
     </div>
   );
 }
+
+
+    

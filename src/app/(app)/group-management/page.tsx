@@ -43,6 +43,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Calendar } from '@/components/ui/calendar';
 import { format, isValid, parseISO } from 'date-fns';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/contexts/AuthContext'; // Import useAuth
 
 const groupFormSchema = z.object({
   name: z.string().min(2, { message: "Group name must be at least 2 characters." }),
@@ -57,7 +58,7 @@ type GroupFormValues = z.infer<typeof groupFormSchema>;
 const NO_TEACHER_ASSIGNED_VALUE = "##NO_TEACHER##";
 
 export default function GroupManagementPage() {
-  const [groups, setGroups] = useState<Group[]>([]);
+  const [allGroups, setAllGroups] = useState<Group[]>([]);
   const [allTeachers, setAllTeachers] = useState<User[]>([]);
   const [allStudents, setAllStudents] = useState<User[]>([]);
   
@@ -74,6 +75,7 @@ export default function GroupManagementPage() {
   const [studentSearchTerm, setStudentSearchTerm] = useState('');
 
   const { toast } = useToast();
+  const { firestoreUser } = useAuth(); // Get current user from AuthContext
 
   const isLoadingData = isLoadingGroups || isLoadingTeachers || isLoadingStudents;
 
@@ -94,7 +96,7 @@ export default function GroupManagementPage() {
     setIsLoadingStudents(true);
     try {
       const groupsSnapshotPromise = getDocs(collection(db, 'groups'));
-      const teachersQuery = query(collection(db, 'users'), where('role', '==', 'teacher'));
+      const teachersQuery = query(collection(db, 'users'), where('role', 'in', ['teacher', 'admin'])); // Admins can also be teachers
       const teachersSnapshotPromise = getDocs(teachersQuery);
       const studentsSnapshotPromise = getDocs(collection(db, 'students'));
 
@@ -104,7 +106,7 @@ export default function GroupManagementPage() {
         studentsSnapshotPromise
       ]);
 
-      setGroups(groupsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as Group)));
+      setAllGroups(groupsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as Group)));
       setIsLoadingGroups(false);
       
       setAllTeachers(teachersSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as User)));
@@ -126,8 +128,20 @@ export default function GroupManagementPage() {
     fetchInitialData();
   }, [fetchInitialData]);
 
+  const displayedGroups = useMemo(() => {
+    if (!firestoreUser) return [];
+    if (firestoreUser.role === 'admin' || firestoreUser.role === 'caja') {
+      return allGroups;
+    }
+    if (firestoreUser.role === 'teacher') {
+      return allGroups.filter(group => group.teacherId === firestoreUser.id);
+    }
+    return [];
+  }, [allGroups, firestoreUser]);
+
+
   const getValidatedStudentCount = useCallback((groupId: string) => {
-    const group = groups.find(g => g.id === groupId);
+    const group = allGroups.find(g => g.id === groupId); // Use allGroups to find the group
     if (!group || !Array.isArray(group.studentIds) || group.studentIds.length === 0) {
       return 0;
     }
@@ -135,9 +149,13 @@ export default function GroupManagementPage() {
       allStudents.some(s => s.id === studentId)
     );
     return validStudentIdsInGroup.length;
-  }, [groups, allStudents]);
+  }, [allGroups, allStudents]);
 
   const handleGroupFormSubmit = async (data: GroupFormValues) => {
+    if (firestoreUser?.role !== 'admin') {
+      toast({ title: 'Permission Denied', description: 'Only administrators can create or edit groups.', variant: 'destructive' });
+      return;
+    }
     setIsSubmitting(true);
     try {
       const groupDataToSave: Partial<Omit<Group, 'id' | 'studentIds'>> & { studentIds?: string[] } = {
@@ -155,7 +173,7 @@ export default function GroupManagementPage() {
             studentIds: editingGroup.studentIds || [] 
         });
         
-        setGroups(prevGroups => prevGroups.map(g => 
+        setAllGroups(prevGroups => prevGroups.map(g => 
           g.id === editingGroup.id ? { ...g, ...groupDataToSave, studentIds: g.studentIds || [] } as Group : g
         ));
         toast({ title: 'Group Updated', description: `Group "${data.name}" updated successfully.` });
@@ -167,7 +185,7 @@ export default function GroupManagementPage() {
         };
         const docRef = await addDoc(collection(db, 'groups'), newGroupWithStudentIds);
         
-        setGroups(prevGroups => [...prevGroups, { ...newGroupWithStudentIds, id: docRef.id } as Group]);
+        setAllGroups(prevGroups => [...prevGroups, { ...newGroupWithStudentIds, id: docRef.id } as Group]);
         toast({ title: 'Group Created', description: `${data.name} created successfully.` });
       }
       
@@ -183,6 +201,10 @@ export default function GroupManagementPage() {
   };
 
   const openEditGroupDialog = (group: Group) => {
+     if (firestoreUser?.role !== 'admin') {
+      toast({ title: 'Permission Denied', description: 'Only administrators can edit groups.', variant: 'destructive' });
+      return;
+    }
     setEditingGroup(group);
     form.reset({
       name: group.name,
@@ -195,16 +217,24 @@ export default function GroupManagementPage() {
   };
 
   const openAddGroupDialog = () => {
+     if (firestoreUser?.role !== 'admin') {
+      toast({ title: 'Permission Denied', description: 'Only administrators can add groups.', variant: 'destructive' });
+      return;
+    }
     setEditingGroup(null);
     form.reset({ name: '', type: 'Saturday', startDate: new Date(), endDate: undefined, teacherId: '' });
     setIsGroupFormDialogOpen(true);
   };
 
   const handleDeleteGroup = async (groupId: string, groupName: string) => {
+    if (firestoreUser?.role !== 'admin') {
+      toast({ title: 'Permission Denied', description: 'Only administrators can delete groups.', variant: 'destructive' });
+      return;
+    }
     if (!confirm(`Are you sure you want to delete the group "${groupName}"? This action cannot be undone.`)) return;
     try {
       await deleteDoc(doc(db, 'groups', groupId));
-      setGroups(prevGroups => prevGroups.filter(g => g.id !== groupId));
+      setAllGroups(prevGroups => prevGroups.filter(g => g.id !== groupId));
       toast({ title: 'Group Deleted', description: `Group "${groupName}" removed successfully.` });
     } catch (error)      {
       console.error("Error deleting group:", error);
@@ -251,7 +281,7 @@ export default function GroupManagementPage() {
     return teacher ? teacher.name : 'Unknown Teacher';
   };
 
-  if (isLoadingData) {
+  if (isLoadingData || !firestoreUser) {
     return (
       <Card>
         <CardHeader>
@@ -265,6 +295,8 @@ export default function GroupManagementPage() {
       </Card>
     );
   }
+  
+  const canManageGroups = firestoreUser?.role === 'admin';
 
   return (
     <>
@@ -272,183 +304,191 @@ export default function GroupManagementPage() {
         <CardHeader className="flex flex-row items-center justify-between">
           <div>
             <CardTitle className="flex items-center gap-2"><Users className="h-6 w-6 text-primary" /> Group Management</CardTitle>
-            <CardDescription>Create and manage student groups, assign teachers, and view student enrollments.</CardDescription>
+            <CardDescription>
+              {canManageGroups 
+                ? "Create and manage student groups, assign teachers, and view student enrollments." 
+                : "View groups you are assigned to and their student enrollments."}
+            </CardDescription>
           </div>
-          <Dialog open={isGroupFormDialogOpen} onOpenChange={(isOpen) => {
-            setIsGroupFormDialogOpen(isOpen);
-            if (!isOpen) {
-              form.reset({ name: '', type: 'Saturday', startDate: new Date(), endDate: undefined, teacherId: '' });
-              setEditingGroup(null);
-            }
-          }}>
-            <DialogTrigger asChild>
-              <Button size="sm" className="gap-1.5 text-sm" onClick={openAddGroupDialog}>
-                <PlusCircle className="size-3.5" />
-                Add New Group
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="sm:max-w-lg">
-              <DialogHeader>
-                <DialogTitle>{editingGroup ? 'Edit Group' : 'Create New Group'}</DialogTitle>
-                <DialogPrimitiveDescription>
-                  {editingGroup ? 'Update the details for this group.' : 'Fill in the details for the new group.'}
-                </DialogPrimitiveDescription>
-              </DialogHeader>
-              <form onSubmit={form.handleSubmit(handleGroupFormSubmit)} className="space-y-4 py-4 max-h-[70vh] overflow-y-auto pr-2">
-                <div>
-                  <Label htmlFor="groupName">Group Name</Label>
-                  <Input
-                    id="groupName"
-                    placeholder="E.g., Saturday Morning Beginners"
-                    {...form.register('name')}
-                    className="mt-1"
+          {canManageGroups && (
+            <Dialog open={isGroupFormDialogOpen} onOpenChange={(isOpen) => {
+              setIsGroupFormDialogOpen(isOpen);
+              if (!isOpen) {
+                form.reset({ name: '', type: 'Saturday', startDate: new Date(), endDate: undefined, teacherId: '' });
+                setEditingGroup(null);
+              }
+            }}>
+              <DialogTrigger asChild>
+                <Button size="sm" className="gap-1.5 text-sm" onClick={openAddGroupDialog}>
+                  <PlusCircle className="size-3.5" />
+                  Add New Group
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-lg">
+                <DialogHeader>
+                  <DialogTitle>{editingGroup ? 'Edit Group' : 'Create New Group'}</DialogTitle>
+                  <DialogPrimitiveDescription>
+                    {editingGroup ? 'Update the details for this group.' : 'Fill in the details for the new group.'}
+                  </DialogPrimitiveDescription>
+                </DialogHeader>
+                <form onSubmit={form.handleSubmit(handleGroupFormSubmit)} className="space-y-4 py-4 max-h-[70vh] overflow-y-auto pr-2">
+                  <div>
+                    <Label htmlFor="groupName">Group Name</Label>
+                    <Input
+                      id="groupName"
+                      placeholder="E.g., Saturday Morning Beginners"
+                      {...form.register('name')}
+                      className="mt-1"
+                    />
+                    {form.formState.errors.name && (
+                      <p className="text-sm text-destructive mt-1">{form.formState.errors.name.message}</p>
+                    )}
+                  </div>
+
+                  <Controller
+                    control={form.control}
+                    name="type"
+                    render={({ field }) => (
+                      <div>
+                        <Label>Group Type</Label>
+                        <Select onValueChange={field.onChange} value={field.value} defaultValue={field.value || "Saturday"}>
+                          <SelectTrigger className="mt-1">
+                            <SelectValue placeholder="Select group type" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Saturday">Saturday Group</SelectItem>
+                            <SelectItem value="Sunday">Sunday Group</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        {form.formState.errors.type && (
+                          <p className="text-sm text-destructive mt-1">{form.formState.errors.type.message}</p>
+                        )}
+                      </div>
+                    )}
                   />
-                  {form.formState.errors.name && (
-                    <p className="text-sm text-destructive mt-1">{form.formState.errors.name.message}</p>
-                  )}
-                </div>
-
-                <Controller
-                  control={form.control}
-                  name="type"
-                  render={({ field }) => (
-                    <div>
-                      <Label>Group Type</Label>
-                      <Select onValueChange={field.onChange} value={field.value} defaultValue={field.value || "Saturday"}>
-                        <SelectTrigger className="mt-1">
-                          <SelectValue placeholder="Select group type" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="Saturday">Saturday Group</SelectItem>
-                          <SelectItem value="Sunday">Sunday Group</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      {form.formState.errors.type && (
-                        <p className="text-sm text-destructive mt-1">{form.formState.errors.type.message}</p>
+                  
+                  <Controller
+                      control={form.control}
+                      name="startDate"
+                      render={({ field }) => (
+                          <div>
+                              <Label>Start Date</Label>
+                              <Popover>
+                                  <PopoverTrigger asChild>
+                                  <Button
+                                      variant={"outline"}
+                                      className={cn(
+                                      "w-full justify-start text-left font-normal mt-1",
+                                      !field.value && "text-muted-foreground"
+                                      )}
+                                  >
+                                      <CalendarIcon className="mr-2 h-4 w-4" />
+                                      {field.value ? format(field.value, "PPP") : <span>Pick a date</span>}
+                                  </Button>
+                                  </PopoverTrigger>
+                                  <PopoverContent className="w-auto p-0">
+                                  <Calendar
+                                      mode="single"
+                                      selected={field.value}
+                                      onSelect={field.onChange}
+                                      initialFocus
+                                  />
+                                  </PopoverContent>
+                              </Popover>
+                              {form.formState.errors.startDate && (
+                                  <p className="text-sm text-destructive mt-1">{form.formState.errors.startDate.message}</p>
+                              )}
+                          </div>
                       )}
-                    </div>
-                  )}
-                />
-                
-                <Controller
-                    control={form.control}
-                    name="startDate"
-                    render={({ field }) => (
-                        <div>
-                            <Label>Start Date</Label>
-                            <Popover>
-                                <PopoverTrigger asChild>
-                                <Button
-                                    variant={"outline"}
-                                    className={cn(
-                                    "w-full justify-start text-left font-normal mt-1",
-                                    !field.value && "text-muted-foreground"
-                                    )}
-                                >
-                                    <CalendarIcon className="mr-2 h-4 w-4" />
-                                    {field.value ? format(field.value, "PPP") : <span>Pick a date</span>}
-                                </Button>
-                                </PopoverTrigger>
-                                <PopoverContent className="w-auto p-0">
-                                <Calendar
-                                    mode="single"
-                                    selected={field.value}
-                                    onSelect={field.onChange}
-                                    initialFocus
-                                />
-                                </PopoverContent>
-                            </Popover>
-                            {form.formState.errors.startDate && (
-                                <p className="text-sm text-destructive mt-1">{form.formState.errors.startDate.message}</p>
-                            )}
-                        </div>
-                    )}
-                />
+                  />
 
-                <Controller
-                    control={form.control}
-                    name="endDate"
-                    render={({ field }) => (
-                        <div>
-                            <Label>End Date (Optional)</Label>
-                            <Popover>
-                                <PopoverTrigger asChild>
-                                <Button
-                                    variant={"outline"}
-                                    className={cn(
-                                    "w-full justify-start text-left font-normal mt-1",
-                                    !field.value && "text-muted-foreground"
-                                    )}
-                                >
-                                    <CalendarIcon className="mr-2 h-4 w-4" />
-                                    {field.value ? format(field.value, "PPP") : <span>Pick a date or clear</span>}
-                                </Button>
-                                </PopoverTrigger>
-                                <PopoverContent className="w-auto p-0" align="start">
-                                    <Calendar
-                                        mode="single"
-                                        selected={field.value || undefined}
-                                        onSelect={(date) => field.onChange(date || null)}
-                                        initialFocus={!!field.value}
-                                    />
-                                    <Button variant="ghost" className="w-full mt-1 text-sm" onClick={() => field.onChange(null)}>Clear End Date</Button>
-                                </PopoverContent>
-                            </Popover>
-                             {form.formState.errors.endDate && (
-                                <p className="text-sm text-destructive mt-1">{form.formState.errors.endDate.message}</p>
-                            )}
-                        </div>
-                    )}
-                />
-                
-                <Controller
-                  control={form.control}
-                  name="teacherId"
-                  render={({ field }) => (
-                    <div>
-                      <Label>Assign Teacher (Optional)</Label>
-                      <Select 
-                        onValueChange={(value) => field.onChange(value === NO_TEACHER_ASSIGNED_VALUE ? '' : value)} 
-                        value={field.value || ''}
-                      >
-                        <SelectTrigger className="mt-1">
-                          <SelectValue placeholder="Select a teacher" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value={NO_TEACHER_ASSIGNED_VALUE}>No Teacher Assigned</SelectItem>
-                          {allTeachers.map(teacher => (
-                            <SelectItem key={teacher.id} value={teacher.id}>
-                              {teacher.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      {form.formState.errors.teacherId && (
-                        <p className="text-sm text-destructive mt-1">{form.formState.errors.teacherId.message}</p>
+                  <Controller
+                      control={form.control}
+                      name="endDate"
+                      render={({ field }) => (
+                          <div>
+                              <Label>End Date (Optional)</Label>
+                              <Popover>
+                                  <PopoverTrigger asChild>
+                                  <Button
+                                      variant={"outline"}
+                                      className={cn(
+                                      "w-full justify-start text-left font-normal mt-1",
+                                      !field.value && "text-muted-foreground"
+                                      )}
+                                  >
+                                      <CalendarIcon className="mr-2 h-4 w-4" />
+                                      {field.value ? format(field.value, "PPP") : <span>Pick a date or clear</span>}
+                                  </Button>
+                                  </PopoverTrigger>
+                                  <PopoverContent className="w-auto p-0" align="start">
+                                      <Calendar
+                                          mode="single"
+                                          selected={field.value || undefined}
+                                          onSelect={(date) => field.onChange(date || null)}
+                                          initialFocus={!!field.value}
+                                      />
+                                      <Button variant="ghost" className="w-full mt-1 text-sm" onClick={() => field.onChange(null)}>Clear End Date</Button>
+                                  </PopoverContent>
+                              </Popover>
+                              {form.formState.errors.endDate && (
+                                  <p className="text-sm text-destructive mt-1">{form.formState.errors.endDate.message}</p>
+                              )}
+                          </div>
                       )}
-                    </div>
-                  )}
-                />
+                  />
+                  
+                  <Controller
+                    control={form.control}
+                    name="teacherId"
+                    render={({ field }) => (
+                      <div>
+                        <Label>Assign Teacher (Optional)</Label>
+                        <Select 
+                          onValueChange={(value) => field.onChange(value === NO_TEACHER_ASSIGNED_VALUE ? '' : value)} 
+                          value={field.value || ''}
+                        >
+                          <SelectTrigger className="mt-1">
+                            <SelectValue placeholder="Select a teacher" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={NO_TEACHER_ASSIGNED_VALUE}>No Teacher Assigned</SelectItem>
+                            {allTeachers.map(teacher => (
+                              <SelectItem key={teacher.id} value={teacher.id}>
+                                {teacher.name} ({teacher.role})
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {form.formState.errors.teacherId && (
+                          <p className="text-sm text-destructive mt-1">{form.formState.errors.teacherId.message}</p>
+                        )}
+                      </div>
+                    )}
+                  />
 
-                <DialogFooter className="pt-4">
-                  <DialogClose asChild>
-                    <Button type="button" variant="outline">
-                      Cancel
+                  <DialogFooter className="pt-4">
+                    <DialogClose asChild>
+                      <Button type="button" variant="outline">
+                        Cancel
+                      </Button>
+                    </DialogClose>
+                    <Button type="submit" disabled={isSubmitting}>
+                      {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                      {editingGroup ? 'Save Changes' : 'Create Group'}
                     </Button>
-                  </DialogClose>
-                  <Button type="submit" disabled={isSubmitting}>
-                    {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    {editingGroup ? 'Save Changes' : 'Create Group'}
-                  </Button>
-                </DialogFooter>
-              </form>
-            </DialogContent>
-          </Dialog>
+                  </DialogFooter>
+                </form>
+              </DialogContent>
+            </Dialog>
+          )}
         </CardHeader>
         <CardContent>
-          {groups.length === 0 ? (
+          {displayedGroups.length === 0 ? (
             <div className="text-center py-10">
-              <p className="text-muted-foreground">No groups found. Get started by adding a new group.</p>
+              <p className="text-muted-foreground">
+                {firestoreUser?.role === 'teacher' ? "You are not currently assigned to any groups." : "No groups found. Get started by adding a new group."}
+              </p>
             </div>
           ) : (
             <Table>
@@ -464,7 +504,7 @@ export default function GroupManagementPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {groups.map((group) => (
+                {displayedGroups.map((group) => (
                   <TableRow key={group.id}>
                     <TableCell className="font-medium">{group.name}</TableCell>
                     <TableCell>{group.type}</TableCell>
@@ -476,14 +516,18 @@ export default function GroupManagementPage() {
                       <Button variant="outline" size="sm" onClick={() => openViewStudentsDialog(group)} className="text-xs">
                         <UserCheck className="mr-1 h-3.5 w-3.5" /> View Students
                       </Button>
-                      <Button variant="ghost" size="icon" onClick={() => openEditGroupDialog(group)}>
-                        <Edit className="h-4 w-4" />
-                        <span className="sr-only">Edit Group</span>
-                      </Button>
-                      <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => handleDeleteGroup(group.id, group.name)}>
-                        <Trash2 className="h-4 w-4" />
-                        <span className="sr-only">Delete Group</span>
-                      </Button>
+                      {canManageGroups && (
+                        <>
+                          <Button variant="ghost" size="icon" onClick={() => openEditGroupDialog(group)}>
+                            <Edit className="h-4 w-4" />
+                            <span className="sr-only">Edit Group</span>
+                          </Button>
+                          <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => handleDeleteGroup(group.id, group.name)}>
+                            <Trash2 className="h-4 w-4" />
+                            <span className="sr-only">Delete Group</span>
+                          </Button>
+                        </>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -553,4 +597,6 @@ export default function GroupManagementPage() {
     </>
   );
 }
+    
+
     
