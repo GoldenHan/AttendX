@@ -1,105 +1,108 @@
+
 rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Robust helper function to get user data and indicate existence
-    function getUserProperties(userId) {
-      let userDoc = get(/databases/$(database)/documents/users/$(userId));
-      if (!userDoc.exists) {
-        return {"exists": false, "role": null}; 
-      }
-      // Document exists, return its data, ensuring role defaults to null if not present
-      return {"exists": true, "role": userDoc.data.role, ...userDoc.data}; 
+    // Helper functions
+    function isUserAuthenticated() {
+      return request.auth != null;
+    }
+
+    function getUserData(userId) {
+      return get(/databases/$(database)/documents/users/$(userId)).data;
     }
 
     function isAdmin(userId) {
-      let userProps = getUserProperties(userId);
-      return userProps.exists && userProps.role == 'admin';
+      let userData = getUserData(userId);
+      return isUserAuthenticated() && userData != null && userData.role == 'admin';
     }
 
     function isTeacher(userId) {
-      let userProps = getUserProperties(userId);
-      return userProps.exists && userProps.role == 'teacher';
+      let userData = getUserData(userId);
+      return isUserAuthenticated() && userData != null && userData.role == 'teacher';
     }
     
     function isCaja(userId) {
-      let userProps = getUserProperties(userId);
-      return userProps.exists && userProps.role == 'caja';
+      let userData = getUserData(userId);
+      return isUserAuthenticated() && userData != null && userData.role == 'caja';
     }
 
-    function isStaff(userId) {
-      let userProps = getUserProperties(userId);
-      return userProps.exists && (userProps.role == 'admin' || userProps.role == 'teacher' || userProps.role == 'caja');
+    function isStudent(userId) {
+      let userData = getUserData(userId);
+      return isUserAuthenticated() && userData != null && userData.role == 'student';
     }
 
+    // USERS collection (includes staff and students who can log in)
     match /users/{userId} {
-      // LIST: Allow if authenticated. This allows querying by username if an authenticated user (e.g. admin) is performing the lookup.
-      // If an unauthenticated user tries to log in by username, this rule will currently block that initial lookup.
-      // To allow unauthenticated username lookup, this rule would need to be more permissive (e.g., `allow list: if request.query.limit == 1;` and then secure the read).
-      allow list: if request.auth != null;
-
-      // READ: Allow if it's the user's own document OR if the requester is an admin.
-      allow read: if request.auth != null && (request.auth.uid == userId || isAdmin(request.auth.uid));
+      allow create: if isAdmin(request.auth.uid) || isTeacher(request.auth.uid); // Admins/Teachers can create new users (students/staff)
       
-      // CREATE: Only admins can create new user documents directly here.
-      // Signup flow (AuthContext.signUp) handles user creation in Firebase Auth and Firestore.
-      allow create: if request.auth != null && isAdmin(request.auth.uid);
+      allow read: if isAdmin(request.auth.uid) || isTeacher(request.auth.uid) || isCaja(request.auth.uid) || request.auth.uid == userId;
+                  // Admins, Teachers, Caja can read any user. Users can read their own profile.
 
-      // UPDATE:
-      // 1. Admins can update anything.
-      // 2. A user can update their own 'requiresPasswordChange' flag to false.
-      allow update: if request.auth != null && (
-        isAdmin(request.auth.uid) ||
-        (request.auth.uid == userId && request.writeFields.size() == 1 && request.writeFields[0] == 'requiresPasswordChange' && request.resource.data.requiresPasswordChange == false)
-      );
-      
-      // DELETE: Only admins can delete user documents from Firestore. (Firebase Auth account deletion is separate).
-      allow delete: if request.auth != null && isAdmin(request.auth.uid);
-    }
-
-    match /students/{studentId} {
-      // LIST: Allow if authenticated staff. Student username lookup by unauthenticated user will fail with this rule.
-      allow list: if request.auth != null && isStaff(request.auth.uid);
-
-      // READ: Staff can read student profiles. Students can read their own if their UID matches studentId (assuming studentId is UID).
-      // If studentId is not UID, students cannot read their own profiles with this rule alone.
-      allow read: if request.auth != null && (isStaff(request.auth.uid) || request.auth.uid == studentId);
-      
-      // CREATE, UPDATE, DELETE: Only admins.
-      allow create, update, delete: if request.auth != null && isAdmin(request.auth.uid);
-    }
-
-    match /groups/{groupId} {
-      allow read, list: if request.auth != null && isStaff(request.auth.uid);
-      allow create, update, delete: if request.auth != null && isAdmin(request.auth.uid);
-    }
-
-    match /sessions/{sessionId} {
-      allow read, list: if request.auth != null && isStaff(request.auth.uid);
-      allow create, update, delete: if request.auth != null && isAdmin(request.auth.uid);
-    }
-
-    match /attendanceRecords/{recordId} {
-      // Allow read/list by staff, or by the student if the record's userId matches their auth uid.
-      allow read, list: if request.auth != null && 
-                          (isStaff(request.auth.uid) || 
-                           (getUserProperties(request.auth.uid).role == 'student' && resource.data.userId == request.auth.uid)
-                          );
-      allow create: if request.auth != null && (isTeacher(request.auth.uid) || isAdmin(request.auth.uid) || isCaja(request.auth.uid));
-      allow update: if false; 
-      allow delete: if request.auth != null && isAdmin(request.auth.uid);
+      allow update: if isAdmin(request.auth.uid) || 
+                       (isTeacher(request.auth.uid) && resource.data.role == 'student') || // Teachers can update student users
+                       (request.auth.uid == userId && // User updating their own profile
+                         !(request.resource.data.role != resource.data.role) && // Cannot change own role
+                         !(request.resource.data.email != resource.data.email && resource.data.email != null) && // Cannot change own email if already set
+                         !(request.resource.data.username != resource.data.username && resource.data.username != null) && // Cannot change own username if already set
+                         !(request.resource.data.gradesByLevel != resource.data.gradesByLevel && resource.data.role == 'student') && // Students cannot change their own grades
+                         ( // Allow self-update of requiresPasswordChange or limited profile fields
+                           (request.writeFields.size() == 1 && request.writeFields[0] == 'requiresPasswordChange' && request.resource.data.requiresPasswordChange == false) ||
+                           (request.writeFields.size() <= 3 && // Example: allow updating photo, phone, notes
+                            ('photoUrl' in request.writeFields || 'phoneNumber' in request.writeFields || 'notes' in request.writeFields)
+                           )
+                         )
+                       );
+                       
+      allow delete: if isAdmin(request.auth.uid); // Only admins can delete users
+      allow list: if isAdmin(request.auth.uid) || isTeacher(request.auth.uid) || isCaja(request.auth.uid); // Admins, Teachers, Caja can list users
     }
     
-    match /teacherAttendanceRecords/{recordId} {
-      allow create: if request.auth != null && isAdmin(request.auth.uid);
-      allow read, delete: if request.auth != null && isAdmin(request.auth.uid);
-      allow update: if false; 
+    // STUDENTS collection (If used for students who DO NOT log in - this might be deprecated by current changes)
+    // For now, assuming students who log in are in 'users' collection.
+    // If 'students' collection is still used for other purposes, its rules would go here.
+    // Example if it were still active for CRUD by admins/teachers:
+    // match /students/{studentId} {
+    //   allow read, list: if isAdmin(request.auth.uid) || isTeacher(request.auth.uid) || isCaja(request.auth.uid);
+    //   allow create, update, delete: if isAdmin(request.auth.uid) || isTeacher(request.auth.uid);
+    // }
+
+
+    // GROUPS collection
+    match /groups/{groupId} {
+      allow read, list: if isUserAuthenticated(); // All authenticated users can read/list groups (UI filters for teachers)
+      allow create, update, delete: if isAdmin(request.auth.uid); // Only admins can manage groups
     }
 
+    // SESSIONS collection
+    match /sessions/{sessionId} {
+      allow read, list: if isUserAuthenticated();
+      // Allow admins or teachers assigned to the group of the session to create/update
+      // For create/update, we'd need to check group's teacherId if session.classId maps to that group.
+      // Simple rule for now:
+      allow create, update, delete: if isAdmin(request.auth.uid) || isTeacher(request.auth.uid) || isCaja(request.auth.uid);
+    }
+
+    // ATTENDANCE RECORDS collection
+    match /attendanceRecords/{recordId} {
+      allow read, list: if isUserAuthenticated(); // Students might need to read their own, admins/teachers can read all
+      // More granular read for students: (isStudent(request.auth.uid) && resource.data.userId == request.auth.uid)
+      allow create: if isAdmin(request.auth.uid) || isTeacher(request.auth.uid) || isCaja(request.auth.uid);
+      allow update, delete: if isAdmin(request.auth.uid) || isTeacher(request.auth.uid);
+    }
+    
+    // TEACHER ATTENDANCE RECORDS collection
+    match /teacherAttendanceRecords/{recordId} {
+      allow read, list: if isAdmin(request.auth.uid) || isCaja(request.auth.uid); // Admins and Caja can view
+      allow create: if isAdmin(request.auth.uid); // Only Admins can create these records (via the dashboard panel)
+      allow delete: if isAdmin(request.auth.uid);
+    }
+
+    // APP CONFIGURATION collection
     match /appConfiguration/{configId} {
-      allow read: if request.auth != null; 
-      allow write: if request.auth != null && isAdmin(request.auth.uid);
+      allow read: if isUserAuthenticated();
+      allow create, update, delete: if isAdmin(request.auth.uid);
     }
   }
 }

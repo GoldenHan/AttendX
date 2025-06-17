@@ -23,7 +23,6 @@ import {
   ClipboardCheck,
   Briefcase,
   GraduationCap,
-  // UserCheck, // Icon for the removed teacher-session-attendance
   ClipboardList, 
   Award, 
 } from 'lucide-react';
@@ -40,9 +39,10 @@ interface NavItem {
 const generalNavItems: NavItem[] = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['admin', 'teacher', 'caja', 'student'] },
   { href: '/attendance-log', label: 'Log Group Attendance', icon: ClipboardEdit, roles: ['admin', 'teacher', 'caja'] },
-  { href: '/attendance-records', label: 'Records', icon: BookUser, roles: ['admin', 'teacher', 'caja', 'student'] },
-  { href: '/reports', label: 'Reports', icon: BarChart3, roles: ['admin', 'teacher', 'caja', 'student'] },
-  { href: '/student-grades', label: 'Student Grades View', icon: ClipboardCheck, roles: ['admin', 'teacher'] },
+  { href: '/attendance-records', label: 'Attendance Records', icon: BookUser, roles: ['admin', 'teacher', 'caja'] }, // Student should not see all records
+  { href: '/reports', label: 'Attendance Reports', icon: BarChart3, roles: ['admin', 'teacher', 'caja'] },
+  { href: '/student-grades', label: 'My Grades', icon: ClipboardCheck, roles: ['student'] }, // Student specific
+  { href: '/student-grades', label: 'Student Grades View', icon: ClipboardCheck, roles: ['admin', 'teacher'] }, // Admin/Teacher view
   { href: '/ai-analysis', label: 'AI Analysis', icon: Brain, roles: ['admin', 'teacher'] },
 ];
 
@@ -50,7 +50,6 @@ const managementNavItems: NavItem[] = [
    { href: '/student-management', label: 'Student Management', icon: GraduationCap, roles: ['admin', 'teacher'] },
    { href: '/group-management', label: 'Groups', icon: FolderKanban, roles: ['admin', 'teacher'] },
    { href: '/grades-management', label: 'Grades Management', icon: ClipboardCheck, roles: ['admin', 'teacher'] },
-   // { href: '/teacher-session-attendance', label: 'Session Attendance', icon: UserCheck, roles: ['admin', 'teacher'] }, // Removed
    { href: '/partial-grades-report', label: 'Partial Grades Report', icon: ClipboardList, roles: ['admin', 'teacher'] }, 
    { href: '/certificate-management', label: 'Certificate Records', icon: Award, roles: ['admin', 'teacher'] },
 ];
@@ -74,8 +73,14 @@ export function SidebarNav() {
   const filterNavItems = (items: NavItem[]): NavItem[] => {
     if (!userRole) return [];
     return items.filter(item => {
-      if (!item.roles) return true;
-      return item.roles.includes(userRole);
+      if (!item.roles) return true; // Item is for all roles if not specified
+      if (item.roles.includes(userRole)) {
+        // Special handling for duplicated labels like "Student Grades View" / "My Grades"
+        if (userRole === 'student' && item.label === 'Student Grades View') return false; // Hide generic for student
+        if (userRole !== 'student' && item.label === 'My Grades') return false; // Hide "My Grades" for non-students
+        return true;
+      }
+      return false;
     });
   };
 
@@ -84,7 +89,7 @@ export function SidebarNav() {
   const visibleAdminNavItems = filterNavItems(adminNavItems);
 
   const renderNavItem = (item: NavItem) => (
-    <SidebarMenuItem key={item.href}>
+    <SidebarMenuItem key={`${item.href}-${item.label}`}>
       <Link href={item.href}>
         <SidebarMenuButton
           className={cn(

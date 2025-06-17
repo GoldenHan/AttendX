@@ -32,83 +32,83 @@ export interface StudentGradeStructure {
 }
 
 export interface User {
-  id: string; // Firestore document ID from 'users' or 'students' collection
-  uid?: string; // Firebase Auth UID (typically for 'users' collection who can log in)
+  id: string; // Firestore document ID (for users collection, this will be the Firebase Auth UID)
+  uid?: string; // Firebase Auth UID (explicitly ensure it's here, often same as id for 'users' collection)
   name: string;
-  username?: string | null; // Added for student login, ensure it can be null
+  username?: string | null; 
   role: 'student' | 'teacher' | 'admin' | 'caja';
-  email?: string | null; // Still needed for Firebase Auth, but username is primary for students
+  email?: string | null; 
   phoneNumber?: string | null;
   photoUrl?: string | null;
-  attendanceCode?: string | null; // Personal code for teachers/admins to log their own attendance
-  requiresPasswordChange?: boolean; // Flag to force password change on first login
+  attendanceCode?: string | null; 
+  requiresPasswordChange?: boolean; 
 
-  // Student-specific fields (primarily in 'students' collection)
-  level?: 'Beginner' | 'Intermediate' | 'Advanced' | 'Other'; // Current level of the student
+  // Student-specific fields (will be part of the User document if role is 'student')
+  level?: 'Beginner' | 'Intermediate' | 'Advanced' | 'Other'; 
   notes?: string;
   age?: number;
   gender?: 'male' | 'female' | 'other';
   preferredShift?: 'Saturday' | 'Sunday';
-  gradesByLevel?: Record<string, StudentGradeStructure>; // Key is the level name (e.g., "Beginner")
+  gradesByLevel?: Record<string, StudentGradeStructure>; 
 }
 
 export interface TeacherAttendanceRecord {
-  id: string; // Firestore document ID
-  teacherId: string; // User.id of the teacher
+  id: string; 
+  teacherId: string; 
   teacherName: string;
-  timestamp: string; // ISO string for when the attendance was logged
+  timestamp: string; 
   attendanceCodeUsed: string;
 }
 
 export interface Session {
-  id: string; // Firestore document ID from 'sessions' collection
-  classId: string; // This ID refers to a Group.id from the 'groups' collection
+  id: string; 
+  classId: string; 
   date: string; // YYYY-MM-DD
   time: string; // HH:MM
   qrCodeValue?: string;
 }
 
 export interface AttendanceRecord {
-  id: string; // Firestore document ID from 'attendanceRecords' collection
-  sessionId: string; // Refers to Session.id
-  userId: string; // Refers to User.id (from 'students' collection)
+  id: string; 
+  sessionId: string; 
+  userId: string; // This will refer to User.id (which is UID) from 'users' collection if student logs in
   status: 'present' | 'absent' | 'late';
-  timestamp: string; // ISO date string of when the record was made or for the session time
+  timestamp: string; 
   observation?: string;
 }
 
 export interface Group {
-  id: string; // Firestore document ID from 'groups' collection
+  id: string; 
   name: string;
-  type: 'Saturday' | 'Sunday'; // Or other relevant group types
-  startDate: string; // ISO Date string
-  endDate?: string | null; // ISO Date string, optional
-  studentIds: string[]; // Array of User.id (from 'students' collection)
+  type: 'Saturday' | 'Sunday'; 
+  startDate: string; 
+  endDate?: string | null; 
+  studentIds: string[]; // Array of User.id (UIDs from 'users' collection for students)
   teacherId?: string | null; // User.id of the assigned teacher (from 'users' collection)
 }
 
 // Configuration for the grading system
 export interface GradingConfiguration {
-  id?: string; // Document ID, typically "currentGradingConfig"
+  id?: string; 
   numberOfPartials: 1 | 2 | 3 | 4;
   passingGrade: number;
   maxIndividualActivityScore: number;
-  maxTotalAccumulatedScore: number; // Max sum for all accumulated activities in one partial
-  maxExamScore: number; // Max score for the exam in one partial
+  maxTotalAccumulatedScore: number; 
+  maxExamScore: number; 
 }
 
 // Default values for GradingConfiguration
 export const DEFAULT_GRADING_CONFIG: GradingConfiguration = {
   numberOfPartials: 3,
   passingGrade: 70,
-  maxIndividualActivityScore: 10, // e.g. each of 5 activities can be up to 10 points
-  maxTotalAccumulatedScore: 50,  // Sum of activities cannot exceed 50
+  maxIndividualActivityScore: 10, 
+  maxTotalAccumulatedScore: 50,  
   maxExamScore: 50,
 };
 
 // Extended User type for grades report pages
 export interface StudentWithDetailedGrades extends User {
-  gradesDisplayLevel?: string; // The level for which grades are being displayed
+  gradesDisplayLevel?: string; 
   calculatedAccumulatedTotalP1?: number | null;
   calculatedAccumulatedTotalP2?: number | null;
   calculatedAccumulatedTotalP3?: number | null;
@@ -132,7 +132,6 @@ export const getDefaultStudentGradeStructure = (config: GradingConfiguration): S
   for (let i = 1; i <= config.numberOfPartials; i++) {
     structure[`partial${i as 1 | 2 | 3 | 4}` as keyof StudentGradeStructure] = getDefaultPartialScores();
   }
-  // Ensure all 4 partials are defined if config is less, to match GradeEntryFormValues expectations
   for (let i = config.numberOfPartials + 1; i <= 4; i++) {
      if (!structure[`partial${i as 1 | 2 | 3 | 4}` as keyof StudentGradeStructure]) {
         structure[`partial${i as 1 | 2 | 3 | 4}` as keyof StudentGradeStructure] = getDefaultPartialScores();
