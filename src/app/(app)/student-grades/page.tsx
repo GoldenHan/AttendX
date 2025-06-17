@@ -217,15 +217,13 @@ export default function StudentGradesPage() {
     let filtered = allStudents;
 
     if (firestoreUser.role === 'teacher') {
-      // Teachers always see students from their selected group, or all their students if 'all' of their groups is selected (which is one specific group ID or 'none')
       if (selectedGroupId === 'none') return []; // Teacher has no groups or selected "none"
 
-      const teacherActualSelectedGroupId = selectedGroupId === 'all' // 'all' for teacher means their specific assigned group if only one, or prompts selection
-        ? (availableGroupsForFilter.length === 1 ? availableGroupsForFilter[0].id : 'requires_selection')
+      const teacherActualSelectedGroupId = selectedGroupId === 'all' 
+        ? (availableGroupsForFilter.length === 1 ? availableGroupsForFilter[0].id : 'all_teacher_groups') // Special key for all teacher groups
         : selectedGroupId;
 
-      if (teacherActualSelectedGroupId === 'requires_selection' && availableGroupsForFilter.length > 1){
-         // If teacher has multiple groups and "All Groups" (their all) is selected, show all students from all their groups.
+      if (teacherActualSelectedGroupId === 'all_teacher_groups' && availableGroupsForFilter.length > 0){
          const studentIdsInTeacherGroups = availableGroupsForFilter.reduce((acc, group) => {
             if (Array.isArray(group.studentIds)) {
                 group.studentIds.forEach(id => acc.add(id));
@@ -234,15 +232,15 @@ export default function StudentGradesPage() {
         }, new Set<string>());
         filtered = filtered.filter(s => studentIdsInTeacherGroups.has(s.id));
 
-      } else if (teacherActualSelectedGroupId !== 'requires_selection') {
+      } else if (teacherActualSelectedGroupId !== 'all_teacher_groups') {
         const group = allGroups.find(g => g.id === teacherActualSelectedGroupId);
-        if (group?.studentIds && group.teacherId === firestoreUser.id) {
+        if (group?.studentIds && group.teacherId === firestoreUser.id) { // Ensure group belongs to teacher
             filtered = filtered.filter(s => group.studentIds.includes(s.id));
         } else {
-            filtered = []; // Teacher selected a group not theirs or group has no students
+            filtered = []; 
         }
-      } else {
-        filtered = []; // Teacher has multiple groups but hasn't selected one.
+      } else { // Teacher has no groups, or 'all' selected without groups
+        filtered = []; 
       }
 
 
@@ -527,5 +525,7 @@ export default function StudentGradesPage() {
 
 
 
+
+    
 
     

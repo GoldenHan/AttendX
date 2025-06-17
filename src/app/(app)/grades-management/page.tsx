@@ -219,7 +219,7 @@ export default function GradesManagementPage() {
            // Ensure teacher can only select students from their groups
           if (firestoreUser?.role === 'teacher') {
             const teacherGroups = fetchedGroups.filter(g => g.teacherId === firestoreUser.id);
-            const isStudentInTeacherGroup = teacherGroups.some(g => g.studentIds.includes(preselectedStudent.id));
+            const isStudentInTeacherGroup = teacherGroups.some(g => Array.isArray(g.studentIds) && g.studentIds.includes(preselectedStudent.id));
             if (isStudentInTeacherGroup) {
               setSelectedStudent(preselectedStudent);
             } else {
@@ -632,6 +632,7 @@ export default function GradesManagementPage() {
                 <SelectContent>
                   {firestoreUser?.role !== 'teacher' && <SelectItem value="all">Todos los Grupos</SelectItem>}
                   {firestoreUser?.role === 'teacher' && availableGroupsForFilter.length === 0 && <SelectItem value="none" disabled>No tienes grupos asignados</SelectItem>}
+                   {firestoreUser?.role === 'teacher' && availableGroupsForFilter.length > 1 && <SelectItem value="all">Todos Mis Grupos</SelectItem>}
                   {availableGroupsForFilter.map((group) => (
                     <SelectItem key={group.id} value={group.id}>
                       {group.name}
@@ -771,5 +772,7 @@ export default function GradesManagementPage() {
   );
 }
 
+
+    
 
     

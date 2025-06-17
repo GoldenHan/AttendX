@@ -187,10 +187,8 @@ export default function PartialGradesReportPage() {
   const studentsForStudentFilterDropdown = useMemo(() => {
     if (!firestoreUser) return [];
     
-    // If "All Groups" is selected by an admin/caja OR if a teacher selected "All My Groups" (which is value 'all')
-    if (selectedGroupId === 'all') {
+    if (selectedGroupId === 'all') { // "All My Groups" for teacher, "All Groups" for admin/caja
         if (firestoreUser.role === 'teacher') {
-            // Collect all students from all groups taught by this teacher
             const studentIdsInTeacherGroups = availableGroupsForFilter.reduce((acc, group) => {
                 if (Array.isArray(group.studentIds)) {
                     group.studentIds.forEach(id => acc.add(id));
@@ -199,15 +197,13 @@ export default function PartialGradesReportPage() {
             }, new Set<string>());
             return allStudentsData.filter(s => studentIdsInTeacherGroups.has(s.id));
         }
-        return allStudentsData; // Admin/Caja sees all students if "All Groups"
+        return allStudentsData; 
     }
 
-    // If a specific group is selected (or teacher has no groups and 'none' is selected)
     if (selectedGroupId === 'none' && firestoreUser.role === 'teacher') return [];
     
     const group = allGroupsData.find(g => g.id === selectedGroupId);
     if (group?.studentIds) {
-      // Ensure teacher can only see students from their own selected group
       if (firestoreUser.role === 'teacher' && group.teacherId !== firestoreUser.id) {
         return [];
       }
@@ -221,7 +217,7 @@ export default function PartialGradesReportPage() {
       const student = studentsForStudentFilterDropdown.find(s => s.id === selectedStudentId);
       return student ? [student] : [];
     }
-    return studentsForStudentFilterDropdown; // Show all students from the (potentially filtered) dropdown
+    return studentsForStudentFilterDropdown; 
   }, [selectedStudentId, studentsForStudentFilterDropdown]);
 
   const handleOpenEditGrades = (studentId: string) => {
@@ -622,5 +618,7 @@ export default function PartialGradesReportPage() {
 }
     
 
+
+    
 
     
