@@ -244,7 +244,7 @@ export default function StaffManagementPage() {
 
       // Group assignment logic (common for new and edit)
       // This needs the staffMemberId. If new, we might not have it yet unless signUpUser returns it or we query.
-      // For now, let's assume staffMemberId is available for editing and for new users, group assignment can be a subsequent edit.
+      // For now, let's assume staffMemberId is available for editing cases, or for new users, group assignment can be a subsequent edit.
       // To make group assignment work for NEW users in this same step, signUpUser in AuthContext would need to return the new user's UID.
       // Let's adjust assuming we have staffMemberId for editing cases, or it's a post-creation step for new.
 
@@ -510,7 +510,7 @@ export default function StaffManagementPage() {
               <DialogHeader>
                 <DialogTitle>{editingStaff ? 'Edit Staff Record' : 'Add New Staff Record'}</DialogTitle>
                 <DialogPrimitiveDescription>
-                  {editingStaff ? 'Update staff details in Firestore.' : 'Fill in staff details. Username will be used as initial password for login. The user will be forced to change it on first login.'}
+                  {editingStaff ? 'Update staff details in Firestore.' : "Fill in staff details. Username and Email are required for login. The Username will be used as the staff member's initial password. They will be required to change this password upon their first login."}
                 </DialogPrimitiveDescription>
               </DialogHeader>
               <Form {...form}>
@@ -793,3 +793,5 @@ export default function StaffManagementPage() {
     </>
   );
 }
+
+    
