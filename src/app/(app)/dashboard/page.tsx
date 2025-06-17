@@ -111,14 +111,10 @@ export default function DashboardPage() {
   const handleTeacherAttendanceSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // This check ensures an admin is operating the terminal if desired for audit,
-    // but the Firestore rules will ultimately determine write permission based on the admin's role.
-    if (!authUser || firestoreUser?.role !== 'admin') {
+    if (firestoreUser?.role !== 'admin') {
       toast({ title: 'Acción no Permitida', description: 'Solo un administrador puede operar este registro. (Error Cliente)', variant: 'destructive' });
-      // console.log('Dashboard Submit Auth Check: authUser:', authUser, 'firestoreUser:', firestoreUser);
       return;
     }
-
 
     if (!teacherAttendanceCode.trim()) {
       toast({ title: 'Error', description: 'Por favor, ingrese el código de asistencia del docente.', variant: 'destructive' });
@@ -126,27 +122,35 @@ export default function DashboardPage() {
     }
     setIsSubmittingTeacherAttendance(true);
     try {
-      const teachersQuery = query(
+      // Query for any user (teacher or admin) with the matching attendance code
+      const usersWithCodeQuery = query(
         collection(db, 'users'),
-        where('role', '==', 'teacher'),
         where('attendanceCode', '==', teacherAttendanceCode.trim())
+        // No role filter here, an admin can also have an attendance code
       );
-      const teachersSnapshot = await getDocs(teachersQuery);
+      const usersSnapshot = await getDocs(usersWithCodeQuery);
 
-      if (teachersSnapshot.empty) {
-        toast({ title: 'Código Inválido', description: 'El código de asistencia no es válido o no pertenece a un docente.', variant: 'destructive' });
+      if (usersSnapshot.empty) {
+        toast({ title: 'Código Inválido', description: 'El código de asistencia no es válido o no pertenece a un usuario con código asignado.', variant: 'destructive' });
       } else {
-        const teacherDoc = teachersSnapshot.docs[0];
-        const teacherData = teacherDoc.data() as User;
+        const userDoc = usersSnapshot.docs[0]; // Take the first match
+        const userData = userDoc.data() as User;
+
+        // Ensure the user found actually has a role that would use an attendance code (teacher or admin)
+        if (userData.role !== 'teacher' && userData.role !== 'admin') {
+            toast({ title: 'Código Inválido', description: 'Este código pertenece a un usuario que no es docente ni administrador.', variant: 'destructive' });
+            setIsSubmittingTeacherAttendance(false);
+            return;
+        }
 
         const newRecord: Omit<TeacherAttendanceRecord, 'id'> = {
-          teacherId: teacherDoc.id,
-          teacherName: teacherData.name,
+          teacherId: userDoc.id, // Store the UID of the user (teacher or admin)
+          teacherName: userData.name,
           timestamp: new Date().toISOString(),
           attendanceCodeUsed: teacherAttendanceCode.trim(),
         };
         await addDoc(collection(db, 'teacherAttendanceRecords'), newRecord);
-        toast({ title: `¡Bienvenido, ${teacherData.name}!`, description: 'Tu asistencia ha sido registrada.' });
+        toast({ title: `¡Bienvenido, ${userData.name}!`, description: 'Tu asistencia ha sido registrada.' });
         setTeacherAttendanceCode('');
       }
     } catch (error: any) {
@@ -189,7 +193,7 @@ export default function DashboardPage() {
   return (
     <div className="flex flex-col gap-6">
       <h1 className="text-3xl font-bold font-headline">Welcome to SERVEX</h1>
-      {/* Diagnostic Info */}
+      
       {firestoreUser && (
         <p className="text-xs text-muted-foreground text-center bg-muted p-2 rounded-md">
           Diagnostic Info: Logged in as {firestoreUser.email} (Role in Firestore: {firestoreUser.role || 'Not defined in Firestore user doc'})
@@ -223,7 +227,7 @@ export default function DashboardPage() {
               <Clock className="h-5 w-5 text-primary" />
               Teacher Attendance
             </CardTitle>
-            <CardDescription>Teachers enter their attendance code here upon arrival.</CardDescription>
+            <CardDescription>Teachers (or Admins acting as teachers) enter their attendance code here upon arrival.</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="text-3xl font-bold text-center mb-3 text-primary">

@@ -13,11 +13,11 @@ import {
 } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Loader2, Pencil, Trash2, UserPlus, FolderKanban, Briefcase, KeyRound, MailIcon } from 'lucide-react'; // Added KeyRound, MailIcon
+import { Loader2, Pencil, Trash2, UserPlus, FolderKanban, Briefcase, KeyRound, MailIcon } from 'lucide-react'; 
 import type { User, Group } from '@/types';
-import { db, auth } from '@/lib/firebase'; // Import auth
+import { db, auth } from '@/lib/firebase'; 
 import { collection, getDocs, deleteDoc, doc, addDoc, updateDoc, query, where, writeBatch } from 'firebase/firestore';
-import { sendPasswordResetEmail } from 'firebase/auth'; // Import sendPasswordResetEmail
+import { sendPasswordResetEmail } from 'firebase/auth'; 
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -149,7 +149,7 @@ export default function StaffManagementPage() {
       phoneNumber: data.phoneNumber || null,
       role: data.role,
       photoUrl: data.photoUrl || null,
-      attendanceCode: data.role === 'teacher' ? (data.attendanceCode || null) : null,
+      attendanceCode: (data.role === 'teacher' || data.role === 'admin') ? (data.attendanceCode || null) : null,
     };
 
     let staffMemberId: string | undefined = editingStaff?.id;
@@ -160,10 +160,6 @@ export default function StaffManagementPage() {
         await updateDoc(staffRef, firestoreUserData);
         toast({ title: 'Staff User Updated', description: `${data.name}'s record updated successfully.` });
       } else {
-        // Note: Creating a Firebase Auth user is separate. This only creates the Firestore record.
-        // For users to log in, they need an Auth account, usually created via the /login page's signup.
-        // If an admin creates a user here, they would need to tell the user to sign up with the SAME email
-        // or the admin would need a more advanced tool to create Firebase Auth users (e.g., via Admin SDK).
         const docRef = await addDoc(collection(db, 'users'), firestoreUserData);
         staffMemberId = docRef.id;
         toast({
@@ -172,7 +168,8 @@ export default function StaffManagementPage() {
         });
       }
 
-      if (data.role === 'teacher' && staffMemberId) {
+      // Handle group assignment for teachers or admins acting as teachers
+      if ((data.role === 'teacher' || data.role === 'admin') && staffMemberId) {
         const newlySelectedGroupId = data.assignedGroupId === UNASSIGN_VALUE_KEY ? null : data.assignedGroupId || null;
         const previouslyAssignedGroup = allGroups.find(g => g.teacherId === staffMemberId);
         const previouslyAssignedGroupId = previouslyAssignedGroup ? previouslyAssignedGroup.id : null;
@@ -196,9 +193,10 @@ export default function StaffManagementPage() {
             batch.update(newGroupRef, { teacherId: staffMemberId });
           }
           await batch.commit();
-          toast({ title: 'Group Assignment Updated', description: `Teacher ${data.name}'s group assignment has been updated.` });
+          toast({ title: 'Group Assignment Updated', description: `${data.name}'s group assignment has been updated.` });
         }
-      } else if (data.role !== 'teacher' && staffMemberId) {
+      } else if (data.role !== 'teacher' && data.role !== 'admin' && staffMemberId) { 
+        // If role is not teacher or admin, unassign from any group
         const previouslyAssignedGroup = allGroups.find(g => g.teacherId === staffMemberId);
         if (previouslyAssignedGroup) {
           const groupRef = doc(db, 'groups', previouslyAssignedGroup.id);
@@ -289,20 +287,14 @@ export default function StaffManagementPage() {
       const userRef = doc(db, 'users', staffToDelete.id);
       batch.delete(userRef);
 
-      if (staffToDelete.role === 'teacher') {
+      if (staffToDelete.role === 'teacher' || staffToDelete.role === 'admin') {
         const assignedGroup = allGroups.find(g => g.teacherId === staffToDelete.id);
         if (assignedGroup) {
           const groupRef = doc(db, 'groups', assignedGroup.id);
           batch.update(groupRef, { teacherId: null });
         }
       }
-      // IMPORTANT: Deleting Firebase Auth user is a separate, more sensitive operation.
-      // This only deletes the Firestore record.
-      // To delete the Auth user, you'd typically use Firebase Admin SDK on a backend.
-      // Or, if the admin IS the user they want to delete (not typical for staff management),
-      // they could call deleteUser(auth.currentUser).
-      // For now, we only delete the Firestore record.
-
+      
       await batch.commit();
 
       toast({ title: 'Staff User Record Deleted', description: `${staffToDelete.name}'s Firestore record removed and unassigned from groups if applicable. Auth account (if any) not affected.` });
@@ -330,7 +322,7 @@ export default function StaffManagementPage() {
          setIsDeleteStaffDialogOpen(false);
          setDeleteAdminPassword('');
        } else {
-         setIsDeleteStaffDialogOpen(true); // Keep dialog open if re-auth fails to allow retry
+         setIsDeleteStaffDialogOpen(true); 
        }
     } finally {
       setIsSubmitting(false);
@@ -360,7 +352,7 @@ export default function StaffManagementPage() {
       <CardHeader className="flex flex-row items-center justify-between">
         <div>
           <CardTitle className="flex items-center gap-2"><Briefcase className="h-6 w-6 text-primary" /> Staff Management</CardTitle>
-          <CardDescription>Manage teacher, admin, and cashier accounts. Assign teachers to groups, set attendance codes, and manage usernames.</CardDescription>
+          <CardDescription>Manage teacher, admin, and cashier accounts. Assign teachers/admins to groups, set attendance codes, and manage usernames.</CardDescription>
         </div>
         <div className="flex gap-2">
           <Button asChild size="sm" variant="outline" className="gap-1.5 text-sm">
@@ -456,7 +448,7 @@ export default function StaffManagementPage() {
                       </FormItem>
                     )}
                   />
-                  {watchedRole === 'teacher' && (
+                  {(watchedRole === 'teacher' || watchedRole === 'admin') && (
                     <>
                       <FormField
                         control={form.control}
@@ -493,7 +485,7 @@ export default function StaffManagementPage() {
                         name="attendanceCode"
                         render={({ field }) => (
                           <FormItem>
-                            <FormLabel>Attendance Code (for Teacher)</FormLabel>
+                            <FormLabel>Attendance Code (for Teacher/Admin acting as Teacher)</FormLabel>
                             <FormControl><Input placeholder="e.g., TCH001" {...field} /></FormControl>
                             <FormMessage />
                           </FormItem>
@@ -546,7 +538,7 @@ export default function StaffManagementPage() {
           </TableHeader>
           <TableBody>
             {staffUsers.length > 0 ? staffUsers.map((staff) => {
-              const assignedGroup = staff.role === 'teacher' ? allGroups.find(g => g.teacherId === staff.id) : null;
+              const assignedGroup = (staff.role === 'teacher' || staff.role === 'admin') ? allGroups.find(g => g.teacherId === staff.id) : null;
               return (
               <TableRow key={staff.id}>
                 <TableCell>{staff.name}</TableCell>
@@ -562,8 +554,8 @@ export default function StaffManagementPage() {
                     {staff.role.charAt(0).toUpperCase() + staff.role.slice(1)}
                   </span>
                 </TableCell>
-                <TableCell>{assignedGroup ? assignedGroup.name : (staff.role === 'teacher' ? 'Unassigned' : 'N/A')}</TableCell>
-                <TableCell>{staff.role === 'teacher' ? (staff.attendanceCode || <span className="text-muted-foreground text-xs">Not set</span>) : 'N/A'}</TableCell>
+                <TableCell>{assignedGroup ? assignedGroup.name : ((staff.role === 'teacher' || staff.role === 'admin') ? 'Unassigned' : 'N/A')}</TableCell>
+                <TableCell>{(staff.role === 'teacher' || staff.role === 'admin') ? (staff.attendanceCode || <span className="text-muted-foreground text-xs">Not set</span>) : 'N/A'}</TableCell>
                 <TableCell className="space-x-0.5">
                   <Button variant="ghost" size="icon" className="mr-1" onClick={() => handleOpenEditDialog(staff)} title="Edit User">
                     <Pencil className="h-4 w-4" />
@@ -616,7 +608,7 @@ export default function StaffManagementPage() {
                 <DialogDescription>
                     Are you sure you want to delete the Firestore record for {staffToDelete?.name}?
                     This action cannot be undone. Enter your admin password to confirm.
-                    Auth account (if any) will NOT be deleted. The teacher will also be unassigned from any group.
+                    Auth account (if any) will NOT be deleted. The user will also be unassigned from any group.
                 </DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-4">
