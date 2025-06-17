@@ -35,12 +35,13 @@ export interface User {
   id: string; // Firestore document ID from 'users' or 'students' collection
   uid?: string; // Firebase Auth UID (typically for 'users' collection who can log in)
   name: string;
-  username?: string; // Added for student login
+  username?: string | null; // Added for student login, ensure it can be null
   role: 'student' | 'teacher' | 'admin' | 'caja';
-  email?: string; // Still needed for Firebase Auth, but username is primary for students
-  phoneNumber?: string;
-  photoUrl?: string;
-  attendanceCode?: string; // Personal code for teachers to log their own attendance
+  email?: string | null; // Still needed for Firebase Auth, but username is primary for students
+  phoneNumber?: string | null;
+  photoUrl?: string | null;
+  attendanceCode?: string | null; // Personal code for teachers/admins to log their own attendance
+  requiresPasswordChange?: boolean; // Flag to force password change on first login
 
   // Student-specific fields (primarily in 'students' collection)
   level?: 'Beginner' | 'Intermediate' | 'Advanced' | 'Other'; // Current level of the student

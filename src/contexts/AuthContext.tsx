@@ -4,15 +4,16 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { auth, db } from '@/lib/firebase';
 import type { User as FirebaseUser } from 'firebase/auth';
-import { 
-  onAuthStateChanged, 
-  signInWithEmailAndPassword, 
+import {
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
   signOut as firebaseSignOut,
   createUserWithEmailAndPassword,
-  reauthenticateWithCredential, 
-  EmailAuthProvider 
+  reauthenticateWithCredential,
+  EmailAuthProvider,
+  updatePassword as firebaseUpdatePassword, // Import updatePassword
 } from 'firebase/auth';
-import { doc, getDoc, collection, query, where, getDocs, setDoc, limit } from 'firebase/firestore';
+import { doc, getDoc, collection, query, where, getDocs, setDoc, limit, updateDoc } from 'firebase/firestore';
 import type { User as FirestoreUserType } from '@/types';
 import { useRouter, usePathname } from 'next/navigation';
 
@@ -20,10 +21,12 @@ interface AuthContextType {
   authUser: FirebaseUser | null;
   firestoreUser: FirestoreUserType | null;
   loading: boolean;
-  signIn: (email: string, pass: string) => Promise<void>; // Stays as email for direct Firebase Auth
-  signUp: (name: string, username: string, email: string, pass: string) => Promise<void>;
+  signIn: (identifier: string, pass: string) => Promise<void>; // Changed email to identifier
+  signUp: (name: string, username: string, email: string, initialPasswordAsUsername: string, role: FirestoreUserType['role']) => Promise<void>; // Modified for new flow
   signOut: () => Promise<void>;
   reauthenticateCurrentUser: (password: string) => Promise<void>;
+  updateUserPassword: (currentPasswordFromUser: string, newPasswordFromUser: string) => Promise<void>; // New function
+  clearRequiresPasswordChangeFlag: () => Promise<void>; // New function
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -38,28 +41,22 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setLoading(true);
-      if (user) { 
+      if (user) {
         setAuthUser(user);
-        // Try fetching from 'users' collection first (for staff/auth accounts)
-        let userDocRef = doc(db, 'users', user.uid);
-        let userDocSnapshot = await getDoc(userDocRef);
+        const userDocRef = doc(db, 'users', user.uid);
+        const userDocSnapshot = await getDoc(userDocRef);
 
         if (userDocSnapshot.exists()) {
-          setFirestoreUser({ id: userDocSnapshot.id, ...userDocSnapshot.data() } as FirestoreUserType);
+          const userData = { id: userDocSnapshot.id, ...userDocSnapshot.data() } as FirestoreUserType;
+          setFirestoreUser(userData);
         } else {
-          // If not in 'users', check 'students' collection (if students have auth uids)
-          // This part might need adjustment depending on how student auth UIDs are stored if they differ
-          // For now, assuming if a user is authenticated, their primary record is in 'users'
-          userDocRef = doc(db, 'students', user.uid); // Fallback or specific check if students have UIDs here
-          userDocSnapshot = await getDoc(userDocRef);
-          if (userDocSnapshot.exists()) {
-             setFirestoreUser({ id: userDocSnapshot.id, ...userDocSnapshot.data() } as FirestoreUserType);
-          } else {
-            console.warn(`Firestore document not found for authenticated user UID: ${user.uid} in 'users' or 'students'.`);
-            setFirestoreUser(null); 
-          }
+          // This case might happen if an Auth user exists but their Firestore doc was deleted or not created.
+          // Or, if students also use Firebase Auth directly and their records are only in 'students'.
+          // For simplicity, this starter assumes staff users are primarily in 'users'.
+          console.warn(`Firestore document not found for authenticated user UID: ${user.uid} in 'users' collection.`);
+          setFirestoreUser(null);
         }
-      } else { 
+      } else {
         setAuthUser(null);
         setFirestoreUser(null);
       }
@@ -69,57 +66,78 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     return () => unsubscribe();
   }, []);
 
-  const signIn = async (email: string, pass: string) => {
+  const signIn = async (identifier: string, pass: string) => {
     setLoading(true);
+    let emailToAuth = identifier;
     try {
-      await signInWithEmailAndPassword(auth, email, pass);
+      if (!identifier.includes('@')) { // Assume it's a username
+        const usersRef = collection(db, 'users');
+        const usernameQuery = query(usersRef, where('username', '==', identifier.trim()), limit(1));
+        const usernameSnapshot = await getDocs(usernameQuery);
+        if (!usernameSnapshot.empty) {
+          const userDoc = usernameSnapshot.docs[0].data();
+          if (userDoc.email) {
+            emailToAuth = userDoc.email;
+          } else {
+            throw new Error('User account does not have an associated email.');
+          }
+        } else {
+          // Also check students collection if usernames could be there and distinct from 'users'
+           const studentsRef = collection(db, 'students');
+           const studentUsernameQuery = query(studentsRef, where('username', '==', identifier.trim()), limit(1));
+           const studentUsernameSnapshot = await getDocs(studentUsernameQuery);
+           if(!studentUsernameSnapshot.empty) {
+             const studentDoc = studentUsernameSnapshot.docs[0].data();
+             if(studentDoc.email) {
+                emailToAuth = studentDoc.email;
+             } else {
+                throw new Error('Student account does not have an associated email.');
+             }
+           } else {
+            throw new Error('Username not found.');
+           }
+        }
+      }
+      await signInWithEmailAndPassword(auth, emailToAuth, pass);
       // Firestore user will be set by onAuthStateChanged
     } catch (error) {
-      setLoading(false); 
+      setLoading(false);
       throw error;
     }
-    // setLoading(false) is handled by onAuthStateChanged
+    // setLoading(false) is handled by onAuthStateChanged which also sets firestoreUser
   };
 
-  const signUp = async (name: string, username: string, email: string, pass: string) => {
+  // Modified signUp for username as initial password and requiresPasswordChange flag
+  const signUp = async (name: string, username: string, email: string, initialPasswordAsUsername: string, role: FirestoreUserType['role']) => {
     setLoading(true);
     try {
-      // Check for username uniqueness in 'users' collection
-      const usernameQuery = query(collection(db, 'users'), where('username', '==', username), limit(1));
-      const usernameSnapshot = await getDocs(usernameQuery);
-      if (!usernameSnapshot.empty) {
-        const error = new Error("Username already exists. Please choose a different one.");
-        (error as any).code = "auth/username-already-exists"; // Custom code
+      const usernameQueryUsers = query(collection(db, 'users'), where('username', '==', username), limit(1));
+      const usernameSnapshotUsers = await getDocs(usernameQueryUsers);
+      if (!usernameSnapshotUsers.empty) {
+        const error = new Error("Username already exists in staff. Please choose a different one.");
+        (error as any).code = "auth/username-already-exists";
         throw error;
       }
+      // Optionally, check username in 'students' too if they are distinct and can't overlap
+      // For now, assuming staff usernames must be unique within 'users'
 
-      const usersQuery = query(collection(db, 'users'), limit(1));
-      const existingUsersSnapshot = await getDocs(usersQuery);
-      let role: FirestoreUserType['role'] = 'student'; 
-      if (existingUsersSnapshot.empty) {
-        role = 'admin';
-      } else {
-        // Allow subsequent signups, default to 'student' or based on other logic if needed
-        // For now, simple 'student' default after first admin
-      }
-
-      const userCredential = await createUserWithEmailAndPassword(auth, email, pass);
+      const userCredential = await createUserWithEmailAndPassword(auth, email, initialPasswordAsUsername); // Use username as password
       const firebaseUser = userCredential.user;
-      
-      const newUserDocData: Omit<FirestoreUserType, 'id'> = { 
+
+      const newUserDocData: Omit<FirestoreUserType, 'id'> = {
         uid: firebaseUser.uid,
         name: name,
         username: username,
-        email: firebaseUser.email || email, // Ensure email is stored
-        role: role, 
+        email: firebaseUser.email || email,
+        role: role,
+        requiresPasswordChange: true, // Set the flag
       };
       await setDoc(doc(db, 'users', firebaseUser.uid), newUserDocData);
       // Firestore user will be set by onAuthStateChanged
     } catch (error) {
-      setLoading(false); 
+      setLoading(false);
       throw error;
     }
-     // setLoading(false) is handled by onAuthStateChanged
   };
 
   const signOut = async () => {
@@ -128,38 +146,69 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       await firebaseSignOut(auth);
       setAuthUser(null);
       setFirestoreUser(null);
-      router.push('/login'); 
+      router.push('/login');
     } catch (error) {
       console.error('Sign out error', error);
     } finally {
-      setLoading(false); 
+      setLoading(false);
     }
   };
 
   const reauthenticateCurrentUser = async (password: string) => {
-    if (!authUser) {
-      throw new Error("User not authenticated. Cannot re-authenticate.");
-    }
-    if (!authUser.email) {
-      throw new Error("Authenticated user does not have an email. Cannot re-authenticate with email/password.");
-    }
+    if (!authUser) throw new Error("User not authenticated.");
+    if (!authUser.email) throw new Error("Authenticated user does not have an email.");
     const credential = EmailAuthProvider.credential(authUser.email, password);
     await reauthenticateWithCredential(authUser, credential);
   };
-  
+
+  const updateUserPassword = async (currentPasswordFromUser: string, newPasswordFromUser: string) => {
+    if (!authUser) throw new Error("No user is currently signed in.");
+    await reauthenticateCurrentUser(currentPasswordFromUser); // Re-authenticate first
+    await firebaseUpdatePassword(authUser, newPasswordFromUser); // Then update
+  };
+
+  const clearRequiresPasswordChangeFlag = async () => {
+    if (!authUser || !firestoreUser) throw new Error("No user or Firestore user data available.");
+    try {
+      const userDocRef = doc(db, 'users', authUser.uid);
+      await updateDoc(userDocRef, {
+        requiresPasswordChange: false, // or delete(field)
+      });
+      // Update local firestoreUser state
+      setFirestoreUser(prev => prev ? { ...prev, requiresPasswordChange: false } : null);
+    } catch (error) {
+      console.error("Error clearing requiresPasswordChange flag:", error);
+      throw error;
+    }
+  };
+
   useEffect(() => {
     if (!loading) {
       const isAuthPage = pathname === '/login' || pathname === '/signup';
-      if (!authUser && !isAuthPage) {
+      const isForcePasswordChangePage = pathname === '/force-password-change';
+
+      if (authUser && firestoreUser?.requiresPasswordChange && !isForcePasswordChangePage) {
+        router.push('/force-password-change');
+      } else if (authUser && !firestoreUser?.requiresPasswordChange && (isAuthPage || isForcePasswordChangePage)) {
+        router.push('/dashboard');
+      } else if (!authUser && !isAuthPage && !isForcePasswordChangePage) { // ensure not to redirect from force-password-change if not auth'd
         router.push('/login');
-      } else if (authUser && isAuthPage) {
-        router.push('/dashboard'); 
       }
     }
-  }, [authUser, loading, pathname, router]);
+  }, [authUser, firestoreUser, loading, pathname, router]);
 
   return (
-    <AuthContext.Provider value={{ authUser, firestoreUser, loading, signIn, signUp, signOut, reauthenticateCurrentUser }}>
+    <AuthContext.Provider value={{
+      authUser,
+      firestoreUser,
+      loading,
+      signIn,
+      signUp,
+      signOut,
+      reauthenticateCurrentUser,
+      updateUserPassword,
+      clearRequiresPasswordChangeFlag
+    }}>
       {children}
     </AuthContext.Provider>
   );
