@@ -130,13 +130,7 @@ export default function StaffManagementPage() {
   }, []);
 
   const checkEmailExistence = useCallback(async (email: string) => {
-    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      setEmailCheckStatus('idle');
-      setEmailCheckMessage(null);
-      return;
-    }
-    setEmailCheckStatus('checking');
-    setEmailCheckMessage('Verifying email...');
+    // The initial "checking" status is now set in the useEffect for immediate feedback
     try {
       const q = query(collection(db, 'users'), where('email', '==', email.trim()), limit(1));
       const querySnapshot = await getDocs(q);
@@ -156,10 +150,10 @@ export default function StaffManagementPage() {
 
   const debouncedCheckEmail = useMemo(() => debounce(checkEmailExistence, 700), [checkEmailExistence]);
 
-  const resetEmailCheck = () => {
+  const resetEmailCheck = useCallback(() => {
     setEmailCheckStatus('idle');
     setEmailCheckMessage(null);
-  };
+  }, []);
 
   const handleOpenAddDialog = () => {
     setEditingStaff(null);
@@ -183,9 +177,12 @@ export default function StaffManagementPage() {
       assignedGroupId: currentGroupAssignment ? currentGroupAssignment.id : undefined,
       attendanceCode: staffToEdit.attendanceCode || '',
     });
-    resetEmailCheck(); // Reset on open, or trigger check if email exists
+    resetEmailCheck(); 
     if (staffToEdit.email) {
-      checkEmailExistence(staffToEdit.email); // Check existing email on edit
+      // Trigger initial check for existing user on edit
+      setEmailCheckStatus('checking');
+      setEmailCheckMessage('Verifying email...');
+      debouncedCheckEmail(staffToEdit.email);
     }
     setIsStaffFormDialogOpen(true);
   };
@@ -381,16 +378,22 @@ export default function StaffManagementPage() {
   };
 
   const watchedRole = form.watch('role');
-  const watchedEmail = form.watch('email'); // Watch email for debounced check
+  const watchedEmail = form.watch('email'); 
 
-  // Effect for debounced email check (only when dialog is open)
   useEffect(() => {
-    if (isStaffFormDialogOpen && watchedEmail) {
-      debouncedCheckEmail(watchedEmail);
-    } else if (!watchedEmail && isStaffFormDialogOpen) {
-      resetEmailCheck(); // Clear status if email is cleared
+    if (isStaffFormDialogOpen) {
+      if (watchedEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(watchedEmail)) {
+        setEmailCheckStatus('checking');
+        setEmailCheckMessage('Verifying email...');
+        debouncedCheckEmail(watchedEmail);
+      } else if (!watchedEmail) {
+        resetEmailCheck();
+      } else if (watchedEmail) { // Email is typed but not yet valid format
+        setEmailCheckStatus('idle');
+        setEmailCheckMessage('Please enter a valid email address.');
+      }
     }
-  }, [watchedEmail, debouncedCheckEmail, isStaffFormDialogOpen]);
+  }, [watchedEmail, isStaffFormDialogOpen, debouncedCheckEmail, resetEmailCheck]);
 
 
   if (isLoading && staffUsers.length === 0 && allGroups.length === 0) {
@@ -492,10 +495,7 @@ export default function StaffManagementPage() {
                             type="email"
                             placeholder="jane.doe@example.com"
                             {...field}
-                            onBlur={(e) => {
-                              field.onBlur(); // Keep RHF's onBlur
-                              debouncedCheckEmail(e.target.value);
-                            }}
+                            // onChange is handled by RHF's field, which updates watchedEmail
                           />
                         </FormControl>
                         {emailCheckMessage && (
@@ -739,3 +739,5 @@ export default function StaffManagementPage() {
     </>
   );
 }
+
+    
