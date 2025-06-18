@@ -71,7 +71,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setLoading(true);
       if (user) {
         setAuthUser(user);
-        let userDocRef = doc(db, 'users', user.uid);
+        let userDocRef = doc(db, 'users', user.uid); // First, check 'users' collection
         let userDocSnapshot = await getDoc(userDocRef);
         let userDataFrom: 'users' | 'Admins' | null = null;
 
@@ -90,15 +90,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           const userData = { 
             id: userDocSnapshot.id, 
             ...userDocSnapshot.data(),
-            // You might want to add a non-DB field here to easily know the source later:
-            // _dataSource: userDataFrom 
+            // _dataSource: userDataFrom // Optional: for debugging to know where it loaded from
           } as FirestoreUserType;
           setFirestoreUser(userData);
-          console.log(`[AuthContext] User data loaded from ${userDataFrom} for UID: ${user.uid}`);
+          console.log(`[AuthContext] User data loaded from '${userDataFrom}' for UID: ${user.uid}`);
         } else {
-          console.warn(`[AuthContext] Firestore document not found for authenticated user UID: ${user.uid} in 'users' or 'Admins' collection.`);
+          console.warn(`[AuthContext] Firestore document not found for authenticated user UID: ${user.uid} in 'users' or 'Admins'.`);
           setFirestoreUser(null);
-          // Optional: Sign out if Firestore record is crucial and missing
+          // Optional: Consider signing out if Firestore record is crucial and missing.
           // await firebaseSignOut(auth); 
           // setAuthUser(null);
         }
@@ -120,8 +119,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     console.log(`[AuthContext] Attempting sign in for identifier: ${identifier}`);
     try {
       if (!identifier.includes('@')) {
-        console.log(`[AuthContext] Identifier "${identifier}" is not an email. Searching username.`);
-        // Try 'users' collection first
+        console.log(`[AuthContext] Identifier "${identifier}" is not an email. Searching for username.`);
+        // Try 'users' collection first for non-admin roles
         let usernameQuery = query(collection(db, 'users'), where('username', '==', identifier.trim()), limit(1));
         let usernameSnapshot = await getDocs(usernameQuery);
 
@@ -136,7 +135,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             userDocSource = 'Admins';
           }
         }
-
+        
         if (userDocSource && !usernameSnapshot.empty) {
           const userDoc = usernameSnapshot.docs[0].data() as FirestoreUserType;
           console.log(`[AuthContext] Found user document for username "${identifier.trim()}" in '${userDocSource}':`, userDoc);
@@ -152,11 +151,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           throw new Error('Nombre de usuario no encontrado.');
         }
       } else {
-        console.log(`[AuthContext] Identifier "${identifier}" is an email. Proceeding directly with Firebase Auth.`);
+         console.log(`[AuthContext] Identifier "${identifier}" is an email. Proceeding directly with Firebase Auth.`);
       }
+      
       await signInWithEmailAndPassword(auth, emailToAuth, pass);
       console.log(`[AuthContext] Firebase Auth successful for email: ${emailToAuth}`);
-      // Firestore user will be set by onAuthStateChanged
+      // Firestore user will be set by onAuthStateChanged based on UID.
     } catch (error: any) {
       console.error(`[AuthContext] signIn error:`, error.code, error.message, error);
       setLoading(false);
@@ -178,22 +178,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       const targetCollection = role === 'admin' ? 'Admins' : 'users';
       console.log(`[AuthContext] signUp: Attempting to create user in ${targetCollection} collection.`);
 
-      // Check username in target collection
       const usernameQuery = query(collection(db, targetCollection), where('username', '==', username.trim()), limit(1));
       const usernameSnapshot = await getDocs(usernameQuery);
       if (!usernameSnapshot.empty) {
-        const error = new Error("Username already exists in the target collection. Please choose a different one.");
+        const error = new Error("Username already exists in the target collection for this role. Please choose a different one.");
         (error as any).code = "auth/username-already-exists"; 
         throw error;
       }
       
-      // Check email in target collection (optional, Firebase Auth will be the ultimate check for email uniqueness across Auth system)
-      const emailQuery = query(collection(db, targetCollection), where('email', '==', email.trim()), limit(1));
-      const emailSnapshot = await getDocs(emailQuery);
-      if (!emailSnapshot.empty) {
-         console.warn(`[AuthContext] Email pre-check found '${email}' in Firestore '${targetCollection}' collection. Firebase Auth will make final determination.`);
-      }
-
       const userCredential = await createUserWithEmailAndPassword(auth, email, initialPasswordAsUsername);
       const firebaseUser = userCredential.user;
 
@@ -203,7 +195,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         username: username.trim(),
         email: firebaseUser.email || email.trim(), 
         role: role,
-        requiresPasswordChange: true, // Always true for new users
+        requiresPasswordChange: true,
         ...(role === 'student' && studentDetails?.level && {
           level: studentDetails.level,
           gradesByLevel: {
@@ -217,12 +209,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         })
       };
 
-      // Save to the determined collection
       await setDoc(doc(db, targetCollection, firebaseUser.uid), newUserDocData);
       console.log(`[AuthContext] User document created in '${targetCollection}' for UID: ${firebaseUser.uid}`);
       
       setAuthUser(firebaseUser);
-      // Ensure the firestoreUser state reflects the newly created user from the correct collection
       setFirestoreUser({ id: firebaseUser.uid, ...newUserDocData } as FirestoreUserType);
 
     } catch (error) {
@@ -261,34 +251,32 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const clearRequiresPasswordChangeFlag = async () => {
     if (!authUser || !firestoreUser) throw new Error("No user or Firestore user data available.");
     try {
-      // Determine which collection the user's document is in
-      // This assumes firestoreUser.role is reliable after login.
+      // Determine the collection based on the firestoreUser's role
       const targetCollection = firestoreUser.role === 'admin' ? 'Admins' : 'users';
       const userDocRef = doc(db, targetCollection, authUser.uid);
       
-      // Verify the document exists in the target collection before updating
+      // Check if the document exists in the determined collection
       const docSnap = await getDoc(userDocRef);
       if (!docSnap.exists()) {
-          // Fallback: if user role was admin but doc not in Admins, try users (e.g., during migration)
-          // Or if role was not admin but doc not in users, this is an issue.
-          if (targetCollection === 'Admins') {
-              const userDocRefInUsers = doc(db, 'users', authUser.uid);
-              const userSnapInUsers = await getDoc(userDocRefInUsers);
-              if (userSnapInUsers.exists()) {
-                  console.warn(`[AuthContext] Admin user ${authUser.uid} found in 'users' collection during clearRequiresPasswordChangeFlag. Updating there.`);
-                  await updateDoc(userDocRefInUsers, { requiresPasswordChange: false });
-              } else {
-                   throw new Error(`User document for ${authUser.uid} not found in Admins or users.`);
-              }
-          } else {
-               throw new Error(`User document for ${authUser.uid} not found in ${targetCollection}.`);
-          }
+        // Fallback: if role indicates admin but doc not in Admins, or vice-versa
+        // This can happen if the role in firestoreUser is stale or there's a data inconsistency
+        console.warn(`[AuthContext] clearRequiresPasswordChangeFlag: Document for UID ${authUser.uid} not found in expected collection '${targetCollection}'. Checking alternative...`);
+        const alternativeCollection = targetCollection === 'Admins' ? 'users' : 'Admins';
+        const altUserDocRef = doc(db, alternativeCollection, authUser.uid);
+        const altDocSnap = await getDoc(altUserDocRef);
+
+        if (altDocSnap.exists()) {
+          console.warn(`[AuthContext] Document found in '${alternativeCollection}'. Updating there.`);
+          await updateDoc(altUserDocRef, { requiresPasswordChange: false });
+        } else {
+          throw new Error(`User document for ${authUser.uid} not found in '${targetCollection}' or '${alternativeCollection}'.`);
+        }
       } else {
-           await updateDoc(userDocRef, { requiresPasswordChange: false });
+         await updateDoc(userDocRef, { requiresPasswordChange: false });
       }
       
       setFirestoreUser(prev => prev ? { ...prev, requiresPasswordChange: false } : null);
-      console.log(`[AuthContext] Cleared requiresPasswordChange flag for user ${authUser.uid} in ${targetCollection}`);
+      console.log(`[AuthContext] Cleared requiresPasswordChange flag for user ${authUser.uid}.`);
     } catch (error) {
       console.error("[AuthContext] Error clearing requiresPasswordChange flag:", error);
       throw error;
@@ -334,3 +322,4 @@ export const useAuth = (): AuthContextType => {
   }
   return context;
 };
+

@@ -73,7 +73,7 @@ function debounce<F extends (...args: any[]) => any>(func: F, waitFor: number) {
 }
 
 export default function StaffManagementPage() {
-  const [staffUsers, setStaffUsers] = useState<User[]>([]); // Will hold users from 'users' and 'Admins'
+  const [staffUsers, setStaffUsers] = useState<User[]>([]);
   const [allGroups, setAllGroups] = useState<Group[]>([]);
   const [allSedes, setAllSedes] = useState<Sede[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -103,11 +103,12 @@ export default function StaffManagementPage() {
   const fetchData = async () => {
     setIsLoading(true);
     try {
-      const staffRolesForUsersCollection: User['role'][] = ['teacher', 'caja', 'supervisor'];
+      const staffRolesForUsersCollection: User['role'][] = ['teacher', 'caja', 'supervisor']; // Exclude 'student' and 'admin'
       const usersQuery = query(collection(db, 'users'), where('role', 'in', staffRolesForUsersCollection));
       const usersSnapshotPromise = getDocs(usersQuery);
       
-      const adminsQuery = query(collection(db, 'Admins'), where('role', '==', 'admin'));
+      // Fetch admins from 'Admins' collection
+      const adminsQuery = query(collection(db, 'Admins')); // No role check needed if all docs in Admins are admins
       const adminsSnapshotPromise = getDocs(adminsQuery);
 
       const groupsSnapshotPromise = getDocs(collection(db, 'groups'));
@@ -121,7 +122,8 @@ export default function StaffManagementPage() {
       ]);
 
       const fetchedUsers = usersSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as User));
-      const fetchedAdmins = adminsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as User));
+      // Explicitly set role for admins fetched from 'Admins' collection if not present
+      const fetchedAdmins = adminsSnapshot.docs.map(docSnap => ({ id: docSnap.id, role: 'admin', ...docSnap.data() } as User));
       
       setStaffUsers([...fetchedUsers, ...fetchedAdmins]);
       setAllGroups(groupsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as Group)));
@@ -141,6 +143,8 @@ export default function StaffManagementPage() {
 
   const checkEmailExistence = useCallback(async (email: string, role: User['role']) => {
     const targetCollection = role === 'admin' ? 'Admins' : 'users';
+    setEmailCheckStatus('checking');
+    setEmailCheckMessage(`Verifying email in ${targetCollection}...`);
     try {
       const q = query(collection(db, targetCollection), where('email', '==', email.trim()), limit(1));
       const querySnapshot = await getDocs(q);
@@ -189,9 +193,6 @@ export default function StaffManagementPage() {
       sedeId: staffToEdit.sedeId || '',
     });
     resetEmailCheck();
-    // For editing, email check isn't strictly necessary unless it changes, 
-    // as Firebase Auth handles email uniqueness at its level.
-    // If you want to pre-validate a *changed* email, you can add logic here.
     setIsStaffFormDialogOpen(true);
   };
 
@@ -208,7 +209,7 @@ export default function StaffManagementPage() {
         setIsSubmitting(false);
         return;
     }
-    // If creating new user and email check found it exists in the target collection for that role
+    
     if (!editingStaff && emailCheckStatus === 'exists' ) {
         toast({ title: 'Email Exists', description: `Email already exists for a user with role '${data.role}'. Firebase Auth may also reject if globally unique.`, variant: 'destructive' });
         setIsSubmitting(false);
@@ -228,23 +229,25 @@ export default function StaffManagementPage() {
     };
 
     let staffMemberId: string | undefined = editingStaff?.id;
+    // Determine target collection based on role
     const targetCollection = data.role === 'admin' ? 'Admins' : 'users';
 
     try {
       if (editingStaff) {
-        // If role changed from admin to non-admin or vice-versa, document needs to move.
-        // This is complex, for now, we assume role doesn't change in edit or it's handled manually.
-        // Simplification: Update in the original collection. User must delete & re-create to change collection.
         const originalCollection = editingStaff.role === 'admin' ? 'Admins' : 'users';
-        if (data.role !== editingStaff.role) {
-            toast({title: "Role Change Not Fully Supported", description: "Changing role between Admin and other staff requires manual DB adjustment to move document between collections. Data saved to original collection.", variant: "default"});
+        if (targetCollection !== originalCollection) {
+            toast({title: "Role Change Across Collections Not Supported", description: "Changing a user's role to/from Admin requires manual database migration. Data was updated in the original collection.", variant: "default"});
+            // Attempt to update in original collection, but this is not ideal for role change.
+            const staffRef = doc(db, originalCollection, editingStaff.id);
+            const { email, username, role, ...updateData } = firestoreUserData; // Exclude role if it's a cross-collection change.
+            await updateDoc(staffRef, updateData);
+        } else {
+            const staffRef = doc(db, targetCollection, editingStaff.id);
+            const { email, username, ...updateData } = firestoreUserData; 
+            await updateDoc(staffRef, updateData);
         }
-        const staffRef = doc(db, originalCollection, editingStaff.id);
-        // Do not update email or username for existing users through this form to avoid Auth issues
-        const { email, username, ...updateData } = firestoreUserData; 
-        await updateDoc(staffRef, updateData);
         toast({ title: 'Staff User Updated', description: `${data.name}'s record updated successfully.` });
-      } else { // Creating new staff user
+      } else { 
         if (!data.username || !data.email) {
             toast({ title: 'Error', description: 'Username and Email are required for new staff.', variant: 'destructive'});
             setIsSubmitting(false);
@@ -258,10 +261,8 @@ export default function StaffManagementPage() {
             additionalData.attendanceCode = data.attendanceCode;
         }
 
-        // signUp in AuthContext now handles saving to the correct collection
         await signUpUser(data.name, data.username, data.email, data.username, data.role, undefined, additionalData);
         
-        // Get the new user's ID to assign to group/sede if necessary (signUp might need to return it or we query)
         const q = query(collection(db, targetCollection), where("email", "==", data.email), limit(1));
         const querySnapshot = await getDocs(q);
         if (!querySnapshot.empty) {
@@ -274,7 +275,6 @@ export default function StaffManagementPage() {
         });
       }
 
-      // Group assignment logic for teachers
       if (staffMemberId && data.role === 'teacher') {
         const newlySelectedGroupId = data.assignedGroupId === UNASSIGN_VALUE_KEY ? null : data.assignedGroupId || null;
         const previouslyAssignedGroup = allGroups.find(g => g.teacherId === staffMemberId);
@@ -310,25 +310,22 @@ export default function StaffManagementPage() {
         }
       }
 
-      // Sede assignment for Supervisors (if not already handled by Sede Management)
       if (staffMemberId && data.role === 'supervisor') {
           const newSedeId = data.sedeId === UNASSIGN_VALUE_KEY ? null : data.sedeId || null;
-          const userSedeRef = doc(db, targetCollection, staffMemberId); // targetCollection here might be Admins if supervisor role is Admin in future
+          const userSedeRef = doc(db, targetCollection, staffMemberId); 
           await updateDoc(userSedeRef, { sedeId: newSedeId });
 
-          // If supervisor is assigned to a new Sede, ensure they are the Sede's supervisor
           if (newSedeId) {
               const sedeRef = doc(db, 'sedes', newSedeId);
               const currentSedeDoc = allSedes.find(s => s.id === newSedeId);
               if (currentSedeDoc?.supervisorId !== staffMemberId) {
                  await updateDoc(sedeRef, { supervisorId: staffMemberId });
-                 // If this supervisor was previously assigned to another sede, clear that old assignment
                  const oldSede = allSedes.find(s => s.supervisorId === staffMemberId && s.id !== newSedeId);
                  if (oldSede) {
                      await updateDoc(doc(db, 'sedes', oldSede.id), {supervisorId: null});
                  }
               }
-          } else { // Unassigning supervisor from any Sede
+          } else { 
              const oldSede = allSedes.find(s => s.supervisorId === staffMemberId);
              if (oldSede) {
                  await updateDoc(doc(db, 'sedes', oldSede.id), {supervisorId: null});
@@ -445,12 +442,7 @@ export default function StaffManagementPage() {
             batch.update(sedeRef, { supervisorId: null });
         }
       }
-      // Also remove from Sede if they were a teacher assigned to a Sede (if sedeId on user doc)
-      if (staffToDelete.sedeId && (staffToDelete.role === 'teacher' || staffToDelete.role === 'supervisor')) {
-          // This is already handled by updating the user doc directly for Sede assignment.
-          // No explicit Sede document update needed here unless Sede stores list of teachers/supervisors.
-      }
-
+      
       await batch.commit();
 
       toast({ title: 'Staff User Record Deleted', description: `${staffToDelete.name}'s Firestore record removed and unassigned if applicable. Their Firebase Authentication account (if any) is NOT automatically deleted by this action.` });
@@ -486,37 +478,33 @@ export default function StaffManagementPage() {
   };
 
   const watchedRole = form.watch('role');
-  const watchedEmail = form.watch('email');
+  const watchedEmailValue = form.watch('email'); // Use a different name to avoid conflict
   const currentFormRole = form.getValues('role');
 
   useEffect(() => {
-    const currentRoleForCheck = editingStaff ? editingStaff.role : currentFormRole;
-    if (isStaffFormDialogOpen && !editingStaff) { // Only for new users
-      if (watchedEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(watchedEmail)) {
-        setEmailCheckStatus('checking');
-        setEmailCheckMessage('Verifying email...');
-        debouncedCheckEmail(watchedEmail, currentRoleForCheck);
-      } else if (!watchedEmail) {
+    const roleToCheck = editingStaff ? editingStaff.role : currentFormRole;
+    if (isStaffFormDialogOpen && !editingStaff) { 
+      if (watchedEmailValue && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(watchedEmailValue)) {
+        debouncedCheckEmail(watchedEmailValue, roleToCheck);
+      } else if (!watchedEmailValue) {
         resetEmailCheck();
-      } else if (watchedEmail) {
+      } else if (watchedEmailValue) {
         setEmailCheckStatus('idle');
         setEmailCheckMessage('Please enter a valid email address.');
       }
-    } else if (isStaffFormDialogOpen && editingStaff && watchedEmail !== editingStaff.email) { // For existing users if email changed
-        if (watchedEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(watchedEmail)) {
-            setEmailCheckStatus('checking');
-            setEmailCheckMessage('Verifying new email...');
-            debouncedCheckEmail(watchedEmail, currentRoleForCheck); // Check against the correct target collection
-        } else if (!watchedEmail) {
+    } else if (isStaffFormDialogOpen && editingStaff && watchedEmailValue !== editingStaff.email) { 
+        if (watchedEmailValue && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(watchedEmailValue)) {
+            debouncedCheckEmail(watchedEmailValue, roleToCheck); 
+        } else if (!watchedEmailValue) {
             resetEmailCheck();
-        } else if (watchedEmail) {
+        } else if (watchedEmailValue) {
              setEmailCheckStatus('idle');
             setEmailCheckMessage('Please enter a valid email address.');
         }
-    } else if (isStaffFormDialogOpen && editingStaff && watchedEmail === editingStaff.email) { // Email unchanged for existing user
+    } else if (isStaffFormDialogOpen && editingStaff && watchedEmailValue === editingStaff.email) { 
         resetEmailCheck(); 
     }
-  }, [watchedEmail, currentFormRole, isStaffFormDialogOpen, editingStaff, debouncedCheckEmail, resetEmailCheck]);
+  }, [watchedEmailValue, currentFormRole, isStaffFormDialogOpen, editingStaff, debouncedCheckEmail, resetEmailCheck]);
 
 
   if (isLoading && staffUsers.length === 0 && allGroups.length === 0 && allSedes.length === 0) {
@@ -618,7 +606,9 @@ export default function StaffManagementPage() {
                   )}/>
                   <FormField control={form.control} name="role" render={({ field }) => (
                       <FormItem><FormLabel>Role*</FormLabel>
-                        <Select onValueChange={field.onChange} value={field.value} defaultValue={field.value} disabled={!!editingStaff && editingStaff.role === 'admin' && authUser?.uid === editingStaff.id /* Prevent admin from changing their own role */}>
+                        <Select onValueChange={field.onChange} value={field.value} defaultValue={field.value} 
+                          disabled={!!editingStaff && editingStaff.role === 'admin' && authUser?.uid === editingStaff.id }
+                        >
                           <FormControl><SelectTrigger><SelectValue placeholder="Select a role" /></SelectTrigger></FormControl>
                           <SelectContent>
                             <SelectItem value="teacher">Teacher</SelectItem>
@@ -703,6 +693,8 @@ export default function StaffManagementPage() {
                   assignmentDisplay = assignedGroup ? `${assignedGroup.name} (Grupo)` : (assignedSedeName !== 'N/A' ? `${assignedSedeName} (Sede)` : 'Unassigned');
               } else if (staff.role === 'supervisor') {
                   assignmentDisplay = assignedSedeName !== 'N/A' ? `${assignedSedeName} (Sede)` : 'Unassigned';
+              } else if (staff.role === 'admin') {
+                  assignmentDisplay = staff.sedeId ? `${getSedeName(staff.sedeId)} (Sede Default)` : 'Global Admin';
               }
               return (
               <TableRow key={staff.id}>
@@ -717,9 +709,13 @@ export default function StaffManagementPage() {
                 <TableCell>{assignmentDisplay}</TableCell>
                 <TableCell>{(staff.role === 'teacher' || staff.role === 'admin' || staff.role === 'supervisor') ? (staff.attendanceCode || <span className="text-muted-foreground text-xs">Not set</span>) : 'N/A'}</TableCell>
                 <TableCell className="space-x-0.5">
-                  <Button variant="ghost" size="icon" className="mr-1" onClick={() => handleOpenEditDialog(staff)} title="Edit User" disabled={staff.role === 'admin' && authUser?.uid !== staff.id && authUser?.uid !== staffUsers.find(u => u.role === 'admin')?.id /* Only main admin can edit other admins, or self */}><Pencil className="h-4 w-4" /><span className="sr-only">Edit</span></Button>
+                  <Button variant="ghost" size="icon" className="mr-1" onClick={() => handleOpenEditDialog(staff)} title="Edit User" 
+                    disabled={staff.role === 'admin' && authUser?.uid !== staff.id && (authUser?.uid !== staffUsers.find(u => u.role === 'admin' && u.id === authUser?.uid)?.id )}
+                  ><Pencil className="h-4 w-4" /><span className="sr-only">Edit</span></Button>
                   <Button variant="ghost" size="icon" className="mr-1" onClick={() => handleSendPasswordReset(staff.email, staff.name)} disabled={!staff.email || isSendingResetEmail === staff.email} title={staff.email ? "Send Password Reset Email" : "Cannot reset (no email)"}><KeyRound className="h-4 w-4" /><span className="sr-only">Send Password Reset</span></Button>
-                  <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => handleOpenDeleteDialog(staff)} title="Delete User" disabled={staff.role === 'admin' && authUser?.uid === staff.id /* Prevent admin from deleting self */}><Trash2 className="h-4 w-4" /><span className="sr-only">Delete</span></Button>
+                  <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => handleOpenDeleteDialog(staff)} title="Delete User" 
+                    disabled={staff.role === 'admin' && authUser?.uid === staff.id}
+                  ><Trash2 className="h-4 w-4" /><span className="sr-only">Delete</span></Button>
                 </TableCell>
               </TableRow>
             )}) : (!isLoading && (<TableRow><TableCell colSpan={7} className="text-center">No staff users found.</TableCell></TableRow>))}
@@ -741,3 +737,4 @@ export default function StaffManagementPage() {
     </>
   );
 }
+
