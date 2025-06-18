@@ -13,8 +13,8 @@ import {
 } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Loader2, Pencil, Trash2, UserPlus, FolderKanban, Briefcase, KeyRound, MailIcon, AlertTriangle, Building } from 'lucide-react'; // Added Building
-import type { User, Group, Sede } from '@/types'; // Added Sede
+import { Loader2, Pencil, Trash2, UserPlus, FolderKanban, Briefcase, KeyRound, MailIcon, AlertTriangle, Building } from 'lucide-react';
+import type { User, Group, Sede } from '@/types';
 import { db, auth } from '@/lib/firebase';
 import { collection, getDocs, deleteDoc, doc, updateDoc, query, where, writeBatch, limit } from 'firebase/firestore';
 import { sendPasswordResetEmail } from 'firebase/auth';
@@ -50,11 +50,11 @@ const staffFormSchema = z.object({
   username: z.string().min(3, "Username must be at least 3 characters.").regex(/^[a-zA-Z0-9_.-]+$/, "Username can only contain letters, numbers, dots, underscores, or hyphens."),
   email: z.string().email({ message: "Invalid email address." }),
   phoneNumber: z.string().optional().or(z.literal('')),
-  role: z.enum(['teacher', 'admin', 'caja', 'supervisor'], { required_error: "Role is required." }), // Added 'supervisor'
+  role: z.enum(['teacher', 'admin', 'caja', 'supervisor'], { required_error: "Role is required." }),
   photoUrl: z.string().url({ message: "Please enter a valid URL for photo." }).optional().or(z.literal('')),
-  assignedGroupId: z.string().optional(), // For teacher's group assignment
+  assignedGroupId: z.string().optional(), 
   attendanceCode: z.string().min(4, "Code must be at least 4 characters.").max(20, "Code cannot exceed 20 characters.").optional().or(z.literal('')),
-  sedeId: z.string().optional().or(z.literal('')), // For assigning teacher/supervisor to a Sede
+  sedeId: z.string().optional().or(z.literal('')),
 });
 
 type StaffFormValues = z.infer<typeof staffFormSchema>;
@@ -73,9 +73,9 @@ function debounce<F extends (...args: any[]) => any>(func: F, waitFor: number) {
 }
 
 export default function StaffManagementPage() {
-  const [staffUsers, setStaffUsers] = useState<User[]>([]);
+  const [staffUsers, setStaffUsers] = useState<User[]>([]); // Will hold users from 'users' and 'Admins'
   const [allGroups, setAllGroups] = useState<Group[]>([]);
-  const [allSedes, setAllSedes] = useState<Sede[]>([]); // State for Sedes
+  const [allSedes, setAllSedes] = useState<Sede[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSendingResetEmail, setIsSendingResetEmail] = useState<string | null>(null);
@@ -96,37 +96,36 @@ export default function StaffManagementPage() {
   const form = useForm<StaffFormValues>({
     resolver: zodResolver(staffFormSchema),
     defaultValues: {
-      name: '',
-      username: '',
-      email: '',
-      phoneNumber: '',
-      role: 'teacher',
-      photoUrl: '',
-      assignedGroupId: undefined,
-      attendanceCode: '',
-      sedeId: '',
+      name: '', username: '', email: '', phoneNumber: '', role: 'teacher', photoUrl: '', assignedGroupId: undefined, attendanceCode: '', sedeId: '',
     },
   });
 
   const fetchData = async () => {
     setIsLoading(true);
     try {
-      const staffRoles: User['role'][] = ['admin', 'teacher', 'caja', 'supervisor'];
-      const usersQuery = query(collection(db, 'users'), where('role', 'in', staffRoles));
+      const staffRolesForUsersCollection: User['role'][] = ['teacher', 'caja', 'supervisor'];
+      const usersQuery = query(collection(db, 'users'), where('role', 'in', staffRolesForUsersCollection));
       const usersSnapshotPromise = getDocs(usersQuery);
       
-      const groupsSnapshotPromise = getDocs(collection(db, 'groups'));
-      const sedesSnapshotPromise = getDocs(collection(db, 'sedes')); // Fetch Sedes
+      const adminsQuery = query(collection(db, 'Admins'), where('role', '==', 'admin'));
+      const adminsSnapshotPromise = getDocs(adminsQuery);
 
-      const [usersSnapshot, groupsSnapshot, sedesSnapshot] = await Promise.all([
+      const groupsSnapshotPromise = getDocs(collection(db, 'groups'));
+      const sedesSnapshotPromise = getDocs(collection(db, 'sedes'));
+
+      const [usersSnapshot, adminsSnapshot, groupsSnapshot, sedesSnapshot] = await Promise.all([
         usersSnapshotPromise,
+        adminsSnapshotPromise,
         groupsSnapshotPromise,
         sedesSnapshotPromise,
       ]);
 
-      setStaffUsers(usersSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as User)));
+      const fetchedUsers = usersSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as User));
+      const fetchedAdmins = adminsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as User));
+      
+      setStaffUsers([...fetchedUsers, ...fetchedAdmins]);
       setAllGroups(groupsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as Group)));
-      setAllSedes(sedesSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as Sede))); // Set Sedes
+      setAllSedes(sedesSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as Sede)));
 
     } catch (error) {
       console.error("Error fetching data:", error);
@@ -140,16 +139,17 @@ export default function StaffManagementPage() {
     fetchData();
   }, []);
 
-  const checkEmailExistence = useCallback(async (email: string) => {
+  const checkEmailExistence = useCallback(async (email: string, role: User['role']) => {
+    const targetCollection = role === 'admin' ? 'Admins' : 'users';
     try {
-      const q = query(collection(db, 'users'), where('email', '==', email.trim()), limit(1));
+      const q = query(collection(db, targetCollection), where('email', '==', email.trim()), limit(1));
       const querySnapshot = await getDocs(q);
       if (!querySnapshot.empty) {
         setEmailCheckStatus('exists');
-        setEmailCheckMessage('An account with this email already exists in Firestore (Staff).');
+        setEmailCheckMessage(`An account with this email already exists in ${targetCollection}.`);
       } else {
         setEmailCheckStatus('not_found');
-        setEmailCheckMessage('No staff account found with this email in Firestore. Email seems available for a new staff member.');
+        setEmailCheckMessage(`Email available in ${targetCollection}.`);
       }
     } catch (error) {
       console.error("Error checking email existence:", error);
@@ -189,11 +189,9 @@ export default function StaffManagementPage() {
       sedeId: staffToEdit.sedeId || '',
     });
     resetEmailCheck();
-    if (staffToEdit.email) {
-      setEmailCheckStatus('checking');
-      setEmailCheckMessage('Verifying email...');
-      debouncedCheckEmail(staffToEdit.email);
-    }
+    // For editing, email check isn't strictly necessary unless it changes, 
+    // as Firebase Auth handles email uniqueness at its level.
+    // If you want to pre-validate a *changed* email, you can add logic here.
     setIsStaffFormDialogOpen(true);
   };
 
@@ -210,6 +208,13 @@ export default function StaffManagementPage() {
         setIsSubmitting(false);
         return;
     }
+    // If creating new user and email check found it exists in the target collection for that role
+    if (!editingStaff && emailCheckStatus === 'exists' ) {
+        toast({ title: 'Email Exists', description: `Email already exists for a user with role '${data.role}'. Firebase Auth may also reject if globally unique.`, variant: 'destructive' });
+        setIsSubmitting(false);
+        return;
+    }
+
 
     const firestoreUserData: Partial<User> = {
       name: data.name,
@@ -223,19 +228,28 @@ export default function StaffManagementPage() {
     };
 
     let staffMemberId: string | undefined = editingStaff?.id;
+    const targetCollection = data.role === 'admin' ? 'Admins' : 'users';
 
     try {
       if (editingStaff) {
-        const staffRef = doc(db, 'users', editingStaff.id);
-        await updateDoc(staffRef, firestoreUserData);
+        // If role changed from admin to non-admin or vice-versa, document needs to move.
+        // This is complex, for now, we assume role doesn't change in edit or it's handled manually.
+        // Simplification: Update in the original collection. User must delete & re-create to change collection.
+        const originalCollection = editingStaff.role === 'admin' ? 'Admins' : 'users';
+        if (data.role !== editingStaff.role) {
+            toast({title: "Role Change Not Fully Supported", description: "Changing role between Admin and other staff requires manual DB adjustment to move document between collections. Data saved to original collection.", variant: "default"});
+        }
+        const staffRef = doc(db, originalCollection, editingStaff.id);
+        // Do not update email or username for existing users through this form to avoid Auth issues
+        const { email, username, ...updateData } = firestoreUserData; 
+        await updateDoc(staffRef, updateData);
         toast({ title: 'Staff User Updated', description: `${data.name}'s record updated successfully.` });
-      } else {
+      } else { // Creating new staff user
         if (!data.username || !data.email) {
             toast({ title: 'Error', description: 'Username and Email are required for new staff.', variant: 'destructive'});
             setIsSubmitting(false);
             return;
         }
-        // Pass sedeId to signUp if role is teacher or supervisor
         const additionalData: Partial<User> = {};
         if (data.role === 'teacher' || data.role === 'supervisor') {
             additionalData.sedeId = data.sedeId === UNASSIGN_VALUE_KEY ? null : data.sedeId || null;
@@ -244,8 +258,16 @@ export default function StaffManagementPage() {
             additionalData.attendanceCode = data.attendanceCode;
         }
 
+        // signUp in AuthContext now handles saving to the correct collection
         await signUpUser(data.name, data.username, data.email, data.username, data.role, undefined, additionalData);
         
+        // Get the new user's ID to assign to group/sede if necessary (signUp might need to return it or we query)
+        const q = query(collection(db, targetCollection), where("email", "==", data.email), limit(1));
+        const querySnapshot = await getDocs(q);
+        if (!querySnapshot.empty) {
+            staffMemberId = querySnapshot.docs[0].id;
+        }
+
         toast({
           title: 'Staff User Record Added',
           description: `${data.name} added. They can log in with username: ${data.username} (as password) and will be prompted to change it.`
@@ -287,6 +309,34 @@ export default function StaffManagementPage() {
           toast({ title: 'Group Unassigned', description: `${data.name} unassigned from group ${previouslyAssignedGroup.name} due to role change.` });
         }
       }
+
+      // Sede assignment for Supervisors (if not already handled by Sede Management)
+      if (staffMemberId && data.role === 'supervisor') {
+          const newSedeId = data.sedeId === UNASSIGN_VALUE_KEY ? null : data.sedeId || null;
+          const userSedeRef = doc(db, targetCollection, staffMemberId); // targetCollection here might be Admins if supervisor role is Admin in future
+          await updateDoc(userSedeRef, { sedeId: newSedeId });
+
+          // If supervisor is assigned to a new Sede, ensure they are the Sede's supervisor
+          if (newSedeId) {
+              const sedeRef = doc(db, 'sedes', newSedeId);
+              const currentSedeDoc = allSedes.find(s => s.id === newSedeId);
+              if (currentSedeDoc?.supervisorId !== staffMemberId) {
+                 await updateDoc(sedeRef, { supervisorId: staffMemberId });
+                 // If this supervisor was previously assigned to another sede, clear that old assignment
+                 const oldSede = allSedes.find(s => s.supervisorId === staffMemberId && s.id !== newSedeId);
+                 if (oldSede) {
+                     await updateDoc(doc(db, 'sedes', oldSede.id), {supervisorId: null});
+                 }
+              }
+          } else { // Unassigning supervisor from any Sede
+             const oldSede = allSedes.find(s => s.supervisorId === staffMemberId);
+             if (oldSede) {
+                 await updateDoc(doc(db, 'sedes', oldSede.id), {supervisorId: null});
+             }
+          }
+          toast({ title: 'Sede Assignment Updated', description: `${data.name}'s Sede assignment updated.`});
+      }
+
 
       form.reset({ name: '', username:'', email: '', phoneNumber: '', role: 'teacher', photoUrl: '', assignedGroupId: undefined, attendanceCode: '', sedeId: '' });
       setEditingStaff(null);
@@ -375,29 +425,32 @@ export default function StaffManagementPage() {
     setIsSubmitting(true);
     try {
       await reauthenticateCurrentUser(deleteAdminPassword);
-
+      
+      const targetCollection = staffToDelete.role === 'admin' ? 'Admins' : 'users';
       const batch = writeBatch(db);
-      const userRef = doc(db, 'users', staffToDelete.id);
+      const userRef = doc(db, targetCollection, staffToDelete.id);
       batch.delete(userRef);
 
-      if (staffToDelete.role === 'teacher' || staffToDelete.role === 'admin' || staffToDelete.role === 'supervisor') {
-        // Unassign from any group if teacher
-        if (staffToDelete.role === 'teacher') {
-            const assignedGroup = allGroups.find(g => g.teacherId === staffToDelete.id);
-            if (assignedGroup) {
-                const groupRef = doc(db, 'groups', assignedGroup.id);
-                batch.update(groupRef, { teacherId: null });
-            }
-        }
-        // Unassign from any Sede if supervisor
-        if (staffToDelete.role === 'supervisor') {
-            const assignedSede = allSedes.find(s => s.supervisorId === staffToDelete.id);
-            if (assignedSede) {
-                const sedeRef = doc(db, 'sedes', assignedSede.id);
-                batch.update(sedeRef, { supervisorId: null });
-            }
+      if (staffToDelete.role === 'teacher') {
+        const assignedGroup = allGroups.find(g => g.teacherId === staffToDelete.id);
+        if (assignedGroup) {
+            const groupRef = doc(db, 'groups', assignedGroup.id);
+            batch.update(groupRef, { teacherId: null });
         }
       }
+      if (staffToDelete.role === 'supervisor') {
+        const assignedSede = allSedes.find(s => s.supervisorId === staffToDelete.id);
+        if (assignedSede) {
+            const sedeRef = doc(db, 'sedes', assignedSede.id);
+            batch.update(sedeRef, { supervisorId: null });
+        }
+      }
+      // Also remove from Sede if they were a teacher assigned to a Sede (if sedeId on user doc)
+      if (staffToDelete.sedeId && (staffToDelete.role === 'teacher' || staffToDelete.role === 'supervisor')) {
+          // This is already handled by updating the user doc directly for Sede assignment.
+          // No explicit Sede document update needed here unless Sede stores list of teachers/supervisors.
+      }
+
       await batch.commit();
 
       toast({ title: 'Staff User Record Deleted', description: `${staffToDelete.name}'s Firestore record removed and unassigned if applicable. Their Firebase Authentication account (if any) is NOT automatically deleted by this action.` });
@@ -434,37 +487,39 @@ export default function StaffManagementPage() {
 
   const watchedRole = form.watch('role');
   const watchedEmail = form.watch('email');
+  const currentFormRole = form.getValues('role');
 
   useEffect(() => {
-    if (isStaffFormDialogOpen && !editingStaff) { 
+    const currentRoleForCheck = editingStaff ? editingStaff.role : currentFormRole;
+    if (isStaffFormDialogOpen && !editingStaff) { // Only for new users
       if (watchedEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(watchedEmail)) {
         setEmailCheckStatus('checking');
         setEmailCheckMessage('Verifying email...');
-        debouncedCheckEmail(watchedEmail);
+        debouncedCheckEmail(watchedEmail, currentRoleForCheck);
       } else if (!watchedEmail) {
         resetEmailCheck();
       } else if (watchedEmail) {
         setEmailCheckStatus('idle');
         setEmailCheckMessage('Please enter a valid email address.');
       }
-    } else if (isStaffFormDialogOpen && editingStaff && watchedEmail !== editingStaff.email) {
+    } else if (isStaffFormDialogOpen && editingStaff && watchedEmail !== editingStaff.email) { // For existing users if email changed
         if (watchedEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(watchedEmail)) {
             setEmailCheckStatus('checking');
             setEmailCheckMessage('Verifying new email...');
-            debouncedCheckEmail(watchedEmail);
+            debouncedCheckEmail(watchedEmail, currentRoleForCheck); // Check against the correct target collection
         } else if (!watchedEmail) {
             resetEmailCheck();
         } else if (watchedEmail) {
              setEmailCheckStatus('idle');
             setEmailCheckMessage('Please enter a valid email address.');
         }
-    } else if (isStaffFormDialogOpen && editingStaff && watchedEmail === editingStaff.email) {
+    } else if (isStaffFormDialogOpen && editingStaff && watchedEmail === editingStaff.email) { // Email unchanged for existing user
         resetEmailCheck(); 
     }
-  }, [watchedEmail, isStaffFormDialogOpen, editingStaff, debouncedCheckEmail, resetEmailCheck]);
+  }, [watchedEmail, currentFormRole, isStaffFormDialogOpen, editingStaff, debouncedCheckEmail, resetEmailCheck]);
 
 
-  if (isLoading && staffUsers.length === 0 && allGroups.length === 0) {
+  if (isLoading && staffUsers.length === 0 && allGroups.length === 0 && allSedes.length === 0) {
     return (
       <Card>
         <CardHeader>
@@ -501,7 +556,7 @@ export default function StaffManagementPage() {
       <CardHeader className="flex flex-row items-center justify-between">
         <div>
           <CardTitle className="flex items-center gap-2"><Briefcase className="h-6 w-6 text-primary" /> Staff Management</CardTitle>
-          <CardDescription>Manage teacher, admin, cashier, and supervisor accounts. Assign to groups/sedes, set attendance codes, and manage usernames. New staff will use their username as initial password and be forced to change it.</CardDescription>
+          <CardDescription>Manage teacher, admin, cashier, and supervisor accounts. Admins are stored in 'Admins' collection, others in 'users'. New staff will use their username as initial password and be forced to change it.</CardDescription>
         </div>
         <div className="flex gap-2">
           <Button asChild size="sm" variant="outline" className="gap-1.5 text-sm">
@@ -536,7 +591,7 @@ export default function StaffManagementPage() {
               <DialogHeader>
                 <DialogTitle>{editingStaff ? 'Edit Staff Record' : 'Add New Staff Record'}</DialogTitle>
                 <DialogPrimitiveDescription>
-                  {editingStaff ? 'Update staff details in Firestore.' : "Fill in staff details. Username and Email are required for login. The Username will be used as the staff member's initial password. They will be required to change this password upon their first login."}
+                  {editingStaff ? 'Update staff details. Email and username cannot be changed here for existing staff.' : "Fill in staff details. Username and Email are required for login. The Username will be used as the staff member's initial password. They will be required to change this password upon their first login."}
                 </DialogPrimitiveDescription>
               </DialogHeader>
               <Form {...form}>
@@ -545,7 +600,10 @@ export default function StaffManagementPage() {
                       <FormItem><FormLabel>Full Name*</FormLabel><FormControl><Input placeholder="Jane Doe" {...field} /></FormControl><FormMessage /></FormItem>
                   )}/>
                   <FormField control={form.control} name="username" render={({ field }) => (
-                      <FormItem><FormLabel>Username (for login & initial password)*</FormLabel><FormControl><Input placeholder="janedoe_staff" {...field} /></FormControl><FormMessage /></FormItem>
+                      <FormItem><FormLabel>Username (for login & initial password)*</FormLabel><FormControl><Input placeholder="janedoe_staff" {...field} disabled={!!editingStaff} /></FormControl>
+                      {!!editingStaff && <p className="text-xs text-muted-foreground mt-1">Username cannot be changed for existing staff.</p>}
+                      <FormMessage />
+                      </FormItem>
                   )}/>
                   <FormField control={form.control} name="email" render={({ field }) => (
                       <FormItem><FormLabel>Email (for Firebase Auth & Password Resets)*</FormLabel>
@@ -560,7 +618,7 @@ export default function StaffManagementPage() {
                   )}/>
                   <FormField control={form.control} name="role" render={({ field }) => (
                       <FormItem><FormLabel>Role*</FormLabel>
-                        <Select onValueChange={field.onChange} value={field.value} defaultValue={field.value}>
+                        <Select onValueChange={field.onChange} value={field.value} defaultValue={field.value} disabled={!!editingStaff && editingStaff.role === 'admin' && authUser?.uid === editingStaff.id /* Prevent admin from changing their own role */}>
                           <FormControl><SelectTrigger><SelectValue placeholder="Select a role" /></SelectTrigger></FormControl>
                           <SelectContent>
                             <SelectItem value="teacher">Teacher</SelectItem>
@@ -568,7 +626,9 @@ export default function StaffManagementPage() {
                             <SelectItem value="admin">Admin</SelectItem>
                             <SelectItem value="caja">Caja</SelectItem>
                           </SelectContent>
-                        </Select><FormMessage />
+                        </Select>
+                        {!!editingStaff && editingStaff.role === 'admin' && authUser?.uid === editingStaff.id && <p className="text-xs text-muted-foreground mt-1">Admins cannot change their own role.</p>}
+                        <FormMessage />
                       </FormItem>
                   )}/>
                   {(watchedRole === 'teacher') && (
@@ -626,8 +686,8 @@ export default function StaffManagementPage() {
         </div>
       </CardHeader>
       <CardContent>
-        {isLoading && staffUsers.length > 0 && (
-             <div className="flex items-center justify-center py-4"><Loader2 className="h-6 w-6 animate-spin text-primary" /><p className="ml-2 text-sm text-muted-foreground">Refreshing staff users...</p></div>
+        {isLoading && staffUsers.length === 0 && (
+             <div className="flex items-center justify-center py-4"><Loader2 className="h-6 w-6 animate-spin text-primary" /><p className="ml-2 text-sm text-muted-foreground">Loading staff users...</p></div>
         )}
         <Table>
           <TableHeader><TableRow>
@@ -657,9 +717,9 @@ export default function StaffManagementPage() {
                 <TableCell>{assignmentDisplay}</TableCell>
                 <TableCell>{(staff.role === 'teacher' || staff.role === 'admin' || staff.role === 'supervisor') ? (staff.attendanceCode || <span className="text-muted-foreground text-xs">Not set</span>) : 'N/A'}</TableCell>
                 <TableCell className="space-x-0.5">
-                  <Button variant="ghost" size="icon" className="mr-1" onClick={() => handleOpenEditDialog(staff)} title="Edit User"><Pencil className="h-4 w-4" /><span className="sr-only">Edit</span></Button>
+                  <Button variant="ghost" size="icon" className="mr-1" onClick={() => handleOpenEditDialog(staff)} title="Edit User" disabled={staff.role === 'admin' && authUser?.uid !== staff.id && authUser?.uid !== staffUsers.find(u => u.role === 'admin')?.id /* Only main admin can edit other admins, or self */}><Pencil className="h-4 w-4" /><span className="sr-only">Edit</span></Button>
                   <Button variant="ghost" size="icon" className="mr-1" onClick={() => handleSendPasswordReset(staff.email, staff.name)} disabled={!staff.email || isSendingResetEmail === staff.email} title={staff.email ? "Send Password Reset Email" : "Cannot reset (no email)"}><KeyRound className="h-4 w-4" /><span className="sr-only">Send Password Reset</span></Button>
-                  <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => handleOpenDeleteDialog(staff)} title="Delete User"><Trash2 className="h-4 w-4" /><span className="sr-only">Delete</span></Button>
+                  <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => handleOpenDeleteDialog(staff)} title="Delete User" disabled={staff.role === 'admin' && authUser?.uid === staff.id /* Prevent admin from deleting self */}><Trash2 className="h-4 w-4" /><span className="sr-only">Delete</span></Button>
                 </TableCell>
               </TableRow>
             )}) : (!isLoading && (<TableRow><TableCell colSpan={7} className="text-center">No staff users found.</TableCell></TableRow>))}
