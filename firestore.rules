@@ -4,158 +4,126 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Helper functions to check user roles from the 'users' collection
+    // Helper functions to check user roles
     function isUserAuthenticated() {
-      return request.auth != null;
+      return request.auth != null && request.auth.uid != null;
     }
 
-    // Helper function to get a user's role.
-    // It checks for document existence before trying to access data.role.
+    // Robust function to get user role
     function getUserRole(userId) {
-      let userDocPath = /databases/$(database)/documents/users/$(userId);
-      if (exists(userDocPath)) {
-        return get(userDocPath).data.role;
-      }
-      return null;
+      let userDoc = get(/databases/$(database)/documents/users/$(userId));
+      // Ensure the document exists and has a 'role' field before accessing it
+      return userDoc.exists && 'role' in userDoc.data ? userDoc.data.role : null;
     }
 
     function isAdmin(userId) {
-      return isUserAuthenticated() && getUserRole(userId) == 'admin';
+      return getUserRole(userId) == 'admin';
     }
 
     function isTeacher(userId) {
-      return isUserAuthenticated() && getUserRole(userId) == 'teacher';
+      return getUserRole(userId) == 'teacher';
     }
 
     function isSupervisor(userId) {
-      return isUserAuthenticated() && getUserRole(userId) == 'supervisor';
+      return getUserRole(userId) == 'supervisor';
     }
 
     function isCaja(userId) {
-      return isUserAuthenticated() && getUserRole(userId) == 'caja';
+      return getUserRole(userId) == 'caja';
     }
 
     function isStudent(userId) {
-      return isUserAuthenticated() && getUserRole(userId) == 'student';
+      return getUserRole(userId) == 'student';
     }
 
-    // Rules for 'users' collection (contains all user types including students, teachers, admins, etc.)
+    // Helper function to check if the user is updating only their own allowed fields
+    function isUpdatingOwnSafeFields() {
+      let allowedFields = ['name', 'phoneNumber', 'photoUrl', 'notes', 'age', 'gender', 'preferredShift', 'level', 'attendanceCode', 'sedeId', 'gradesByLevel']; // Added gradesByLevel
+      let incomingData = request.resource.data;
+
+      // User cannot change their own role, email, username, or uid via profile update
+      // User also cannot directly modify their own 'requiresPasswordChange' to true
+      let disallowedUserUpdates = ['role', 'email', 'username', 'uid'];
+      let changingDisallowedField = disallowedUserUpdates.some(field => field in incomingData && incomingData[field] != resource.data[field]);
+
+      if (changingDisallowedField) {
+        return false;
+      }
+      if ('requiresPasswordChange' in incomingData && incomingData.requiresPasswordChange == true && resource.data.requiresPasswordChange == false) {
+        return false; // User cannot set their own requiresPasswordChange from false to true
+      }
+
+      // Check if all incoming keys are in the allowed list or are implicitly allowed (like requiresPasswordChange when setting to false)
+      return incomingData.keys().hasOnly(allowedFields.concat(['requiresPasswordChange']));
+    }
+
+    function isUpdatingOwnRequiresPasswordChangeToFalse() {
+      // Check if the user is updating their *own* document
+      // And if requiresPasswordChange is being set from true to false
+      return request.resource.data.requiresPasswordChange == false && resource.data.requiresPasswordChange == true;
+    }
+
+    // Rules for the 'users' collection (students, teachers, admins, caja, supervisors)
     match /users/{userId} {
-      // Allow any authenticated user to read any individual user document.
-      // This is primarily to ensure helper functions (isAdmin, isTeacher, etc.) can
-      // always fetch the role of a user to evaluate other rules.
-      // LISTING users is still restricted below.
-      allow read: if isUserAuthenticated();
-
-      // Listing users is restricted to admin, teachers, and supervisors.
-      allow list: if isUserAuthenticated() &&
-                    (isAdmin(request.auth.uid) || isTeacher(request.auth.uid) || isSupervisor(request.auth.uid));
-
-      // Create:
-      // 1. Admins can create any user.
-      // 2. Users can self-register if the request indicates a student role and matches auth token.
-      allow create: if isUserAuthenticated() && (
-                      isAdmin(request.auth.uid) ||
-                      (request.auth.uid == userId && request.resource.data.role == 'student' && request.resource.data.email == request.auth.token.email)
+      allow read: if isUserAuthenticated() && (
+                    request.auth.uid == userId || // Can read own document
+                    isAdmin(request.auth.uid) ||
+                    isTeacher(request.auth.uid) ||
+                    isSupervisor(request.auth.uid) ||
+                    isCaja(request.auth.uid)
+                  );
+      allow list: if isUserAuthenticated() && (
+                    isAdmin(request.auth.uid) ||
+                    isTeacher(request.auth.uid) || // For selecting students/teachers
+                    isSupervisor(request.auth.uid)
+                  );
+      allow create: if isUserAuthenticated() && isAdmin(request.auth.uid); // Admin creates new staff/student *records*
+      allow update: if isUserAuthenticated() && (
+                      (isAdmin(request.auth.uid)) || // Admins can update any user document
+                      (request.auth.uid == userId && isUpdatingOwnSafeFields()) || // User can update their own allowed fields
+                      (request.auth.uid == userId && isUpdatingOwnRequiresPasswordChangeToFalse()) // User can change their password flag
                     );
-
-      // Update:
-      // 1. Admins can update any user.
-      // 2. Users can update specific "safe" fields on their own profile,
-      //    and specifically manage their 'requiresPasswordChange' flag.
-      function isOwner(docUserId) {
-        return request.auth.uid == docUserId;
-      }
-      function isUpdatingOwnSafeFields() {
-        // Define which fields a user can update on their own profile
-        // Excludes critical fields like 'role', 'email' (for auth sync), 'username' (for auth sync).
-        let allowedFields = ['name', 'phoneNumber', 'photoUrl', 'notes', 'age', 'gender', 'preferredShift', 'attendanceCode', 'sedeId'];
-        let passwordChangeField = ['requiresPasswordChange'];
-        let allAllowed = allowedFields.concat(passwordChangeField);
-
-        let incomingData = request.resource.data;
-        let existingData = resource.data;
-
-        // Check that only allowed fields are being modified
-        let onlyAllowedFieldsModified = incomingData.keys().hasOnly(allAllowed);
-
-        // Special handling for 'requiresPasswordChange': can only be set from true to false by the user.
-        let validPasswordChangeUpdate = true;
-        if (incomingData.keys().hasAny(passwordChangeField)) {
-            if (!(existingData.requiresPasswordChange == true && incomingData.requiresPasswordChange == false)) {
-                 // If user is trying to change it from false to true, or to some other value, deny.
-                 // Or if it's not present in existing data (shouldn't happen for this flag).
-                 if (incomingData.requiresPasswordChange != existingData.requiresPasswordChange) {
-                    validPasswordChangeUpdate = false;
-                 }
-            }
-        }
-        // Ensure email and username are not changed by non-admins
-        let emailUnchanged = incomingData.email == existingData.email;
-        let usernameUnchanged = incomingData.username == existingData.username;
-
-        return isOwner(userId) && onlyAllowedFieldsModified && validPasswordChangeUpdate && emailUnchanged && usernameUnchanged;
-      }
-      allow update: if isUserAuthenticated() && (isAdmin(request.auth.uid) || isUpdatingOwnSafeFields());
-
-
-      // Delete: Only admins can delete user documents.
-      allow delete: if isUserAuthenticated() && isAdmin(request.auth.uid);
+      allow delete: if isUserAuthenticated() && isAdmin(request.auth.uid); // Only admins can delete users
     }
 
-    // Rules for 'groups' collection
-    match /groups/{groupId} {
-      // Admins, teachers, supervisors, cashiers can read/list. Students too (e.g. to see their group).
-      allow read, list: if isUserAuthenticated() &&
-                          (isAdmin(request.auth.uid) || isTeacher(request.auth.uid) || isSupervisor(request.auth.uid) || isCaja(request.auth.uid) || isStudent(request.auth.uid));
-      // Admins and supervisors can create/update groups.
-      allow create, update: if isUserAuthenticated() &&
-                              (isAdmin(request.auth.uid) || isSupervisor(request.auth.uid));
-      allow delete: if isUserAuthenticated() && isAdmin(request.auth.uid);
-    }
-
-    // Rules for 'sessions' collection
-    match /sessions/{sessionId} {
-      allow read, list: if isUserAuthenticated() &&
-                          (isAdmin(request.auth.uid) || isTeacher(request.auth.uid) || isSupervisor(request.auth.uid) || isCaja(request.auth.uid) || isStudent(request.auth.uid));
-      // Admins, teachers, supervisors can create/update sessions.
-      allow create, update: if isUserAuthenticated() &&
-                              (isAdmin(request.auth.uid) || isTeacher(request.auth.uid) || isSupervisor(request.auth.uid));
-      allow delete: if isUserAuthenticated() && isAdmin(request.auth.uid);
-    }
-
-    // Rules for 'attendanceRecords' collection
+    // Rules for 'attendanceRecords'
     match /attendanceRecords/{recordId} {
-      // Admins, teachers, supervisors, cashiers can list. Students can read their own.
-      allow list: if isUserAuthenticated() &&
-                    (isAdmin(request.auth.uid) || isTeacher(request.auth.uid) || isSupervisor(request.auth.uid) || isCaja(request.auth.uid));
-      allow read: if isUserAuthenticated() &&
-                    (isAdmin(request.auth.uid) || isTeacher(request.auth.uid) || isSupervisor(request.auth.uid) || isCaja(request.auth.uid) ||
-                     (isStudent(request.auth.uid) && resource.data.userId == request.auth.uid) );
-      // Admins, teachers, supervisors, cashiers can create records.
-      allow create: if isUserAuthenticated() &&
-                      (isAdmin(request.auth.uid) || isTeacher(request.auth.uid) || isSupervisor(request.auth.uid) || isCaja(request.auth.uid));
-      // Only admins can modify/delete records.
+      allow read, list: if isUserAuthenticated() && (isAdmin(request.auth.uid) || isTeacher(request.auth.uid) || isSupervisor(request.auth.uid) || isCaja(request.auth.uid));
+      allow create: if isUserAuthenticated() && (isAdmin(request.auth.uid) || isTeacher(request.auth.uid) || isSupervisor(request.auth.uid) || isCaja(request.auth.uid));
+      allow update: if isUserAuthenticated() && (isAdmin(request.auth.uid) || isTeacher(request.auth.uid)); // Admins or teachers can update
+      allow delete: if isUserAuthenticated() && isAdmin(request.auth.uid);
+    }
+
+    // Rules for 'sessions'
+    match /sessions/{sessionId} {
+      allow read, list: if isUserAuthenticated() && (isAdmin(request.auth.uid) || isTeacher(request.auth.uid) || isSupervisor(request.auth.uid) || isCaja(request.auth.uid));
+      allow create: if isUserAuthenticated() && (isAdmin(request.auth.uid) || isTeacher(request.auth.uid) || isSupervisor(request.auth.uid));
       allow update, delete: if isUserAuthenticated() && isAdmin(request.auth.uid);
     }
 
-    // Rules for 'appConfiguration' collection (e.g., gradingConfig)
-    match /appConfiguration/{configId} {
-      allow read: if isUserAuthenticated(); // All authenticated users can read config.
-      allow write: if isUserAuthenticated() && isAdmin(request.auth.uid); // Only admins can change config.
+    // Rules for 'groups'
+    match /groups/{groupId} {
+      allow read, list: if isUserAuthenticated() && (isAdmin(request.auth.uid) || isTeacher(request.auth.uid) || isSupervisor(request.auth.uid) || isCaja(request.auth.uid));
+      allow create, update, delete: if isUserAuthenticated() && isAdmin(request.auth.uid);
     }
 
-    // Rules for 'teacherAttendanceRecords' collection
+    // Rules for 'appConfiguration' (like grading config)
+    match /appConfiguration/{configId} {
+      allow read: if isUserAuthenticated(); // All authenticated users can read config
+      allow write: if isUserAuthenticated() && isAdmin(request.auth.uid);
+    }
+
+    // Rules for 'teacherAttendanceRecords'
     match /teacherAttendanceRecords/{recordId} {
         allow read, list: if isUserAuthenticated() && (isAdmin(request.auth.uid) || isSupervisor(request.auth.uid));
-        // Admin dashboard logs this centrally
-        allow create: if isUserAuthenticated() && (isAdmin(request.auth.uid));
+        // Admin or the teacher themselves can create (assuming teacherId in record is their own UID)
+        allow create: if isUserAuthenticated() && (isAdmin(request.auth.uid) || (isTeacher(request.auth.uid) && request.resource.data.teacherId == request.auth.uid) || (isSupervisor(request.auth.uid) && request.resource.data.teacherId == request.auth.uid) );
         allow update, delete: if isUserAuthenticated() && isAdmin(request.auth.uid);
     }
 
-     // Rules for 'sedes' collection
+     // Rules for 'sedes'
     match /sedes/{sedeId} {
-      allow read, list: if isUserAuthenticated() && (isAdmin(request.auth.uid) || isSupervisor(request.auth.uid) || isTeacher(request.auth.uid) || isCaja(request.auth.uid));
+      allow read, list: if isUserAuthenticated() && (isAdmin(request.auth.uid) || isSupervisor(request.auth.uid) || isTeacher(request.auth.uid));
       allow create, update, delete: if isUserAuthenticated() && isAdmin(request.auth.uid);
     }
   }
