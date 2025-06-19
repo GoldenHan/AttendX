@@ -6,7 +6,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, Mail, Lock, User as UserIcon } from 'lucide-react';
+import { Loader2, Mail, Lock, User as UserIcon, Building } from 'lucide-react'; // Added Building icon
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -27,19 +27,21 @@ const loginFormSchema = z.object({
   password: z.string().min(1, { message: "La contraseña es requerida." }),
 });
 
-const signupFormSchema = z.object({
-  name: z.string().min(2, { message: "El nombre debe tener al menos 2 caracteres." }),
-  username: z.string().min(3, { message: "El nombre de usuario debe tener al menos 3 caracteres."}).regex(/^[a-zA-Z0-9_.-]+$/, "El nombre de usuario solo puede contener letras, números, puntos, guiones bajos o guiones."),
-  email: z.string().email({ message: "Dirección de correo electrónico inválida." }),
-  password: z.string().min(6, { message: "La contraseña debe tener al menos 6 caracteres." }),
-  confirmPassword: z.string().min(6, { message: "La contraseña debe tener al menos 6 caracteres." }),
-}).refine(data => data.password === data.confirmPassword, {
+// Schema for new institution admin signup
+const newAdminSignupFormSchema = z.object({
+  institutionName: z.string().min(2, { message: "El nombre de la institución debe tener al menos 2 caracteres." }),
+  adminName: z.string().min(2, { message: "El nombre del administrador debe tener al menos 2 caracteres." }),
+  adminUsername: z.string().min(3, { message: "El nombre de usuario debe tener al menos 3 caracteres."}).regex(/^[a-zA-Z0-9_.-]+$/, "El nombre de usuario solo puede contener letras, números, puntos, guiones bajos o guiones."),
+  adminEmail: z.string().email({ message: "Dirección de correo electrónico inválida." }),
+  adminPassword: z.string().min(6, { message: "La contraseña debe tener al menos 6 caracteres." }),
+  confirmAdminPassword: z.string().min(6, { message: "La contraseña debe tener al menos 6 caracteres." }),
+}).refine(data => data.adminPassword === data.confirmAdminPassword, {
   message: "Las contraseñas no coinciden.",
-  path: ["confirmPassword"],
+  path: ["confirmAdminPassword"],
 });
 
 type LoginFormValues = z.infer<typeof loginFormSchema>;
-type SignupFormValues = z.infer<typeof signupFormSchema>;
+type NewAdminSignupFormValues = z.infer<typeof newAdminSignupFormSchema>;
 
 export default function AuthPage() {
   const [isSignUpActive, setIsSignUpActive] = useState(false);
@@ -52,9 +54,9 @@ export default function AuthPage() {
     defaultValues: { identifier: '', password: '' },
   });
 
-  const signupForm = useForm<SignupFormValues>({
-    resolver: zodResolver(signupFormSchema),
-    defaultValues: { name: '', username: '', email: '', password: '', confirmPassword: '' },
+  const newAdminSignupForm = useForm<NewAdminSignupFormValues>({
+    resolver: zodResolver(newAdminSignupFormSchema),
+    defaultValues: { institutionName: '', adminName: '', adminUsername: '', adminEmail: '', adminPassword: '', confirmAdminPassword: '' },
   });
 
   const currentLoadingState = authLoading || isSubmitting;
@@ -66,7 +68,6 @@ export default function AuthPage() {
       toast({ title: 'Ingreso Exitoso', description: '¡Bienvenido/a de nuevo!' });
     } catch (error: any) {
       let errorMessage = 'Fallo al ingresar. Verifica tus credenciales.';
-      // Firebase Auth error codes
       if (error.code === 'auth/user-not-found' ||
           error.code === 'auth/wrong-password' ||
           error.code === 'auth/invalid-credential' ||
@@ -84,16 +85,23 @@ export default function AuthPage() {
     }
   };
 
-  const handleSignupSubmit = async (data: SignupFormValues) => {
+  const handleNewAdminSignupSubmit = async (data: NewAdminSignupFormValues) => {
     setIsSubmitting(true);
     try {
-      // For signup, role defaults to 'student' if not specified elsewhere.
-      // If this signup form is for staff, you'd need to pass the role.
-      // Assuming general student signup here:
-      await signUp(data.name, data.username, data.email, data.password /*, 'student' if role needed here */);
-      toast({ title: 'Cuenta Creada', description: "Te has registrado e iniciado sesión exitosamente." });
+      // Call AuthContext.signUp with role 'admin'
+      // Institution name is for context/UX, actual user details are adminName, adminUsername, etc.
+      await signUp(
+        data.adminName, 
+        data.adminUsername, 
+        data.adminEmail, 
+        data.adminPassword, 
+        'admin' // Crucial: role is 'admin'
+        // No studentDetails or staffDetails needed for primary admin signup
+      );
+      toast({ title: 'Registro de Administrador Exitoso', description: `Bienvenido/a, ${data.adminName}. Tu institución ha sido registrada.` });
+      // User will be redirected by AuthContext after signup
     } catch (error: any) {
-      let errorMessage = 'Fallo al crear la cuenta. Por favor, inténtalo de nuevo.';
+      let errorMessage = 'Fallo al registrar la nueva institución. Por favor, inténtalo de nuevo.';
       if (error.code === 'auth/email-already-in-use') errorMessage = 'Este correo electrónico ya está en uso.';
       else if (error.code === 'auth/weak-password') errorMessage = 'La contraseña es demasiado débil.';
       else if (error.message?.includes("Username already exists")) errorMessage = "Este nombre de usuario ya está en uso.";
@@ -111,85 +119,99 @@ export default function AuthPage() {
     >
       <div
         className={cn(
-          "relative h-[650px] w-full max-w-4xl overflow-hidden rounded-2xl shadow-2xl",
+          "relative h-[750px] sm:h-[700px] w-full max-w-4xl overflow-hidden rounded-2xl shadow-2xl", // Increased height
           "container"
         )}
       >
-        {/* Sign Up Form Container */}
+        {/* New Institution Admin Sign Up Form Container */}
         <div
           className={cn(
             "form-container sign-up-container absolute top-0 left-0 h-full w-1/2 z-10 transition-all duration-700 ease-in-out",
             isSignUpActive ? "translate-x-full opacity-100 z-20 animate-show" : "opacity-0 z-10"
           )}
         >
-          <Form {...signupForm}>
+          <Form {...newAdminSignupForm}>
             <form
-              onSubmit={signupForm.handleSubmit(handleSignupSubmit)}
+              onSubmit={newAdminSignupForm.handleSubmit(handleNewAdminSignupSubmit)}
               className="flex h-full flex-col items-center justify-center space-y-3 bg-card px-10 text-center text-card-foreground"
             >
-              <h1 className="text-3xl font-bold mb-6 text-signup-panel-foreground">Crear Cuenta</h1>
-              <FormField control={signupForm.control} name="name" render={({ field }) => (
+              <h1 className="text-3xl font-bold mb-4 text-signup-panel-foreground">Registrar Nueva Institución</h1>
+              <p className="text-xs text-muted-foreground mb-3">Crea la cuenta principal de administrador para tu institución educativa.</p>
+              
+              <FormField control={newAdminSignupForm.control} name="institutionName" render={({ field }) => (
                 <FormItem className="w-full">
-                  <FormLabel className="sr-only">Nombre Completo</FormLabel>
+                  <FormLabel className="sr-only">Nombre de la Institución</FormLabel>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                      <UserIcon className="h-5 w-5 text-muted-foreground" />
+                      <Building className="h-5 w-5 text-muted-foreground" />
                     </div>
-                    <FormControl><Input placeholder="Nombre Completo" {...field} disabled={currentLoadingState} className="bg-input pl-10" /></FormControl>
+                    <FormControl><Input placeholder="Nombre de la Institución" {...field} disabled={currentLoadingState} className="bg-input pl-10" /></FormControl>
                   </div>
                   <FormMessage className="text-xs text-left" />
                 </FormItem>
               )}/>
-              <FormField control={signupForm.control} name="username" render={({ field }) => (
+              <FormField control={newAdminSignupForm.control} name="adminName" render={({ field }) => (
                 <FormItem className="w-full">
-                  <FormLabel className="sr-only">Nombre de Usuario</FormLabel>
+                  <FormLabel className="sr-only">Nombre del Administrador</FormLabel>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                       <UserIcon className="h-5 w-5 text-muted-foreground" />
                     </div>
-                    <FormControl><Input placeholder="Nombre de Usuario" {...field} disabled={currentLoadingState} className="bg-input pl-10" /></FormControl>
+                    <FormControl><Input placeholder="Nombre Completo del Administrador" {...field} disabled={currentLoadingState} className="bg-input pl-10" /></FormControl>
                   </div>
                   <FormMessage className="text-xs text-left" />
                 </FormItem>
               )}/>
-              <FormField control={signupForm.control} name="email" render={({ field }) => (
+              <FormField control={newAdminSignupForm.control} name="adminUsername" render={({ field }) => (
                 <FormItem className="w-full">
-                  <FormLabel className="sr-only">Email</FormLabel>
+                  <FormLabel className="sr-only">Nombre de Usuario del Admin</FormLabel>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <UserIcon className="h-5 w-5 text-muted-foreground" />
+                    </div>
+                    <FormControl><Input placeholder="Nombre de Usuario para Admin" {...field} disabled={currentLoadingState} className="bg-input pl-10" /></FormControl>
+                  </div>
+                  <FormMessage className="text-xs text-left" />
+                </FormItem>
+              )}/>
+              <FormField control={newAdminSignupForm.control} name="adminEmail" render={({ field }) => (
+                <FormItem className="w-full">
+                  <FormLabel className="sr-only">Email del Administrador</FormLabel>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                       <Mail className="h-5 w-5 text-muted-foreground" />
                     </div>
-                    <FormControl><Input type="email" placeholder="Correo Electrónico" {...field} disabled={currentLoadingState} className="bg-input pl-10" /></FormControl>
+                    <FormControl><Input type="email" placeholder="Email del Administrador" {...field} disabled={currentLoadingState} className="bg-input pl-10" /></FormControl>
                   </div>
                   <FormMessage className="text-xs text-left" />
                 </FormItem>
               )}/>
-              <FormField control={signupForm.control} name="password" render={({ field }) => (
+              <FormField control={newAdminSignupForm.control} name="adminPassword" render={({ field }) => (
                 <FormItem className="w-full">
-                  <FormLabel className="sr-only">Contraseña</FormLabel>
+                  <FormLabel className="sr-only">Contraseña del Administrador</FormLabel>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                       <Lock className="h-5 w-5 text-muted-foreground" />
                     </div>
-                    <FormControl><Input type="password" placeholder="Contraseña" {...field} disabled={currentLoadingState} className="bg-input pl-10" /></FormControl>
+                    <FormControl><Input type="password" placeholder="Contraseña para Administrador" {...field} disabled={currentLoadingState} className="bg-input pl-10" /></FormControl>
                   </div>
                   <FormMessage className="text-xs text-left" />
                 </FormItem>
               )}/>
-              <FormField control={signupForm.control} name="confirmPassword" render={({ field }) => (
+              <FormField control={newAdminSignupForm.control} name="confirmAdminPassword" render={({ field }) => (
                 <FormItem className="w-full">
-                  <FormLabel className="sr-only">Confirmar Contraseña</FormLabel>
+                  <FormLabel className="sr-only">Confirmar Contraseña del Admin</FormLabel>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                       <Lock className="h-5 w-5 text-muted-foreground" />
                     </div>
-                    <FormControl><Input type="password" placeholder="Confirmar Contraseña" {...field} disabled={currentLoadingState} className="bg-input pl-10" /></FormControl>
+                    <FormControl><Input type="password" placeholder="Confirmar Contraseña del Admin" {...field} disabled={currentLoadingState} className="bg-input pl-10" /></FormControl>
                   </div>
                   <FormMessage className="text-xs text-left" />
                 </FormItem>
               )}/>
-              <Button type="submit" variant="default" className="mt-4 rounded-full px-8 py-3 text-sm font-semibold uppercase tracking-wider bg-signup-panel text-signup-panel-foreground hover:bg-signup-panel/90" disabled={currentLoadingState}>
-                {currentLoadingState && isSignUpActive ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Registrar'}
+              <Button type="submit" variant="default" className="mt-3 rounded-full px-8 py-3 text-sm font-semibold uppercase tracking-wider bg-signup-panel text-signup-panel-foreground hover:bg-signup-panel/90" disabled={currentLoadingState}>
+                {currentLoadingState && isSignUpActive ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Registrar Institución'}
               </Button>
             </form>
           </Form>
@@ -278,7 +300,7 @@ export default function AuthPage() {
             >
               <h1 className="text-3xl font-bold text-signup-panel-foreground">¡Bienvenido de Nuevo!</h1>
               <p className="mt-4 text-sm font-light leading-relaxed text-signup-panel-foreground">
-                Para mantenerse conectado con nosotros, por favor inicie sesión con su información personal.
+                Si ya tienes una cuenta con tu institución, por favor inicia sesión aquí.
               </p>
               <Button
                 variant="outline"
@@ -300,17 +322,17 @@ export default function AuthPage() {
                 "bg-primary text-primary-foreground"
               )}
             >
-              <h1 className="text-3xl font-bold">¡Hola!</h1>
+              <h1 className="text-3xl font-bold">¿Nueva Institución?</h1>
               <p className="mt-4 text-sm font-light leading-relaxed">
-                Ingrese sus datos personales y comience su viaje con nosotros.
+                Registra tu institución educativa y configura la cuenta de administrador principal.
               </p>
               <Button
                 variant="secondary"
                 className="mt-8 rounded-full px-8 py-3 text-sm font-semibold uppercase tracking-wider"
-                onClick={() => { signupForm.reset(); setIsSignUpActive(true); }}
+                onClick={() => { newAdminSignupForm.reset(); setIsSignUpActive(true); }}
                 disabled={currentLoadingState}
               >
-                Regístrarme
+                Registrar mi Institución
               </Button>
             </div>
           </div>
@@ -334,3 +356,5 @@ export default function AuthPage() {
     </div>
   );
 }
+
+    
