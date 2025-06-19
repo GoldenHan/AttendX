@@ -53,16 +53,23 @@ export function Header({ appLogoUrl, appName }: { appLogoUrl?: string | null, ap
       <SidebarTrigger className="text-primary-foreground md:hidden" />
       <div className="flex items-center gap-2">
         {appLogoUrl ? (
-          <Link href="/" className="flex items-center">
-            <Image src={appLogoUrl} alt="App Logo" width={120} height={30} className="object-contain h-auto max-h-[30px] w-auto max-w-[120px]" />
+          <Link href="/" className="flex items-center gap-2">
+            <Image 
+              src={appLogoUrl} 
+              alt="App Logo" 
+              width={30} // Adjusted for potentially smaller logo in header
+              height={30} 
+              className="object-contain h-auto max-h-[30px] w-auto max-w-[120px]" 
+            />
+            <span className="text-xl font-semibold font-headline text-primary-foreground">
+              {effectiveAppName}
+            </span>
           </Link>
         ) : (
-          <>
-            <SheetIcon className="h-6 w-6 text-primary-foreground" />
-            <Link href="/" className="text-xl font-semibold font-headline text-primary-foreground">
-              {effectiveAppName}
-            </Link>
-          </>
+          <Link href="/" className="flex items-center gap-2 text-xl font-semibold font-headline text-primary-foreground">
+            <SheetIcon className="h-6 w-6" />
+            <span>{effectiveAppName}</span>
+          </Link>
         )}
       </div>
       <div className="ml-auto flex items-center gap-2">
