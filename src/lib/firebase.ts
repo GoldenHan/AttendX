@@ -23,7 +23,7 @@ if (!firebaseConfig.authDomain) {
   console.error("Firebase Auth Domain is missing or empty. Make sure NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN is set correctly.");
 }
 if (!firebaseConfig.projectId) {
-  console.error("Firebase Project ID is missing or empty. Make sure NEXT_PUBLIC_FIREBASE_PROJECT_ID is set correctly.");
+  console.error("Firebase Project ID is missing or empty. Make sure NEXT_PUBLIC_FIREBASE_PROJECT_ID is set correctly. This is critical for Firestore connectivity.");
 }
 
 
@@ -47,3 +47,4 @@ const db = getFirestore(app);
 const auth = getAuth(app);
 
 export { app, db, auth };
+
