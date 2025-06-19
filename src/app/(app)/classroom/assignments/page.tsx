@@ -31,6 +31,15 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { format, isValid, parseISO } from 'date-fns';
 import { cn } from '@/lib/utils';
+import {
+  Form,
+  FormControl,
+  FormDescription,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from '@/components/ui/form'; // Added missing imports
 
 const classroomItemFormSchema = z.object({
   title: z.string().min(3, { message: 'Title must be at least 3 characters.' }).max(100, {message: 'Title cannot exceed 100 characters.'}),
@@ -195,61 +204,71 @@ export default function ClassroomAssignmentsPage() {
                   <DialogTitle>Create New Classroom Item</DialogTitle>
                   <DialogPrimitiveDescription>Fill in the details for the new assignment or reminder.</DialogPrimitiveDescription>
                 </DialogHeader>
-                <form onSubmit={form.handleSubmit(handleFormSubmit)} className="space-y-4 py-4 max-h-[70vh] overflow-y-auto pr-2">
-                  <FormField control={form.control} name="groupId" render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Group*</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value} disabled={teacherGroups.length === 0}>
-                        <SelectTrigger><SelectValue placeholder="Select a group" /></SelectTrigger>
-                        <SelectContent>
-                          {teacherGroups.map(group => <SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}/>
-                  <FormField control={form.control} name="title" render={({ field }) => (
-                    <FormItem><FormLabel>Title*</FormLabel><Input placeholder="e.g., Chapter 5 Reading, Project Deadline" {...field} /><FormMessage /></FormItem>
-                  )}/>
-                  <FormField control={form.control} name="description" render={({ field }) => (
-                    <FormItem><FormLabel>Description (Optional)</FormLabel><Textarea placeholder="Provide details about the assignment or reminder..." {...field} rows={5} /><FormMessage /></FormItem>
-                  )}/>
-                  <FormField control={form.control} name="itemType" render={({ field }) => (
-                    <FormItem><FormLabel>Item Type*</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value}>
-                        <SelectTrigger><SelectValue placeholder="Select item type" /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="assignment">Assignment</SelectItem>
-                          <SelectItem value="reminder">Reminder</SelectItem>
-                        </SelectContent>
-                      </Select><FormMessage />
-                    </FormItem>
-                  )}/>
-                  <Controller control={form.control} name="dueDate" render={({ field }) => (
-                    <FormItem className="flex flex-col"><FormLabel>Due Date (Optional)</FormLabel>
-                      <Popover><PopoverTrigger asChild>
-                        <Button variant={"outline"} className={cn("w-full justify-start text-left font-normal", !field.value && "text-muted-foreground")}>
-                          <CalendarIcon className="mr-2 h-4 w-4" />{field.value ? format(field.value, "PPP") : <span>Pick a date</span>}</Button>
-                      </PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value || undefined} onSelect={field.onChange} initialFocus /></PopoverContent></Popover>
-                      <FormMessage />
-                    </FormItem>
-                  )}/>
-                   <FormField control={form.control} name="status" render={({ field }) => (
-                    <FormItem><FormLabel>Status</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="published">Published (Visible to Students)</SelectItem>
-                          <SelectItem value="draft">Draft (Saved for Later)</SelectItem>
-                        </SelectContent>
-                      </Select><FormMessage />
-                    </FormItem>
-                  )}/>
-                  <DialogFooter className="pt-4">
-                    <DialogClose asChild><Button type="button" variant="outline">Cancel</Button></DialogClose>
-                    <Button type="submit" disabled={isSubmitting}>{isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Create Item</Button>
-                  </DialogFooter>
-                </form>
+                <Form {...form}> {/* Encapsulate with Form provider */}
+                  <form onSubmit={form.handleSubmit(handleFormSubmit)} className="space-y-4 py-4 max-h-[70vh] overflow-y-auto pr-2">
+                    <FormField control={form.control} name="groupId" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Group*</FormLabel>
+                        <Select onValueChange={field.onChange} value={field.value} disabled={teacherGroups.length === 0}>
+                          <FormControl>
+                            <SelectTrigger><SelectValue placeholder="Select a group" /></SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {teacherGroups.map(group => <SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}/>
+                    <FormField control={form.control} name="title" render={({ field }) => (
+                      <FormItem><FormLabel>Title*</FormLabel><FormControl><Input placeholder="e.g., Chapter 5 Reading, Project Deadline" {...field} /></FormControl><FormMessage /></FormItem>
+                    )}/>
+                    <FormField control={form.control} name="description" render={({ field }) => (
+                      <FormItem><FormLabel>Description (Optional)</FormLabel><FormControl><Textarea placeholder="Provide details about the assignment or reminder..." {...field} rows={5} /></FormControl><FormMessage /></FormItem>
+                    )}/>
+                    <FormField control={form.control} name="itemType" render={({ field }) => (
+                      <FormItem><FormLabel>Item Type*</FormLabel>
+                        <Select onValueChange={field.onChange} value={field.value}>
+                           <FormControl>
+                            <SelectTrigger><SelectValue placeholder="Select item type" /></SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value="assignment">Assignment</SelectItem>
+                            <SelectItem value="reminder">Reminder</SelectItem>
+                          </SelectContent>
+                        </Select><FormMessage />
+                      </FormItem>
+                    )}/>
+                    <FormField control={form.control} name="dueDate" render={({ field }) => ( // Changed Controller to FormField
+                      <FormItem className="flex flex-col"><FormLabel>Due Date (Optional)</FormLabel>
+                        <Popover><PopoverTrigger asChild>
+                          <FormControl>
+                            <Button variant={"outline"} className={cn("w-full justify-start text-left font-normal", !field.value && "text-muted-foreground")}>
+                              <CalendarIcon className="mr-2 h-4 w-4" />{field.value ? format(field.value, "PPP") : <span>Pick a date</span>}</Button>
+                          </FormControl>
+                        </PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value || undefined} onSelect={field.onChange} initialFocus /></PopoverContent></Popover>
+                        <FormMessage />
+                      </FormItem>
+                    )}/>
+                     <FormField control={form.control} name="status" render={({ field }) => (
+                      <FormItem><FormLabel>Status</FormLabel>
+                        <Select onValueChange={field.onChange} value={field.value}>
+                           <FormControl>
+                            <SelectTrigger><SelectValue /></SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value="published">Published (Visible to Students)</SelectItem>
+                            <SelectItem value="draft">Draft (Saved for Later)</SelectItem>
+                          </SelectContent>
+                        </Select><FormMessage />
+                      </FormItem>
+                    )}/>
+                    <DialogFooter className="pt-4">
+                      <DialogClose asChild><Button type="button" variant="outline">Cancel</Button></DialogClose>
+                      <Button type="submit" disabled={isSubmitting}>{isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Create Item</Button>
+                    </DialogFooter>
+                  </form>
+                </Form>
               </DialogContent>
             </Dialog>
           </div>
