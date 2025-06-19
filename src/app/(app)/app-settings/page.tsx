@@ -18,7 +18,7 @@ import { DEFAULT_GRADING_CONFIG, DEFAULT_CLASS_SCHEDULE_CONFIG } from '@/types';
 import Image from 'next/image';
 
 const MAX_LOGO_SIZE_MB = 1; // Max logo size in MB for Data URL storage
-const DEFAULT_APP_NAME = "AttendX";
+const DEFAULT_APP_NAME = ""; // Changed from "AttendX" to ""
 
 export default function AppSettingsPage() {
   const { toast } = useToast();
@@ -51,7 +51,7 @@ export default function AppSettingsPage() {
     if (storedAppName) {
       setAppName(storedAppName);
     } else {
-      setAppName(DEFAULT_APP_NAME); // Set default if nothing in localStorage
+      setAppName(DEFAULT_APP_NAME); 
     }
     const storedLogoDataUrl = localStorage.getItem('appLogoDataUrl');
     if (storedLogoDataUrl) {
@@ -197,7 +197,7 @@ export default function AppSettingsPage() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${appName.toLowerCase().replace(/\s+/g, '_')}_students_export.json`;
+      a.download = `${(appName || 'app').toLowerCase().replace(/\s+/g, '_')}_students_export.json`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -497,3 +497,4 @@ export default function AppSettingsPage() {
     </div>
   );
 }
+

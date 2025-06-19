@@ -19,7 +19,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { useAuth } from '@/contexts/AuthContext';
 
-const DEFAULT_APP_NAME_SHELL = "AttendX";
+const DEFAULT_APP_NAME_SHELL = ""; // Changed from "AttendX"
 
 export function MainAppShell({ 
   children,
@@ -95,3 +95,4 @@ export function MainAppShell({
     </SidebarProvider>
   );
 }
+

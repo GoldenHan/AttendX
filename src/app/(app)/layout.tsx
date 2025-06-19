@@ -6,7 +6,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import React, { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 
-const DEFAULT_APP_NAME_LAYOUT = "AttendX";
+const DEFAULT_APP_NAME_LAYOUT = ""; // Changed from "AttendX"
 
 export default function AppLayout({
   children,
@@ -86,3 +86,4 @@ export default function AppLayout({
 
   return <MainAppShell appLogoUrl={appLogoUrl} appName={appName}>{children}</MainAppShell>;
 }
+

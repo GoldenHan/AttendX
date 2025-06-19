@@ -16,7 +16,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import React, { useState, useEffect } from 'react';
 import Image from 'next/image'; 
 
-const DEFAULT_APP_NAME_HEADER = "AttendX";
+const DEFAULT_APP_NAME_HEADER = ""; // Changed from "AttendX"
 
 export function Header({ appLogoUrl, appName }: { appLogoUrl?: string | null, appName?: string }) {
   const { authUser, firestoreUser, signOut, loading } = useAuth();
@@ -118,3 +118,4 @@ export function Header({ appLogoUrl, appName }: { appLogoUrl?: string | null, ap
     </header>
   );
 }
+
