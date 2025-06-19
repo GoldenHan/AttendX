@@ -23,8 +23,8 @@ import {
   ClipboardCheck,
   Briefcase,
   GraduationCap,
-  ClipboardList, 
-  Award, 
+  ClipboardList,
+  Award,
   Building,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
@@ -35,31 +35,31 @@ interface NavItem {
   label: string;
   icon: React.ElementType;
   roles?: User['role'][];
+  excludeRoles?: User['role'][]; // New property to explicitly exclude roles
 }
 
-const generalNavItems: NavItem[] = [
+const navItems: NavItem[] = [
+  // General & Core
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['admin', 'teacher', 'caja', 'student', 'supervisor'] },
   { href: '/attendance-log', label: 'Log Group Attendance', icon: ClipboardEdit, roles: ['admin', 'teacher', 'caja', 'supervisor'] },
-  { href: '/attendance-records', label: 'Attendance Records', icon: BookUser, roles: ['admin', 'teacher', 'caja', 'supervisor'] }, 
+  { href: '/attendance-records', label: 'Attendance Records', icon: BookUser, roles: ['admin', 'teacher', 'caja', 'supervisor'] },
   { href: '/reports', label: 'Attendance Reports', icon: BarChart3, roles: ['admin', 'teacher', 'caja', 'supervisor'] },
-  { href: '/student-grades', label: 'My Grades', icon: ClipboardCheck, roles: ['student'] }, 
-  { href: '/student-grades', label: 'Student Grades View', icon: ClipboardCheck, roles: ['admin', 'teacher', 'supervisor'] }, 
+  { href: '/student-grades', label: 'My Grades', icon: ClipboardCheck, roles: ['student'] },
+  { href: '/student-grades', label: 'Student Grades View', icon: ClipboardCheck, roles: ['admin', 'teacher', 'supervisor'], excludeRoles: ['student'] },
   { href: '/ai-analysis', label: 'AI Analysis', icon: Brain, roles: ['admin', 'teacher', 'supervisor'] },
-];
 
-const managementNavItems: NavItem[] = [
-   { href: '/student-management', label: 'Student Management', icon: GraduationCap, roles: ['admin', 'teacher', 'supervisor'] },
-   { href: '/group-management', label: 'Groups', icon: FolderKanban, roles: ['admin', 'teacher', 'supervisor'] },
-   { href: '/grades-management', label: 'Grades Management', icon: ClipboardCheck, roles: ['admin', 'teacher', 'supervisor'] },
-   { href: '/partial-grades-report', label: 'Partial Grades Report', icon: ClipboardList, roles: ['admin', 'teacher', 'supervisor'] }, 
-   { href: '/certificate-management', label: 'Certificate Records', icon: Award, roles: ['admin', 'teacher', 'supervisor'] },
-];
+  // Management (for Admin, Supervisor, Teacher)
+  { href: '/student-management', label: 'Student Management', icon: GraduationCap, roles: ['admin', 'teacher', 'supervisor'] },
+  { href: '/group-management', label: 'Group Management', icon: FolderKanban, roles: ['admin', 'teacher', 'supervisor'] },
+  { href: '/grades-management', label: 'Grades Management', icon: ClipboardCheck, roles: ['admin', 'teacher', 'supervisor'] },
+  { href: '/partial-grades-report', label: 'Partial Grades Report', icon: ClipboardList, roles: ['admin', 'teacher', 'supervisor'] },
+  { href: '/certificate-management', label: 'Certificate Records', icon: Award, roles: ['admin', 'teacher', 'supervisor'] },
 
-const adminNavItems: NavItem[] = [
-   { href: '/sede-management', label: 'Sede Management', icon: Building, roles: ['admin'] },
-   { href: '/user-management', label: 'Staff Management', icon: Briefcase, roles: ['admin', 'supervisor'] },
-   { href: '/app-settings', label: 'Settings', icon: Settings, roles: ['admin'] },
-   { href: '/qr-login-setup', label: 'QR Session Login', icon: QrCode, roles: ['admin', 'teacher', 'caja', 'supervisor'] },
+  // Administration (for Admin, Supervisor)
+  { href: '/user-management', label: 'Staff Management', icon: Briefcase, roles: ['admin', 'supervisor'] },
+  { href: '/sede-management', label: 'Sede Management', icon: Building, roles: ['admin'] },
+  { href: '/app-settings', label: 'Settings', icon: Settings, roles: ['admin'] },
+  { href: '/qr-login-setup', label: 'QR Session Setup', icon: QrCode, roles: ['admin', 'teacher', 'caja', 'supervisor'] },
 ];
 
 
@@ -72,27 +72,25 @@ export function SidebarNav() {
     return null;
   }
 
-  const filterNavItems = (items: NavItem[]): NavItem[] => {
+  const filterNavItemsForRole = (items: NavItem[]): NavItem[] => {
     if (!userRole) return [];
     return items.filter(item => {
-      if (!item.roles) return true; 
-      if (item.roles.includes(userRole)) {
-        // Specific label handling for student vs staff
-        if (userRole === 'student' && item.label === 'Student Grades View') return false; 
-        if (userRole !== 'student' && item.label === 'My Grades') return false; 
-        
-        // Supervisor should not see "Staff Management" if the label is generic,
-        // but they should see it if it implies adding Teachers, etc.
-        // Assuming the current "Staff Management" is for all staff types, supervisor access is fine.
+      if (item.excludeRoles && item.excludeRoles.includes(userRole)) {
+        return false;
+      }
+      if (!item.roles || item.roles.includes(userRole)) {
         return true;
       }
       return false;
     });
   };
 
-  const visibleGeneralNavItems = filterNavItems(generalNavItems);
-  const visibleManagementNavItems = filterNavItems(managementNavItems);
-  const visibleAdminNavItems = filterNavItems(adminNavItems);
+  const visibleNavItems = filterNavItemsForRole(navItems);
+
+  const generalItems = visibleNavItems.filter(item => ['/dashboard', '/attendance-log', '/attendance-records', '/reports', '/student-grades', '/ai-analysis', '/qr-login-setup'].includes(item.href));
+  const managementItems = visibleNavItems.filter(item => ['/student-management', '/group-management', '/grades-management', '/partial-grades-report', '/certificate-management'].includes(item.href));
+  const adminItems = visibleNavItems.filter(item => ['/user-management', '/sede-management', '/app-settings'].includes(item.href));
+
 
   const renderNavItem = (item: NavItem) => (
     <SidebarMenuItem key={`${item.href}-${item.label}`}>
@@ -117,29 +115,27 @@ export function SidebarNav() {
   return (
     <div className="flex-1 overflow-auto">
       <SidebarMenu>
-        {visibleGeneralNavItems.length > 0 && (
+        {generalItems.length > 0 && (
           <SidebarGroup>
             <SidebarGroupLabel>Menu</SidebarGroupLabel>
-            {visibleGeneralNavItems.map(renderNavItem)}
+            {generalItems.map(renderNavItem)}
           </SidebarGroup>
         )}
 
-        {visibleManagementNavItems.length > 0 && (
+        {managementItems.length > 0 && (
           <SidebarGroup>
             <SidebarGroupLabel>Management</SidebarGroupLabel>
-            {visibleManagementNavItems.map(renderNavItem)}
+            {managementItems.map(renderNavItem)}
           </SidebarGroup>
         )}
 
-        {visibleAdminNavItems.length > 0 && (
+        {adminItems.length > 0 && (
           <SidebarGroup>
             <SidebarGroupLabel>Administration</SidebarGroupLabel>
-            {visibleAdminNavItems.map(renderNavItem)}
+            {adminItems.map(renderNavItem)}
           </SidebarGroup>
         )}
       </SidebarMenu>
     </div>
   );
 }
-
-    
