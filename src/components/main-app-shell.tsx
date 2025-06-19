@@ -9,7 +9,7 @@ import {
   SidebarContent,
   SidebarFooter,
   SidebarInset,
-  SidebarTrigger, // Import SidebarTrigger
+  SidebarTrigger,
 } from '@/components/ui/sidebar';
 import { Header } from '@/components/header';
 import { SidebarNav } from '@/components/sidebar-nav';
@@ -19,7 +19,13 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { useAuth } from '@/contexts/AuthContext';
 
-export function MainAppShell({ children }: { children: React.ReactNode }) {
+export function MainAppShell({ 
+  children,
+  appLogoUrl 
+}: { 
+  children: React.ReactNode;
+  appLogoUrl?: string | null;
+}) {
   const { signOut, loading: authLoading, firestoreUser } = useAuth();
 
   const handleLogout = async () => {
@@ -31,9 +37,16 @@ export function MainAppShell({ children }: { children: React.ReactNode }) {
       <Sidebar variant="sidebar" collapsible="icon" side="left">
         <SidebarHeader className="p-4 flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2 text-lg font-semibold font-headline text-primary">
-            <span className="group-data-[collapsible=icon]:hidden">SERVEX</span>
+            {appLogoUrl ? (
+              <Image src={appLogoUrl} alt="App Logo" width={120} height={30} className="object-contain h-[30px] group-data-[collapsible=icon]:hidden" />
+            ) : (
+              <span className="group-data-[collapsible=icon]:hidden">SERVEX</span>
+            )}
+             {/* Show small icon version when collapsed if logo exists */}
+            {appLogoUrl && (
+               <Image src={appLogoUrl} alt="App Logo Icon" width={24} height={24} className="object-contain h-6 w-6 hidden group-data-[collapsible=icon]:block" />
+            )}
           </Link>
-          {/* Desktop Sidebar Toggle Button */}
           <SidebarTrigger className="text-sidebar-foreground hidden md:flex" />
         </SidebarHeader>
         <SidebarContent>
@@ -46,7 +59,6 @@ export function MainAppShell({ children }: { children: React.ReactNode }) {
           )}
         </SidebarContent>
         <SidebarFooter className="flex flex-col items-center">
-          {/* Snoopy image removed from here */}
           <Button variant="ghost" className="w-full justify-start group-data-[collapsible=icon]:justify-center" onClick={handleLogout} disabled={authLoading}>
             {authLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin group-data-[collapsible=icon]:mr-0" />}
             {!authLoading && <LogOut className="mr-2 h-4 w-4 group-data-[collapsible=icon]:mr-0" />}
@@ -55,7 +67,7 @@ export function MainAppShell({ children }: { children: React.ReactNode }) {
         </SidebarFooter>
       </Sidebar>
       <SidebarInset className="flex flex-col">
-        <Header />
+        <Header appLogoUrl={appLogoUrl} />
         <main className="flex-1 overflow-auto p-4 sm:p-6 bg-background">
           {children}
         </main>

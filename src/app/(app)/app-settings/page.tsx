@@ -8,18 +8,19 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
-import { Settings, Download, RefreshCw, Moon, Sun, Save, Loader2, AlertTriangle, Clock } from 'lucide-react';
+import { Settings, Download, RefreshCw, Moon, Sun, Save, Loader2, AlertTriangle, Clock, Image as ImageIcon } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import React, { useState, useEffect, useCallback } from 'react';
 import { db } from '@/lib/firebase';
 import { doc, getDoc, setDoc, collection, getDocs, query, where } from 'firebase/firestore';
 import type { GradingConfiguration, User, ClassScheduleConfiguration } from '@/types';
 import { DEFAULT_GRADING_CONFIG, DEFAULT_CLASS_SCHEDULE_CONFIG } from '@/types';
+import Image from 'next/image';
 
 export default function AppSettingsPage() {
   const { toast } = useToast();
   const [isDarkMode, setIsDarkMode] = useState(false);
-  const [appName, setAppName] = useState("AttendX"); // Changed from SERVEX to AttendX
+  const [appName, setAppName] = useState("AttendX");
   const [isExporting, setIsExporting] = useState(false);
   
   const [isSavingGradingConfig, setIsSavingGradingConfig] = useState(false);
@@ -30,9 +31,10 @@ export default function AppSettingsPage() {
   const [classScheduleConfig, setClassScheduleConfig] = useState<ClassScheduleConfiguration>(DEFAULT_CLASS_SCHEDULE_CONFIG);
   const [isLoadingScheduleConfig, setIsLoadingScheduleConfig] = useState(true);
 
+  const [logoUrlInput, setLogoUrlInput] = useState('');
+  const [isSavingLogo, setIsSavingLogo] = useState(false);
 
   useEffect(() => {
-    // Apply theme from localStorage on mount for this page
     const storedTheme = localStorage.getItem('theme');
     if (storedTheme === 'dark') {
       document.documentElement.classList.add('dark');
@@ -44,6 +46,10 @@ export default function AppSettingsPage() {
     const storedAppName = localStorage.getItem('appName');
     if (storedAppName) {
       setAppName(storedAppName);
+    }
+    const storedLogoUrl = localStorage.getItem('appLogoUrl');
+    if (storedLogoUrl) {
+      setLogoUrlInput(storedLogoUrl);
     }
   }, []);
 
@@ -126,6 +132,18 @@ export default function AppSettingsPage() {
     const newName = e.target.value;
     setAppName(newName);
     localStorage.setItem('appName', newName);
+  };
+
+  const handleLogoUrlInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setLogoUrlInput(e.target.value);
+  };
+
+  const handleSaveLogoUrl = () => {
+    setIsSavingLogo(true);
+    localStorage.setItem('appLogoUrl', logoUrlInput);
+    window.dispatchEvent(new CustomEvent('logoUrlChanged', { detail: logoUrlInput }));
+    toast({ title: 'Logo URL Saved', description: 'The new logo URL has been saved locally.' });
+    setIsSavingLogo(false);
   };
 
   const handleExportStudentData = async () => {
@@ -250,6 +268,34 @@ export default function AppSettingsPage() {
                 />
                 {isDarkMode ? <Moon className="ml-2 h-5 w-5" /> : <Sun className="ml-2 h-5 w-5" />}
               </div>
+              <div className="space-y-2">
+                <Label htmlFor="logoUrl">Application Logo URL</Label>
+                <div className="flex items-start gap-2">
+                    <Input 
+                        id="logoUrl" 
+                        type="url" 
+                        value={logoUrlInput} 
+                        onChange={handleLogoUrlInputChange} 
+                        placeholder="https://example.com/logo.png" 
+                        className="flex-grow"
+                    />
+                    <Button onClick={handleSaveLogoUrl} disabled={isSavingLogo}>
+                        {isSavingLogo ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                        Save Logo
+                    </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Paste the URL of your desired logo. It will be displayed in the header and sidebar.
+                  For production, consider using Firebase Storage and providing the public URL here.
+                </p>
+                {logoUrlInput && (
+                  <div className="mt-2 p-2 border rounded-md inline-block bg-muted">
+                    <Image src={logoUrlInput} alt="Logo Preview" width={100} height={40} className="object-contain" onError={() => {
+                       toast({ title: 'Logo Error', description: 'Could not load image from URL.', variant: 'destructive'});
+                    }} />
+                  </div>
+                )}
+              </div>
             </div>
           </div>
           
@@ -277,7 +323,7 @@ export default function AppSettingsPage() {
                         <SelectItem value="NotSet">Not Set / Varies</SelectItem>
                         <SelectItem value="Saturday">Saturday Only</SelectItem>
                         <SelectItem value="Sunday">Sunday Only</SelectItem>
-                        <SelectItem value="SaturdayAndSunday">Both Weekends (Saturday and Sunday)</SelectItem>
+                        <SelectItem value="SaturdayAndSunday">Both Weekends (Sat & Sun)</SelectItem>
                         <SelectItem value="Daily">Daily (Weekdays)</SelectItem>
                       </SelectContent>
                     </Select>
@@ -412,4 +458,3 @@ export default function AppSettingsPage() {
     </div>
   );
 }
-

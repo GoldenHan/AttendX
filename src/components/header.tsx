@@ -14,20 +14,19 @@ import {
 import { SidebarTrigger } from '@/components/ui/sidebar';
 import { useAuth } from '@/contexts/AuthContext';
 import React, { useState, useEffect } from 'react';
+import Image from 'next/image'; // Import next/image
 
-export function Header() {
+export function Header({ appLogoUrl }: { appLogoUrl?: string | null }) {
   const { authUser, firestoreUser, signOut, loading } = useAuth();
   
-  // Initialize language from localStorage or default to 'ES'
   const [currentLanguage, setCurrentLanguage] = useState<'EN' | 'ES'>(() => {
     if (typeof window !== 'undefined') {
       const storedLang = localStorage.getItem('appLanguage') as 'EN' | 'ES';
       return ['EN', 'ES'].includes(storedLang) ? storedLang : 'ES';
     }
-    return 'ES'; // Default for SSR or if window is not available
+    return 'ES'; 
   });
 
-  // Persist language choice to localStorage whenever it changes
   useEffect(() => {
     if (typeof window !== 'undefined') {
       localStorage.setItem('appLanguage', currentLanguage);
@@ -41,10 +40,7 @@ export function Header() {
   const toggleLanguage = () => {
     setCurrentLanguage((prevLang) => {
       const newLang = prevLang === 'ES' ? 'EN' : 'ES';
-      // This console log confirms the state change for the placeholder.
-      // A real i18n library would be integrated here.
       console.log(`Language preference set to: ${newLang}`);
-      // TODO: Integrate actual i18n library to change application language based on 'newLang'.
       return newLang;
     });
   };
@@ -53,10 +49,18 @@ export function Header() {
     <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b border-border bg-primary px-4 text-primary-foreground sm:static sm:h-auto sm:px-6 py-2">
       <SidebarTrigger className="text-primary-foreground md:hidden" />
       <div className="flex items-center gap-2">
-        <SheetIcon className="h-6 w-6 text-primary-foreground" />
-        <Link href="/" className="text-xl font-semibold font-headline text-primary-foreground">
-          SERVEX
-        </Link>
+        {appLogoUrl ? (
+          <Link href="/" className="flex items-center">
+            <Image src={appLogoUrl} alt="App Logo" width={120} height={30} className="object-contain h-[30px] max-w-[120px]" priority />
+          </Link>
+        ) : (
+          <>
+            <SheetIcon className="h-6 w-6 text-primary-foreground" />
+            <Link href="/" className="text-xl font-semibold font-headline text-primary-foreground">
+              SERVEX
+            </Link>
+          </>
+        )}
       </div>
       <div className="ml-auto flex items-center gap-2">
         <Button
