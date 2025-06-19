@@ -30,8 +30,8 @@ interface AuthContextType {
     initialPasswordAsUsername: string,
     role: FirestoreUserType['role'],
     studentDetails?: { level: FirestoreUserType['level'] },
-    staffDetails?: Partial<Pick<FirestoreUserType, 'sedeId' | 'attendanceCode'>>,
-    institutionName?: string // Added for admin signup
+    staffDetails?: Partial<Pick<FirestoreUserType, 'sedeId' | 'attendanceCode' | 'institutionId'>>, // Added institutionId here
+    institutionName?: string
   ) => Promise<void>;
   signOut: () => Promise<void>;
   reauthenticateCurrentUser: (password: string) => Promise<void>;
@@ -141,8 +141,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     initialPasswordAsUsername: string,
     role: FirestoreUserType['role'],
     studentDetails?: { level: FirestoreUserType['level'] },
-    staffDetails?: Partial<Pick<FirestoreUserType, 'sedeId' | 'attendanceCode'>>,
-    institutionName?: string // Added for admin signup
+    staffDetails?: Partial<Pick<FirestoreUserType, 'sedeId' | 'attendanceCode' | 'institutionId'>>,
+    institutionName?: string
   ) => {
     setLoading(true);
     try {
@@ -159,16 +159,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
       const userCredential = await createUserWithEmailAndPassword(auth, email, initialPasswordAsUsername);
       const firebaseUser = userCredential.user;
-      let newInstitutionId: string | null = null;
+      let effectiveInstitutionId: string | null | undefined = staffDetails?.institutionId;
 
-      if (role === 'admin' && institutionName) {
+      // This block handles the very first admin creating their institution.
+      if (role === 'admin' && institutionName && !effectiveInstitutionId) {
         const institutionRef = await addDoc(collection(db, 'institutions'), {
           name: institutionName,
           adminUids: [firebaseUser.uid],
           createdAt: new Date().toISOString(),
         });
-        newInstitutionId = institutionRef.id;
-        console.log(`[AuthContext] Institution document created with ID: ${newInstitutionId}`);
+        effectiveInstitutionId = institutionRef.id;
+        console.log(`[AuthContext] Institution document created with ID: ${effectiveInstitutionId}`);
       }
 
       const newUserDocData: Omit<FirestoreUserType, 'id'> = {
@@ -178,7 +179,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         email: firebaseUser.email || email.trim(),
         role: role,
         requiresPasswordChange: true,
-        institutionId: newInstitutionId, // Assign institutionId if admin
+        institutionId: effectiveInstitutionId || null, // Assign institutionId
         ...(role === 'student' && studentDetails?.level && {
           level: studentDetails.level,
           gradesByLevel: {
@@ -186,11 +187,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           },
           phoneNumber: null, photoUrl: null, notes: null, age: undefined, gender: undefined, preferredShift: undefined,
         }),
-        ...( (role === 'teacher' || role === 'supervisor' || role === 'admin') && staffDetails && {
+        ...( (role === 'teacher' || role === 'supervisor' || role === 'admin' || role === 'caja') && staffDetails && { // Added 'caja'
             sedeId: staffDetails.sedeId || null,
             attendanceCode: staffDetails.attendanceCode || null,
+            // institutionId is already handled by effectiveInstitutionId
         })
       };
+      
+      if (role !== 'admin' && !newUserDocData.institutionId) {
+          console.warn(`[AuthContext] Attempting to create a non-admin user without an institutionId. This might be an issue. User role: ${role}`);
+      }
+
 
       await setDoc(doc(db, targetCollection, firebaseUser.uid), newUserDocData);
       console.log(`[AuthContext] User document created in '${targetCollection}' for UID: ${firebaseUser.uid}`);

@@ -42,7 +42,7 @@ export interface Sede {
   id: string;
   name: string;
   supervisorId?: string | null; // UID of the user with role 'supervisor' assigned to this Sede
-  institutionId?: string | null; // ID of the institution this Sede belongs to
+  institutionId: string; // ID of the institution this Sede belongs to (Mandatory)
 }
 
 export interface User {
@@ -57,7 +57,7 @@ export interface User {
   attendanceCode?: string | null;
   requiresPasswordChange?: boolean;
   sedeId?: string | null; // For teachers and supervisors to link them to a Sede
-  institutionId?: string | null; // ID of the institution this user belongs to
+  institutionId: string | null; // ID of the institution this user belongs to (Mandatory for staff, nullable for student if not yet assigned)
 
   // Student-specific fields
   level?: 'Beginner' | 'Intermediate' | 'Advanced' | 'Other';
@@ -78,9 +78,11 @@ export interface TeacherAttendanceRecord {
 
 export interface Session {
   id: string;
-  classId: string;
+  classId: string; // This is the Group ID
   date: string; // YYYY-MM-DD
   time: string; // HH:MM
+  institutionId?: string | null; // For scoping sessions to an institution
+  sedeId?: string | null; // For scoping sessions to a Sede
 }
 
 export interface AttendanceRecord {
@@ -90,6 +92,7 @@ export interface AttendanceRecord {
   status: 'present' | 'absent' | 'late';
   timestamp: string;
   observation?: string;
+  institutionId?: string | null; // For scoping records
 }
 
 export interface Group {
@@ -101,6 +104,7 @@ export interface Group {
   studentIds: string[];
   teacherId?: string | null;
   sedeId?: string | null;
+  institutionId?: string | null; // Added for direct linking
 }
 
 export interface GradingConfiguration {
@@ -110,6 +114,7 @@ export interface GradingConfiguration {
   maxIndividualActivityScore: number;
   maxTotalAccumulatedScore: number;
   maxExamScore: number;
+  institutionId?: string | null; // To scope grading configs per institution eventually
 }
 
 export const DEFAULT_GRADING_CONFIG: GradingConfiguration = {
@@ -125,6 +130,7 @@ export interface ClassScheduleConfiguration {
   scheduleType: 'Saturday' | 'Sunday' | 'Daily' | 'NotSet' | 'SaturdayAndSunday';
   startTime: string;
   endTime: string;
+  institutionId?: string | null; // To scope schedule configs per institution eventually
 }
 
 export const DEFAULT_CLASS_SCHEDULE_CONFIG: ClassScheduleConfiguration = {
@@ -156,8 +162,10 @@ export const getDefaultStudentGradeStructure = (config: GradingConfiguration): S
     partial1: getDefaultPartialScores(),
     partial2: getDefaultPartialScores(),
     partial3: getDefaultPartialScores(),
-    partial4: getDefaultPartialScores(),
     certificateCode: '',
   };
+  if (config.numberOfPartials >= 4) {
+    structure.partial4 = getDefaultPartialScores();
+  }
   return structure;
 };
