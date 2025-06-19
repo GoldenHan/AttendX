@@ -20,12 +20,23 @@ import {
   DialogTrigger,
   DialogClose,
 } from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Loader2, PlusCircle, CalendarIcon, AlertTriangle, Info, Edit, Trash2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, query, where, addDoc, orderBy, serverTimestamp, Timestamp } from 'firebase/firestore';
+import { collection, getDocs, query, where, addDoc, orderBy, serverTimestamp, Timestamp, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import type { Group, ClassroomItem as ClassroomItemType } from '@/types';
 import { useAuth } from '@/contexts/AuthContext';
 import { useForm } from 'react-hook-form';
@@ -55,7 +66,7 @@ type ClassroomItemFormValues = z.infer<typeof classroomItemFormSchema>;
 
 export default function ClassroomAssignmentsPage() {
   const { toast } = useToast();
-  const { firestoreUser, loading: authLoading } = useAuth(); // Renamed institutionId to firestoreUser.institutionId for clarity
+  const { firestoreUser, loading: authLoading } = useAuth();
   const router = useRouter();
 
   const [manageableGroups, setManageableGroups] = useState<Group[]>([]);
@@ -66,6 +77,11 @@ export default function ClassroomAssignmentsPage() {
   const [isLoadingItems, setIsLoadingItems] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isFormOpen, setIsFormOpen] = useState(false);
+
+  const [editingItem, setEditingItem] = useState<ClassroomItemType | null>(null);
+  const [isConfirmDeleteDialogOpen, setIsConfirmDeleteDialogOpen] = useState(false);
+  const [itemToDelete, setItemToDelete] = useState<ClassroomItemType | null>(null);
+
 
   const form = useForm<ClassroomItemFormValues>({
     resolver: zodResolver(classroomItemFormSchema),
@@ -124,12 +140,11 @@ export default function ClassroomAssignmentsPage() {
         setSelectedGroupId(initialGroupId);
         form.setValue('groupId', initialGroupId);
       } else if (groups.length > 0 && selectedGroupId) {
-        // If a group was already selected, ensure it's still valid, otherwise reset
         if (!groups.find(g => g.id === selectedGroupId)) {
            setSelectedGroupId(groups[0].id);
            form.setValue('groupId', groups[0].id);
         } else {
-            form.setValue('groupId', selectedGroupId); // Ensure form is in sync
+            form.setValue('groupId', selectedGroupId);
         }
       } else if (groups.length === 0) {
         setSelectedGroupId('');
@@ -162,10 +177,9 @@ export default function ClassroomAssignmentsPage() {
         return {
           id: doc.id,
           ...data,
-          // Ensure timestamps are handled correctly if they come from serverTimestamp
           createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate().toISOString() : data.createdAt,
           updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate().toISOString() : data.updatedAt,
-          dueDate: data.dueDate instanceof Timestamp ? data.dueDate.toDate().toISOString() : data.dueDate,
+          dueDate: data.dueDate instanceof Timestamp ? data.dueDate.toDate().toISOString() : (typeof data.dueDate === 'string' ? data.dueDate : null),
         } as ClassroomItemType;
       });
       setClassroomItems(items);
@@ -187,10 +201,35 @@ export default function ClassroomAssignmentsPage() {
     if (selectedGroupId && firestoreUser?.institutionId) {
       fetchClassroomItemsForGroup(selectedGroupId);
     } else {
-      setClassroomItems([]); // Clear items if no group is selected
+      setClassroomItems([]);
     }
   }, [selectedGroupId, firestoreUser?.institutionId, fetchClassroomItemsForGroup]);
 
+  const openCreateFormDialog = () => {
+    setEditingItem(null);
+    form.reset({
+      title: '',
+      description: '',
+      itemType: 'assignment',
+      dueDate: null,
+      groupId: selectedGroupId || (manageableGroups.length > 0 ? manageableGroups[0].id : ''),
+      status: 'published',
+    });
+    setIsFormOpen(true);
+  };
+
+  const openEditFormDialog = (item: ClassroomItemType) => {
+    setEditingItem(item);
+    form.reset({
+      title: item.title,
+      description: item.description || '',
+      itemType: item.itemType,
+      dueDate: item.dueDate ? parseISO(item.dueDate) : null,
+      groupId: item.groupId,
+      status: item.status,
+    });
+    setIsFormOpen(true);
+  };
 
   const handleFormSubmit = async (data: ClassroomItemFormValues) => {
     if (!firestoreUser || !firestoreUser.institutionId || !data.groupId) {
@@ -199,41 +238,74 @@ export default function ClassroomAssignmentsPage() {
     }
     setIsSubmitting(true);
 
-    const newItemData: Omit<ClassroomItemType, 'id' | 'createdAt' | 'updatedAt'> = {
+    const itemDataPayload = {
         groupId: data.groupId,
         institutionId: firestoreUser.institutionId,
-        teacherId: firestoreUser.id, 
+        teacherId: firestoreUser.id,
         title: data.title,
         description: data.description || '',
         itemType: data.itemType,
         dueDate: data.dueDate ? data.dueDate.toISOString() : null,
         status: data.status,
+        updatedAt: serverTimestamp(),
     };
 
     try {
-      const docRef = await addDoc(collection(db, 'classroomItems'), {
-         ...newItemData,
-         createdAt: serverTimestamp(), // Use Firestore server timestamp
-         updatedAt: serverTimestamp(),
-      });
-      toast({ title: 'Success', description: `${data.itemType === 'assignment' ? 'Assignment' : 'Reminder'} "${data.title}" created.` });
-      fetchClassroomItemsForGroup(data.groupId); // Re-fetch after creation
+      if (editingItem) {
+        const itemRef = doc(db, 'classroomItems', editingItem.id);
+        await updateDoc(itemRef, itemDataPayload);
+        toast({ title: 'Success', description: `${data.itemType === 'assignment' ? 'Assignment' : 'Reminder'} "${data.title}" updated.` });
+      } else {
+        await addDoc(collection(db, 'classroomItems'), {
+           ...itemDataPayload,
+           createdAt: serverTimestamp(),
+        });
+        toast({ title: 'Success', description: `${data.itemType === 'assignment' ? 'Assignment' : 'Reminder'} "${data.title}" created.` });
+      }
+      fetchClassroomItemsForGroup(data.groupId);
       form.reset({
-        title: '',
-        description: '',
-        itemType: 'assignment',
-        dueDate: null,
-        groupId: data.groupId, 
-        status: 'published',
+        title: '', description: '', itemType: 'assignment', dueDate: null,
+        groupId: data.groupId, status: 'published',
       });
       setIsFormOpen(false);
+      setEditingItem(null);
     } catch (error) {
-      console.error("Error creating classroom item:", error);
-      toast({ title: 'Error', description: 'Could not create the item.', variant: 'destructive' });
+      console.error("Error saving classroom item:", error);
+      toast({ title: 'Error', description: `Could not ${editingItem ? 'update' : 'create'} the item.`, variant: 'destructive' });
     }
-
     setIsSubmitting(false);
   };
+
+  const openDeleteConfirmationDialog = (item: ClassroomItemType) => {
+    setItemToDelete(item);
+    setIsConfirmDeleteDialogOpen(true);
+  };
+
+  const handleConfirmDeleteItem = async () => {
+    if (!itemToDelete || !firestoreUser?.institutionId) {
+      toast({ title: 'Error', description: 'No item selected for deletion or missing context.', variant: 'destructive' });
+      setIsConfirmDeleteDialogOpen(false);
+      return;
+    }
+    // Optional: Add permission check here (e.g., only creator or admin can delete)
+    // For now, assuming if user can see it and is on this page, they can delete.
+
+    setIsSubmitting(true); // Use general submitting state or a specific one for deletion
+    try {
+      const itemRef = doc(db, 'classroomItems', itemToDelete.id);
+      await deleteDoc(itemRef);
+      toast({ title: 'Item Deleted', description: `"${itemToDelete.title}" has been removed.` });
+      fetchClassroomItemsForGroup(itemToDelete.groupId); // Refresh list for current group
+    } catch (error) {
+      console.error('Error deleting classroom item:', error);
+      toast({ title: 'Deletion Failed', description: 'Could not delete the item.', variant: 'destructive' });
+    } finally {
+      setIsSubmitting(false);
+      setIsConfirmDeleteDialogOpen(false);
+      setItemToDelete(null);
+    }
+  };
+
 
   if (authLoading || (!firestoreUser && !firestoreUser?.institutionId)) {
     return <div className="flex justify-center items-center h-full"><Loader2 className="h-8 w-8 animate-spin text-primary" /> <span className="ml-2">Loading user data...</span></div>;
@@ -248,16 +320,19 @@ export default function ClassroomAssignmentsPage() {
               <CardTitle>Classroom Administration</CardTitle>
               <CardDescription>Manage assignments and reminders for your groups.</CardDescription>
             </div>
-            <Dialog open={isFormOpen} onOpenChange={setIsFormOpen}>
+            <Dialog open={isFormOpen} onOpenChange={(open) => {
+              setIsFormOpen(open);
+              if (!open) setEditingItem(null); // Clear editingItem when dialog closes
+            }}>
               <DialogTrigger asChild>
-                <Button size="sm" className="gap-1.5 text-sm" disabled={manageableGroups.length === 0 || isLoadingGroups}>
+                <Button size="sm" className="gap-1.5 text-sm" onClick={openCreateFormDialog} disabled={manageableGroups.length === 0 || isLoadingGroups}>
                   <PlusCircle className="size-3.5" /> New Item
                 </Button>
               </DialogTrigger>
               <DialogContent className="sm:max-w-lg">
                 <DialogHeader>
-                  <DialogTitle>Create New Classroom Item</DialogTitle>
-                  <DialogPrimitiveDescription>Fill in the details for the new assignment or reminder.</DialogPrimitiveDescription>
+                  <DialogTitle>{editingItem ? 'Edit Classroom Item' : 'Create New Classroom Item'}</DialogTitle>
+                  <DialogPrimitiveDescription>Fill in the details for the item.</DialogPrimitiveDescription>
                 </DialogHeader>
                 <Form {...form}>
                   <form onSubmit={form.handleSubmit(handleFormSubmit)} className="space-y-4 py-4 max-h-[70vh] overflow-y-auto pr-2">
@@ -267,10 +342,10 @@ export default function ClassroomAssignmentsPage() {
                         <Select 
                             onValueChange={(value) => {
                                 field.onChange(value);
-                                setSelectedGroupId(value); // Also update the page's selected group
+                                setSelectedGroupId(value);
                             }} 
                             value={field.value} 
-                            disabled={manageableGroups.length === 0 || isLoadingGroups}
+                            disabled={manageableGroups.length === 0 || isLoadingGroups || !!editingItem} // Disable if editing
                         >
                           <FormControl>
                             <SelectTrigger><SelectValue placeholder="Select a group" /></SelectTrigger>
@@ -282,6 +357,7 @@ export default function ClassroomAssignmentsPage() {
                         {manageableGroups.length === 0 && !isLoadingGroups && (
                              <p className="text-xs text-muted-foreground mt-1">No groups available for assignment.</p>
                         )}
+                        {!!editingItem && <p className="text-xs text-muted-foreground mt-1">Group cannot be changed when editing.</p>}
                         <FormMessage />
                       </FormItem>
                     )}/>
@@ -330,7 +406,7 @@ export default function ClassroomAssignmentsPage() {
                     )}/>
                     <DialogFooter className="pt-4">
                       <DialogClose asChild><Button type="button" variant="outline">Cancel</Button></DialogClose>
-                      <Button type="submit" disabled={isSubmitting || manageableGroups.length === 0 || !form.getValues('groupId')}>{isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Create Item</Button>
+                      <Button type="submit" disabled={isSubmitting || manageableGroups.length === 0 || !form.getValues('groupId')}>{isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{editingItem ? 'Save Changes' : 'Create Item'}</Button>
                     </DialogFooter>
                   </form>
                 </Form>
@@ -343,7 +419,7 @@ export default function ClassroomAssignmentsPage() {
                 value={selectedGroupId} 
                 onValueChange={(value) => {
                     setSelectedGroupId(value);
-                    form.setValue('groupId', value); // Keep form in sync for new item creation
+                    if (value) form.setValue('groupId', value);
                 }} 
                 disabled={isLoadingGroups || manageableGroups.length === 0}
             >
@@ -398,7 +474,7 @@ export default function ClassroomAssignmentsPage() {
               )}
             </div>
           )}
-          {!isLoadingGroups && manageableGroups.length > 0 && !selectedGroupId && !isLoadingItems && (
+          {!isLoadingGroups && !isLoadingItems && manageableGroups.length > 0 && !selectedGroupId && (
              <div className="text-center py-4 text-muted-foreground">
                 Please select a group to view or add assignments.
              </div>
@@ -434,10 +510,15 @@ export default function ClassroomAssignmentsPage() {
                     </CardContent>
                     <CardFooter className="text-xs text-muted-foreground flex justify-between items-center">
                       <span>Created: {item.createdAt && isValid(parseISO(item.createdAt)) ? format(parseISO(item.createdAt), 'PPP p') : 'Not available'}</span>
-                       {/* Placeholder for Edit/Delete actions */}
                       <div className="space-x-1">
-                        <Button variant="ghost" size="icon" disabled><Edit className="h-4 w-4" /></Button>
-                        <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" disabled><Trash2 className="h-4 w-4" /></Button>
+                        <Button variant="ghost" size="icon" onClick={() => openEditFormDialog(item)} title="Edit Item">
+                            <Edit className="h-4 w-4" />
+                            <span className="sr-only">Edit</span>
+                        </Button>
+                        <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => openDeleteConfirmationDialog(item)} title="Delete Item">
+                            <Trash2 className="h-4 w-4" />
+                            <span className="sr-only">Delete</span>
+                        </Button>
                       </div>
                     </CardFooter>
                   </Card>
@@ -447,6 +528,26 @@ export default function ClassroomAssignmentsPage() {
           )}
         </CardContent>
       </Card>
+
+      <AlertDialog open={isConfirmDeleteDialogOpen} onOpenChange={setIsConfirmDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone. This will permanently delete the item
+              "{itemToDelete?.title}".
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setItemToDelete(null)}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmDeleteItem} disabled={isSubmitting} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
+
