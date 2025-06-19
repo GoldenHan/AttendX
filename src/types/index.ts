@@ -86,7 +86,7 @@ export interface AttendanceRecord {
 export interface Group {
   id: string; 
   name: string;
-  type: 'Saturday' | 'Sunday'; 
+  type: 'Saturday' | 'Sunday' | 'SaturdayAndSunday' | 'Daily'; 
   startDate: string; 
   endDate?: string | null; 
   studentIds: string[]; // Array of User.id (UIDs from 'users' collection for students)
@@ -116,7 +116,7 @@ export const DEFAULT_GRADING_CONFIG: GradingConfiguration = {
 // Configuration for Class Schedules
 export interface ClassScheduleConfiguration {
   id?: string; // Typically "currentClassScheduleConfig"
-  scheduleType: 'Saturday' | 'Sunday' | 'Daily' | 'NotSet';
+  scheduleType: 'Saturday' | 'Sunday' | 'Daily' | 'NotSet' | 'SaturdayAndSunday';
   startTime: string; // Format HH:MM
   endTime: string;   // Format HH:MM
 }
@@ -160,3 +160,4 @@ export const getDefaultStudentGradeStructure = (config: GradingConfiguration): S
   };
   return structure;
 };
+

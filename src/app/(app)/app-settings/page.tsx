@@ -269,6 +269,7 @@ export default function AppSettingsPage() {
                         <SelectItem value="NotSet">Not Set / Varies</SelectItem>
                         <SelectItem value="Saturday">Sabatino (Saturday Only)</SelectItem>
                         <SelectItem value="Sunday">Dominical (Sunday Only)</SelectItem>
+                        <SelectItem value="SaturdayAndSunday">Ambos Fines de Semana (Sábado y Domingo)</SelectItem>
                         <SelectItem value="Daily">Diario (Weekdays)</SelectItem>
                       </SelectContent>
                     </Select>
@@ -403,3 +404,4 @@ export default function AppSettingsPage() {
     </div>
   );
 }
+

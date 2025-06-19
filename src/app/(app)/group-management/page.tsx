@@ -26,7 +26,8 @@ import { Loader2, PlusCircle, Users, Edit, Trash2, CalendarIcon, Search, UserChe
 import { useToast } from '@/hooks/use-toast';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, doc, deleteDoc, updateDoc, query, where } from 'firebase/firestore';
-import type { Group, User } from '@/types';
+import type { Group, User, ClassScheduleConfiguration } from '@/types'; // Added ClassScheduleConfiguration
+import { DEFAULT_CLASS_SCHEDULE_CONFIG } from '@/types'; // Added DEFAULT_CLASS_SCHEDULE_CONFIG
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -47,10 +48,11 @@ import { useAuth } from '@/contexts/AuthContext'; // Import useAuth
 
 const groupFormSchema = z.object({
   name: z.string().min(2, { message: "Group name must be at least 2 characters." }),
-  type: z.enum(['Saturday', 'Sunday'], { required_error: "Group type is required." }),
+  type: z.enum(['Saturday', 'Sunday', 'SaturdayAndSunday', 'Daily'], { required_error: "Group type is required." }),
   startDate: z.date({ required_error: "Start date is required." }),
   endDate: z.date().optional().nullable(),
   teacherId: z.string().optional().or(z.literal('')),
+  // startTime and endTime could be added here if overrides are needed per group
 });
 
 type GroupFormValues = z.infer<typeof groupFormSchema>;
@@ -61,10 +63,13 @@ export default function GroupManagementPage() {
   const [allGroups, setAllGroups] = useState<Group[]>([]);
   const [allTeachers, setAllTeachers] = useState<User[]>([]);
   const [allStudents, setAllStudents] = useState<User[]>([]);
+  const [classScheduleConfig, setClassScheduleConfig] = useState<ClassScheduleConfiguration>(DEFAULT_CLASS_SCHEDULE_CONFIG);
   
   const [isLoadingGroups, setIsLoadingGroups] = useState(true);
   const [isLoadingTeachers, setIsLoadingTeachers] = useState(true);
   const [isLoadingStudents, setIsLoadingStudents] = useState(true);
+  const [isLoadingScheduleConfig, setIsLoadingScheduleConfig] = useState(true);
+
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isGroupFormDialogOpen, setIsGroupFormDialogOpen] = useState(false);
@@ -77,13 +82,13 @@ export default function GroupManagementPage() {
   const { toast } = useToast();
   const { firestoreUser } = useAuth(); // Get current user from AuthContext
 
-  const isLoadingData = isLoadingGroups || isLoadingTeachers || isLoadingStudents;
+  const isLoadingData = isLoadingGroups || isLoadingTeachers || isLoadingStudents || isLoadingScheduleConfig;
 
   const form = useForm<GroupFormValues>({
     resolver: zodResolver(groupFormSchema),
     defaultValues: {
       name: '',
-      type: 'Saturday',
+      type: 'Saturday', // Default could be derived from classScheduleConfig.scheduleType
       startDate: new Date(),
       endDate: undefined,
       teacherId: '',
@@ -94,16 +99,20 @@ export default function GroupManagementPage() {
     setIsLoadingGroups(true);
     setIsLoadingTeachers(true);
     setIsLoadingStudents(true);
+    setIsLoadingScheduleConfig(true);
     try {
       const groupsSnapshotPromise = getDocs(collection(db, 'groups'));
-      const teachersQuery = query(collection(db, 'users'), where('role', 'in', ['teacher', 'admin'])); // Admins can also be teachers
+      const teachersQuery = query(collection(db, 'users'), where('role', 'in', ['teacher', 'admin'])); 
       const teachersSnapshotPromise = getDocs(teachersQuery);
       const studentsSnapshotPromise = getDocs(collection(db, 'students'));
+      const scheduleConfigPromise = getDoc(doc(db, 'appConfiguration', 'currentClassScheduleConfig'));
 
-      const [groupsSnapshot, teachersSnapshot, studentsSnapshot] = await Promise.all([
+
+      const [groupsSnapshot, teachersSnapshot, studentsSnapshot, scheduleConfigSnap] = await Promise.all([
         groupsSnapshotPromise,
         teachersSnapshotPromise,
-        studentsSnapshotPromise
+        studentsSnapshotPromise,
+        scheduleConfigPromise
       ]);
 
       setAllGroups(groupsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as Group)));
@@ -115,14 +124,30 @@ export default function GroupManagementPage() {
       setAllStudents(studentsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as User)));
       setIsLoadingStudents(false);
 
+      if (scheduleConfigSnap.exists()) {
+        const configData = scheduleConfigSnap.data() as ClassScheduleConfiguration;
+        setClassScheduleConfig(configData);
+        // Set default group type in form if a specific global type is set (excluding 'NotSet' and 'Daily')
+        if (configData.scheduleType !== 'NotSet' && configData.scheduleType !== 'Daily') {
+            form.setValue('type', configData.scheduleType);
+        } else if (configData.scheduleType === 'Daily') {
+            form.setValue('type', 'Daily'); // Explicitly for daily
+        }
+      } else {
+        setClassScheduleConfig(DEFAULT_CLASS_SCHEDULE_CONFIG);
+      }
+      setIsLoadingScheduleConfig(false);
+
+
     } catch (error) {
       console.error("Error fetching initial data:", error);
-      toast({ title: 'Error fetching data', description: 'Could not load groups, teachers, or students.', variant: 'destructive' });
+      toast({ title: 'Error fetching data', description: 'Could not load groups, teachers, students or schedule config.', variant: 'destructive' });
       setIsLoadingGroups(false);
       setIsLoadingTeachers(false);
       setIsLoadingStudents(false);
+      setIsLoadingScheduleConfig(false);
     }
-  }, [toast]);
+  }, [toast, form]); // Added form to dependency array
 
   useEffect(() => {
     fetchInitialData();
@@ -189,7 +214,13 @@ export default function GroupManagementPage() {
         toast({ title: 'Group Created', description: `${data.name} created successfully.` });
       }
       
-      form.reset({ name: '', type: 'Saturday', startDate: new Date(), endDate: undefined, teacherId: '' });
+      form.reset({ 
+        name: '', 
+        type: classScheduleConfig.scheduleType !== 'NotSet' ? classScheduleConfig.scheduleType : 'Saturday', 
+        startDate: new Date(), 
+        endDate: undefined, 
+        teacherId: '' 
+      });
       setEditingGroup(null);
       setIsGroupFormDialogOpen(false);
     } catch (error) {
@@ -222,7 +253,11 @@ export default function GroupManagementPage() {
       return;
     }
     setEditingGroup(null);
-    form.reset({ name: '', type: 'Saturday', startDate: new Date(), endDate: undefined, teacherId: '' });
+    // Set default type based on global config, fallback to Saturday if NotSet or if config is still loading
+    const defaultType = classScheduleConfig.scheduleType !== 'NotSet' 
+      ? classScheduleConfig.scheduleType 
+      : 'Saturday';
+    form.reset({ name: '', type: defaultType, startDate: new Date(), endDate: undefined, teacherId: '' });
     setIsGroupFormDialogOpen(true);
   };
 
@@ -314,7 +349,8 @@ export default function GroupManagementPage() {
             <Dialog open={isGroupFormDialogOpen} onOpenChange={(isOpen) => {
               setIsGroupFormDialogOpen(isOpen);
               if (!isOpen) {
-                form.reset({ name: '', type: 'Saturday', startDate: new Date(), endDate: undefined, teacherId: '' });
+                const defaultType = classScheduleConfig.scheduleType !== 'NotSet' ? classScheduleConfig.scheduleType : 'Saturday';
+                form.reset({ name: '', type: defaultType, startDate: new Date(), endDate: undefined, teacherId: '' });
                 setEditingGroup(null);
               }
             }}>
@@ -329,6 +365,11 @@ export default function GroupManagementPage() {
                   <DialogTitle>{editingGroup ? 'Edit Group' : 'Create New Group'}</DialogTitle>
                   <DialogPrimitiveDescription>
                     {editingGroup ? 'Update the details for this group.' : 'Fill in the details for the new group.'}
+                    {!isLoadingScheduleConfig && classScheduleConfig.scheduleType !== 'NotSet' && (
+                        <span className="block text-xs mt-1 text-muted-foreground">
+                            Default schedule type from settings: {classScheduleConfig.scheduleType}. You can override it here.
+                        </span>
+                    )}
                   </DialogPrimitiveDescription>
                 </DialogHeader>
                 <form onSubmit={form.handleSubmit(handleGroupFormSubmit)} className="space-y-4 py-4 max-h-[70vh] overflow-y-auto pr-2">
@@ -358,6 +399,8 @@ export default function GroupManagementPage() {
                           <SelectContent>
                             <SelectItem value="Saturday">Saturday Group</SelectItem>
                             <SelectItem value="Sunday">Sunday Group</SelectItem>
+                            <SelectItem value="SaturdayAndSunday">Both Weekends (Sat & Sun)</SelectItem>
+                            <SelectItem value="Daily">Daily Group (Weekdays)</SelectItem>
                           </SelectContent>
                         </Select>
                         {form.formState.errors.type && (
@@ -507,7 +550,7 @@ export default function GroupManagementPage() {
                 {displayedGroups.map((group) => (
                   <TableRow key={group.id}>
                     <TableCell className="font-medium">{group.name}</TableCell>
-                    <TableCell>{group.type}</TableCell>
+                    <TableCell>{group.type === 'SaturdayAndSunday' ? 'Both Weekends' : group.type}</TableCell>
                     <TableCell>{formatDateDisplay(group.startDate)}</TableCell>
                     <TableCell>{formatDateDisplay(group.endDate)}</TableCell>
                     <TableCell>{getTeacherName(group.teacherId)}</TableCell>
