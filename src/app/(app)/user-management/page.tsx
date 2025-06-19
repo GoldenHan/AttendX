@@ -73,23 +73,22 @@ function debounce<F extends (...args: any[]) => any>(func: F, waitFor: number) {
 }
 
 export default function StaffManagementPage() {
+  // All useState hooks at the top
   const [staffUsers, setStaffUsers] = useState<User[]>([]);
   const [allGroups, setAllGroups] = useState<Group[]>([]);
   const [allSedes, setAllSedes] = useState<Sede[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSendingResetEmail, setIsSendingResetEmail] = useState<string | null>(null);
-
   const [isStaffFormDialogOpen, setIsStaffFormDialogOpen] = useState(false);
   const [editingStaff, setEditingStaff] = useState<User | null>(null);
-
   const [isDeleteStaffDialogOpen, setIsDeleteStaffDialogOpen] = useState(false);
   const [staffToDelete, setStaffToDelete] = useState<User | null>(null);
   const [deleteAdminPassword, setDeleteAdminPassword] = useState('');
-
   const [emailCheckStatus, setEmailCheckStatus] = useState<'idle' | 'checking' | 'exists' | 'not_found' | 'error'>('idle');
   const [emailCheckMessage, setEmailCheckMessage] = useState<string | null>(null);
 
+  // All other custom hooks and built-in hooks (useContext, useForm, useCallback, useMemo, useEffect)
   const { toast } = useToast();
   const { reauthenticateCurrentUser, authUser, firestoreUser } = useAuth();
 
@@ -100,7 +99,7 @@ export default function StaffManagementPage() {
     },
   });
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setIsLoading(true);
     try {
       const usersQuery = query(collection(db, 'users'), where('role', '!=', 'student'));
@@ -125,11 +124,12 @@ export default function StaffManagementPage() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [toast]); // No dependency on firestoreUser here as queries are general or based on component logic
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [fetchData]);
+
 
   const checkEmailExistence = useCallback(async (email: string) => {
     setEmailCheckStatus('checking');
@@ -158,8 +158,97 @@ export default function StaffManagementPage() {
     setEmailCheckMessage(null);
   }, []);
   
-  const canAddStaff = firestoreUser?.role === 'admin' || firestoreUser?.role === 'supervisor';
+  const canAddStaff = useMemo(() => firestoreUser?.role === 'admin' || firestoreUser?.role === 'supervisor', [firestoreUser]);
 
+  const watchedEmailValue = form.watch('email');
+
+  useEffect(() => {
+    if (isStaffFormDialogOpen && watchedEmailValue && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(watchedEmailValue)) {
+        if (!editingStaff || watchedEmailValue !== editingStaff.email) {
+            debouncedCheckEmail(watchedEmailValue);
+        } else {
+            resetEmailCheck();
+        }
+    } else if (!watchedEmailValue && isStaffFormDialogOpen) {
+      resetEmailCheck();
+    } else if (watchedEmailValue && isStaffFormDialogOpen) {
+      setEmailCheckStatus('idle');
+      setEmailCheckMessage('Please enter a valid email address.');
+    }
+  }, [watchedEmailValue, isStaffFormDialogOpen, editingStaff, debouncedCheckEmail, resetEmailCheck]);
+
+  const displayedStaffUsers = useMemo(() => {
+    if (!firestoreUser) return []; // Ensure firestoreUser is available
+    if (firestoreUser.role === 'supervisor') {
+        return staffUsers.filter(staff => staff.sedeId === firestoreUser.sedeId && (staff.role === 'teacher' || staff.id === firestoreUser.id));
+    }
+    return staffUsers;
+  }, [staffUsers, firestoreUser]);
+
+  const getSedeName = useCallback((sedeId?: string | null) => {
+    if (!sedeId) return 'N/A';
+    const sede = allSedes.find(s => s.id === sedeId);
+    return sede ? sede.name : 'Unknown Sede';
+  }, [allSedes]);
+  
+  const availableSedesForAssignment = useMemo(() => {
+    if (!firestoreUser) return [];
+    if (firestoreUser.role === 'supervisor') {
+        return allSedes.filter(s => s.id === firestoreUser.sedeId);
+    }
+    return allSedes;
+  }, [allSedes, firestoreUser]);
+  
+  const availableGroupsForTeacherAssignment = useMemo(() => {
+    if (!firestoreUser) return [];
+    if (firestoreUser.role === 'supervisor') {
+        return allGroups.filter(g => g.sedeId === firestoreUser.sedeId);
+    }
+    return allGroups;
+  }, [allGroups, firestoreUser]);
+
+  const watchedRole = form.watch('role');
+
+  // Conditional rendering logic, AFTER all hooks have been called
+  if (isLoading && staffUsers.length === 0 && allGroups.length === 0 && allSedes.length === 0) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2"><Briefcase className="h-6 w-6 text-primary" /> Staff Management</CardTitle>
+          <CardDescription>Manage teacher, administrator, cashier, and supervisor accounts.</CardDescription>
+        </CardHeader>
+        <CardContent className="flex items-center justify-center py-10">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+           <p className="ml-2">Loading staff, groups, and sedes...</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (!firestoreUser) { // Check if firestoreUser is loaded
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2"><Briefcase className="h-6 w-6 text-primary" /> Staff Management</CardTitle>
+        </CardHeader>
+        <CardContent className="flex items-center justify-center py-10">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" /><p className="ml-2">Verifying user role...</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // Only admins and supervisors can manage staff
+  if (firestoreUser.role !== 'admin' && firestoreUser.role !== 'supervisor') {
+    return (
+      <Card>
+        <CardHeader><CardTitle>Access Denied</CardTitle></CardHeader>
+        <CardContent><p>You do not have permission to manage Staff.</p></CardContent>
+      </Card>
+    );
+  }
+
+  // Form submission and other handlers remain largely the same, but are now correctly placed after all hooks.
   const handleOpenAddDialog = () => {
     setEditingStaff(null);
     const defaultValues: StaffFormValues = {
@@ -391,10 +480,10 @@ export default function StaffManagementPage() {
   };
 
   const confirmDeleteStaffUser = async () => {
-    if (!staffToDelete || !authUser) return;
+    if (!staffToDelete || !authUser || !firestoreUser) return; // Added firestoreUser check for safety
     
-    const isAdminDeleting = firestoreUser?.role === 'admin';
-    const isSupervisorDeleting = firestoreUser?.role === 'supervisor';
+    const isAdminDeleting = firestoreUser.role === 'admin';
+    const isSupervisorDeleting = firestoreUser.role === 'supervisor';
 
     if (isAdminDeleting && !deleteAdminPassword) {
       toast({ title: 'Input Required', description: 'Admin password is required to delete.', variant: 'destructive' });
@@ -404,7 +493,7 @@ export default function StaffManagementPage() {
         toast({ title: "Action Denied", description: "Supervisors can only delete teachers.", variant: "destructive" });
         return;
     }
-    if (isSupervisorDeleting && staffToDelete.sedeId !== firestoreUser?.sedeId) {
+    if (isSupervisorDeleting && staffToDelete.sedeId !== firestoreUser.sedeId) {
         toast({ title: "Action Denied", description: "Supervisors can only delete teachers from their own Sede.", variant: "destructive" });
         return;
     }
@@ -458,46 +547,6 @@ export default function StaffManagementPage() {
     }
   };
 
-  const watchedRole = form.watch('role');
-  const watchedEmailValue = form.watch('email');
-
-  useEffect(() => {
-    if (isStaffFormDialogOpen && watchedEmailValue && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(watchedEmailValue)) {
-        if (!editingStaff || watchedEmailValue !== editingStaff.email) {
-            debouncedCheckEmail(watchedEmailValue);
-        } else {
-            resetEmailCheck();
-        }
-    } else if (!watchedEmailValue && isStaffFormDialogOpen) {
-      resetEmailCheck();
-    } else if (watchedEmailValue && isStaffFormDialogOpen) {
-      setEmailCheckStatus('idle');
-      setEmailCheckMessage('Please enter a valid email address.');
-    }
-  }, [watchedEmailValue, isStaffFormDialogOpen, editingStaff, debouncedCheckEmail, resetEmailCheck]);
-
-  const displayedStaffUsers = useMemo(() => {
-    if (firestoreUser?.role === 'supervisor') {
-        return staffUsers.filter(staff => staff.sedeId === firestoreUser.sedeId && (staff.role === 'teacher' || staff.id === firestoreUser.id));
-    }
-    return staffUsers;
-  }, [staffUsers, firestoreUser]);
-
-  if (isLoading && staffUsers.length === 0 && allGroups.length === 0 && allSedes.length === 0) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2"><Briefcase className="h-6 w-6 text-primary" /> Staff Management</CardTitle>
-          <CardDescription>Manage teacher, administrator, cashier, and supervisor accounts.</CardDescription>
-        </CardHeader>
-        <CardContent className="flex items-center justify-center py-10">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
-           <p className="ml-2">Loading staff, groups, and sedes...</p>
-        </CardContent>
-      </Card>
-    );
-  }
-
   const getEmailCheckMessageColor = () => {
     switch (emailCheckStatus) {
       case 'checking': return 'text-muted-foreground';
@@ -508,27 +557,6 @@ export default function StaffManagementPage() {
     }
   };
   
-  const getSedeName = (sedeId?: string | null) => {
-    if (!sedeId) return 'N/A';
-    const sede = allSedes.find(s => s.id === sedeId);
-    return sede ? sede.name : 'Unknown Sede';
-  };
-  
-  const availableSedesForAssignment = useMemo(() => {
-    if (firestoreUser?.role === 'supervisor') {
-        return allSedes.filter(s => s.id === firestoreUser.sedeId);
-    }
-    return allSedes;
-  }, [allSedes, firestoreUser]);
-  
-  const availableGroupsForTeacherAssignment = useMemo(() => {
-    if (firestoreUser?.role === 'supervisor') {
-        return allGroups.filter(g => g.sedeId === firestoreUser.sedeId);
-    }
-    return allGroups;
-  }, [allGroups, firestoreUser]);
-
-
   return (
     <>
     <Card>
@@ -656,7 +684,7 @@ export default function StaffManagementPage() {
                           </FormItem>
                      )}/>
                    )}
-                  {(watchedRole === 'teacher') && ( // Only teachers can be assigned to groups in this form
+                  {(watchedRole === 'teacher') && ( 
                     <FormField control={form.control} name="assignedGroupId" render={({ field }) => (
                         <FormItem><FormLabel>Assign Teacher to Group (Optional)</FormLabel>
                           <Select onValueChange={(value) => { field.onChange(value === UNASSIGN_VALUE_KEY ? undefined : value);}} value={field.value || UNASSIGN_VALUE_KEY}>
@@ -774,5 +802,3 @@ export default function StaffManagementPage() {
     </>
   );
 }
-
-    
