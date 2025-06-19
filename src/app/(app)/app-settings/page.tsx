@@ -18,11 +18,12 @@ import { DEFAULT_GRADING_CONFIG, DEFAULT_CLASS_SCHEDULE_CONFIG } from '@/types';
 import Image from 'next/image';
 
 const MAX_LOGO_SIZE_MB = 1; // Max logo size in MB for Data URL storage
+const DEFAULT_APP_NAME = "AttendX";
 
 export default function AppSettingsPage() {
   const { toast } = useToast();
   const [isDarkMode, setIsDarkMode] = useState(false);
-  const [appName, setAppName] = useState("AttendX");
+  const [appName, setAppName] = useState(DEFAULT_APP_NAME);
   const [isExporting, setIsExporting] = useState(false);
   
   const [isSavingGradingConfig, setIsSavingGradingConfig] = useState(false);
@@ -33,7 +34,7 @@ export default function AppSettingsPage() {
   const [classScheduleConfig, setClassScheduleConfig] = useState<ClassScheduleConfiguration>(DEFAULT_CLASS_SCHEDULE_CONFIG);
   const [isLoadingScheduleConfig, setIsLoadingScheduleConfig] = useState(true);
 
-  const [logoPreviewUrl, setLogoPreviewUrl] = useState<string | null>(null); // Can be Data URL or external URL
+  const [logoPreviewUrl, setLogoPreviewUrl] = useState<string | null>(null);
   const [isProcessingLogo, setIsProcessingLogo] = useState(false);
 
 
@@ -49,8 +50,9 @@ export default function AppSettingsPage() {
     const storedAppName = localStorage.getItem('appName');
     if (storedAppName) {
       setAppName(storedAppName);
+    } else {
+      setAppName(DEFAULT_APP_NAME); // Set default if nothing in localStorage
     }
-    // Changed from 'appLogoUrl' to 'appLogoDataUrl' to reflect it can be a data URI
     const storedLogoDataUrl = localStorage.getItem('appLogoDataUrl');
     if (storedLogoDataUrl) {
       setLogoPreviewUrl(storedLogoDataUrl);
@@ -136,6 +138,7 @@ export default function AppSettingsPage() {
     const newName = e.target.value;
     setAppName(newName);
     localStorage.setItem('appName', newName);
+    window.dispatchEvent(new CustomEvent('appNameChanged', { detail: newName }));
   };
 
   const handleLogoFileChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -147,7 +150,7 @@ export default function AppSettingsPage() {
           description: `Logo image must be smaller than ${MAX_LOGO_SIZE_MB}MB. Please choose a smaller file.`,
           variant: 'destructive',
         });
-        event.target.value = ''; // Clear the file input
+        event.target.value = '';
         return;
       }
       setIsProcessingLogo(true);
@@ -165,7 +168,7 @@ export default function AppSettingsPage() {
         setIsProcessingLogo(false);
       };
       reader.readAsDataURL(file);
-      event.target.value = ''; // Clear the file input to allow re-uploading the same file
+      event.target.value = '';
     }
   };
 
@@ -327,7 +330,7 @@ export default function AppSettingsPage() {
                   <div className="mt-2 p-2 border rounded-md inline-block bg-muted">
                     <Image src={logoPreviewUrl} alt="Logo Preview" width={100} height={40} className="object-contain h-auto max-h-[40px] w-auto max-w-[150px]" onError={() => {
                        toast({ title: 'Logo Error', description: 'Could not load image from the provided data.', variant: 'destructive'});
-                       setLogoPreviewUrl(null); // Clear invalid preview
+                       setLogoPreviewUrl(null);
                     }} />
                   </div>
                 )}
@@ -359,7 +362,7 @@ export default function AppSettingsPage() {
                         <SelectItem value="NotSet">Not Set / Varies</SelectItem>
                         <SelectItem value="Saturday">Saturday Only</SelectItem>
                         <SelectItem value="Sunday">Sunday Only</SelectItem>
-                        <SelectItem value="SaturdayAndSunday">Both Weekends (Sat & Sun)</SelectItem>
+                        <SelectItem value="SaturdayAndSunday">Both Weekends (Sat &amp; Sun)</SelectItem>
                         <SelectItem value="Daily">Daily (Weekdays)</SelectItem>
                       </SelectContent>
                     </Select>

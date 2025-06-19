@@ -14,19 +14,24 @@ import {
 import { Header } from '@/components/header';
 import { SidebarNav } from '@/components/sidebar-nav';
 import { Button } from '@/components/ui/button';
-import { LogOut, Loader2, SheetIcon } from 'lucide-react'; // Added SheetIcon
+import { LogOut, Loader2, SheetIcon } from 'lucide-react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useAuth } from '@/contexts/AuthContext';
 
+const DEFAULT_APP_NAME_SHELL = "AttendX";
+
 export function MainAppShell({ 
   children,
-  appLogoUrl 
+  appLogoUrl,
+  appName
 }: { 
   children: React.ReactNode;
   appLogoUrl?: string | null;
+  appName?: string;
 }) {
   const { signOut, loading: authLoading, firestoreUser } = useAuth();
+  const effectiveAppName = appName || DEFAULT_APP_NAME_SHELL;
 
   const handleLogout = async () => {
     await signOut();
@@ -46,7 +51,7 @@ export function MainAppShell({
               <>
                 <SheetIcon className="h-6 w-6 group-data-[collapsible=icon]:block hidden" /> 
                 <SheetIcon className="h-6 w-6 group-data-[collapsible=icon]:hidden" /> 
-                <span className="group-data-[collapsible=icon]:hidden">AttendX</span>
+                <span className="group-data-[collapsible=icon]:hidden">{effectiveAppName}</span>
               </>
             )}
           </Link>
@@ -70,7 +75,7 @@ export function MainAppShell({
         </SidebarFooter>
       </Sidebar>
       <SidebarInset className="flex flex-col">
-        <Header appLogoUrl={appLogoUrl} />
+        <Header appLogoUrl={appLogoUrl} appName={appName} />
         <main className="flex-1 overflow-auto p-4 sm:p-6 bg-background">
           {children}
         </main>

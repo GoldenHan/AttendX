@@ -16,8 +16,11 @@ import { useAuth } from '@/contexts/AuthContext';
 import React, { useState, useEffect } from 'react';
 import Image from 'next/image'; 
 
-export function Header({ appLogoUrl }: { appLogoUrl?: string | null }) {
+const DEFAULT_APP_NAME_HEADER = "AttendX";
+
+export function Header({ appLogoUrl, appName }: { appLogoUrl?: string | null, appName?: string }) {
   const { authUser, firestoreUser, signOut, loading } = useAuth();
+  const effectiveAppName = appName || DEFAULT_APP_NAME_HEADER;
   
   const [currentLanguage, setCurrentLanguage] = useState<'EN' | 'ES'>(() => {
     if (typeof window !== 'undefined') {
@@ -57,7 +60,7 @@ export function Header({ appLogoUrl }: { appLogoUrl?: string | null }) {
           <>
             <SheetIcon className="h-6 w-6 text-primary-foreground" />
             <Link href="/" className="text-xl font-semibold font-headline text-primary-foreground">
-              AttendX
+              {effectiveAppName}
             </Link>
           </>
         )}

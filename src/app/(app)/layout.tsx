@@ -6,6 +6,8 @@ import { useRouter, usePathname } from 'next/navigation';
 import React, { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 
+const DEFAULT_APP_NAME_LAYOUT = "AttendX";
+
 export default function AppLayout({
   children,
 }: {
@@ -14,24 +16,36 @@ export default function AppLayout({
   const { authUser, firestoreUser, loading } = useAuth();
   const router = useRouter();
   const pathname = usePathname(); 
-  const [appLogoUrl, setAppLogoUrl] = useState<string | null>(null); // Can be Data URL or external URL
+  const [appLogoUrl, setAppLogoUrl] = useState<string | null>(null);
+  const [appName, setAppName] = useState<string>(DEFAULT_APP_NAME_LAYOUT);
 
   useEffect(() => {
-    // Load initial logo URL from localStorage
-    const storedLogoDataUrl = localStorage.getItem('appLogoDataUrl'); // Changed key
+    const storedLogoDataUrl = localStorage.getItem('appLogoDataUrl');
     if (storedLogoDataUrl) {
       setAppLogoUrl(storedLogoDataUrl);
     }
+    const storedAppName = localStorage.getItem('appName');
+    if (storedAppName) {
+      setAppName(storedAppName);
+    } else {
+      setAppName(DEFAULT_APP_NAME_LAYOUT);
+    }
 
-    // Listen for logo changes from AppSettings
     const handleLogoChange = (event: Event) => {
-      const customEvent = event as CustomEvent<string | null>; // Can be null if logo removed
+      const customEvent = event as CustomEvent<string | null>;
       setAppLogoUrl(customEvent.detail);
     };
+    const handleAppNameChange = (event: Event) => {
+      const customEvent = event as CustomEvent<string>;
+      setAppName(customEvent.detail || DEFAULT_APP_NAME_LAYOUT);
+    };
+
     window.addEventListener('logoUrlChanged', handleLogoChange);
+    window.addEventListener('appNameChanged', handleAppNameChange);
 
     return () => {
       window.removeEventListener('logoUrlChanged', handleLogoChange);
+      window.removeEventListener('appNameChanged', handleAppNameChange);
     };
   }, []);
 
@@ -50,7 +64,6 @@ export default function AppLayout({
   }, [authUser, firestoreUser, loading, router, pathname]);
 
   useEffect(() => {
-    // Apply theme on layout mount, if user navigates here from login (which clears theme)
     const storedTheme = localStorage.getItem('theme');
     if (storedTheme === 'dark') {
       document.documentElement.classList.add('dark');
@@ -71,5 +84,5 @@ export default function AppLayout({
       return <>{children}</>;
   }
 
-  return <MainAppShell appLogoUrl={appLogoUrl}>{children}</MainAppShell>;
+  return <MainAppShell appLogoUrl={appLogoUrl} appName={appName}>{children}</MainAppShell>;
 }
