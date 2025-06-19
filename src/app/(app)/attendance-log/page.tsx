@@ -18,18 +18,18 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
-import type { AttendanceRecord, User, Group, Session } from '@/types';
+import type { AttendanceRecord, User, Group, Session, ClassScheduleConfiguration } from '@/types';
+import { DEFAULT_CLASS_SCHEDULE_CONFIG } from '@/types';
 import React, { useState, useEffect, useCallback } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, addDoc, getDocs, Timestamp, query, where, doc, writeBatch } from 'firebase/firestore'; // Removed getDoc as prefill is removed
+import { collection, addDoc, getDocs, Timestamp, query, where, doc, writeBatch } from 'firebase/firestore';
 import { Loader2, CalendarIcon } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
-import { format } from 'date-fns'; // Removed isValid, parse as prefill is removed
+import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
-// useSearchParams removed as QR logic is gone
 
 const studentAttendanceSchema = z.object({
   userId: z.string(),
@@ -49,21 +49,21 @@ type AttendanceLogFormValues = z.infer<typeof attendanceLogFormSchema>;
 
 export default function AttendanceLogPage() {
   const { toast } = useToast();
-  // searchParams removed
 
   const [groups, setGroups] = useState<Group[]>([]);
   const [allStudents, setAllStudents] = useState<User[]>([]);
+  const [classScheduleConfig, setClassScheduleConfig] = useState<ClassScheduleConfiguration>(DEFAULT_CLASS_SCHEDULE_CONFIG);
+  
   const [isLoadingData, setIsLoadingData] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   
-  // qrSessionId and isPreloadingFromQr states removed
 
   const form = useForm<AttendanceLogFormValues>({
     resolver: zodResolver(attendanceLogFormSchema),
     defaultValues: {
       groupId: '',
       sessionDate: new Date(),
-      sessionTime: '09:00',
+      sessionTime: DEFAULT_CLASS_SCHEDULE_CONFIG.startTime, // Initial default
       attendances: [],
     },
   });
@@ -75,8 +75,6 @@ export default function AttendanceLogPage() {
   });
 
   const watchedGroupId = form.watch('groupId');
-
-  // useEffect for searchParams and qrSessionId removed
 
   const populateStudentsForGroup = useCallback((groupId: string) => {
     remove(); 
@@ -103,23 +101,52 @@ export default function AttendanceLogPage() {
     const fetchData = async () => {
       setIsLoadingData(true);
       try {
-        const groupsSnapshot = await getDocs(collection(db, 'groups'));
-        setGroups(groupsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Group)));
+        const groupsSnapshotPromise = getDocs(collection(db, 'groups'));
+        const studentsSnapshotPromise = getDocs(collection(db, 'students'));
+        const scheduleConfigPromise = getDoc(doc(db, 'appConfiguration', 'currentClassScheduleConfig'));
 
-        const studentsSnapshot = await getDocs(collection(db, 'students'));
+        const [groupsSnapshot, studentsSnapshot, scheduleConfigSnap] = await Promise.all([
+            groupsSnapshotPromise,
+            studentsSnapshotPromise,
+            scheduleConfigPromise
+        ]);
+        
+        setGroups(groupsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Group)));
         setAllStudents(studentsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as User)));
+
+        let loadedScheduleConfig = DEFAULT_CLASS_SCHEDULE_CONFIG;
+        if (scheduleConfigSnap.exists()) {
+            loadedScheduleConfig = scheduleConfigSnap.data() as ClassScheduleConfiguration;
+            setClassScheduleConfig(loadedScheduleConfig);
+        } else {
+            setClassScheduleConfig(DEFAULT_CLASS_SCHEDULE_CONFIG);
+        }
+
+        // Reset form with potentially new default time from schedule config
+        form.reset({
+            groupId: '', // Reset group selection
+            sessionDate: new Date(),
+            sessionTime: loadedScheduleConfig.startTime || '09:00',
+            attendances: [],
+        });
+        remove(); // Clear any existing attendance fields
 
       } catch (error) {
         console.error("Error fetching data: ", error);
-        toast({ title: 'Error fetching data', description: 'Could not load groups or students.', variant: 'destructive' });
+        toast({ title: 'Error fetching data', description: 'Could not load groups, students, or schedule config.', variant: 'destructive' });
+        // Ensure form is reset even on error, with application default time
+        form.reset({
+            groupId: '',
+            sessionDate: new Date(),
+            sessionTime: DEFAULT_CLASS_SCHEDULE_CONFIG.startTime,
+            attendances: [],
+        });
+        remove();
       }
       setIsLoadingData(false);
     };
     fetchData();
-  }, [toast]);
-
-  // useEffect for prefillFormWithQrSession removed
-
+  }, [toast, form, remove]); // form and remove are added to dependencies
 
   const findOrCreateSession = async (groupId: string, date: Date, time: string): Promise<string> => {
     const sessionDateStr = format(date, 'yyyy-MM-dd');
@@ -147,7 +174,6 @@ export default function AttendanceLogPage() {
   async function onSubmit(data: AttendanceLogFormValues) {
     setIsSubmitting(true);
     try {
-      // qrSessionId logic removed, always find or create
       const finalSessionId = await findOrCreateSession(data.groupId, data.sessionDate, data.sessionTime);
       
       const batch = writeBatch(db);
@@ -173,11 +199,10 @@ export default function AttendanceLogPage() {
         title: 'Attendance Logged',
         description: `Attendance for group recorded successfully for session ID: ${finalSessionId}.`,
       });
-      // Always reset form fully
       form.reset({
         groupId: '',
         sessionDate: new Date(),
-        sessionTime: '09:00',
+        sessionTime: classScheduleConfig.startTime || '09:00', // Use loaded config or fallback
         attendances: [],
       });
       remove(); 
@@ -188,7 +213,6 @@ export default function AttendanceLogPage() {
     setIsSubmitting(false);
   }
   
-  // effectiveIsLoading simplified
   if (isLoadingData) {
     return (
       <Card>
@@ -226,7 +250,7 @@ export default function AttendanceLogPage() {
                         field.onChange(value);
                       }}
                       value={field.value}
-                      disabled={isLoadingData} // qrSessionId removed from disabled
+                      disabled={isLoadingData}
                     >
                       <FormControl>
                         <SelectTrigger>
@@ -260,7 +284,7 @@ export default function AttendanceLogPage() {
                               "w-full pl-3 text-left font-normal",
                               !field.value && "text-muted-foreground"
                             )}
-                            disabled={isLoadingData} // qrSessionId removed from disabled
+                            disabled={isLoadingData}
                           >
                             {field.value ? (
                               format(field.value, "PPP")
@@ -277,7 +301,7 @@ export default function AttendanceLogPage() {
                           selected={field.value}
                           onSelect={field.onChange}
                           disabled={(date) =>
-                            date > new Date() || date < new Date("1900-01-01") // qrSessionId removed from disabled
+                            date > new Date() || date < new Date("1900-01-01")
                           }
                           initialFocus
                         />
@@ -294,9 +318,9 @@ export default function AttendanceLogPage() {
                   <FormItem>
                     <FormLabel>Session Time (HH:MM)</FormLabel>
                     <FormControl>
-                      <Input type="time" {...field} disabled={isLoadingData} /> {/* qrSessionId removed from disabled */}
+                      <Input type="time" {...field} disabled={isLoadingData} />
                     </FormControl>
-                     <FormDescription>Enter time in 24-hour format (e.g., 14:30).</FormDescription>
+                     <FormDescription>Enter time in 24-hour format (e.g., 14:30). Default based on App Settings.</FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -376,8 +400,8 @@ export default function AttendanceLogPage() {
             )}
 
 
-            <Button type="submit" disabled={isSubmitting || isLoadingData || fields.length === 0}> {/* isPreloadingFromQr removed */}
-              {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} {/* isPreloadingFromQr removed */}
+            <Button type="submit" disabled={isSubmitting || isLoadingData || fields.length === 0}>
+              {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Log All Attendance
             </Button>
           </form>
@@ -386,3 +410,4 @@ export default function AttendanceLogPage() {
     </Card>
   );
 }
+
