@@ -12,13 +12,20 @@ import {
 } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import type { User, AttendanceRecord as AttendanceRecordType, Group, Session } from '@/types';
+import type { User, AttendanceRecord as AttendanceRecordType, Group, Session, ClassScheduleConfiguration } from '@/types';
+import { DEFAULT_CLASS_SCHEDULE_CONFIG } from '@/types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, query } from 'firebase/firestore'; // Removed 'where' as it's not used for initial fetch
-import { Loader2 } from 'lucide-react';
+import { collection, getDocs, query, doc, getDoc } from 'firebase/firestore';
+import { Loader2, CalendarIcon } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Label } from '@/components/ui/label';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Button } from '@/components/ui/button';
+import { Calendar } from '@/components/ui/calendar';
+import { cn } from '@/lib/utils';
+import { format } from 'date-fns';
+
 
 interface UserAttendanceStats {
   userId: string;
@@ -33,63 +40,86 @@ interface UserAttendanceStats {
 export default function AttendanceReportsPage() {
   const [selectedGroupId, setSelectedGroupId] = useState<string | 'all'>('all');
   const [selectedUserId, setSelectedUserId] = useState<string | 'all'>('all');
-  const [reportType, setReportType] = useState<'overall' | 'currentMonth'>('overall');
+  const [reportType, setReportType] = useState<'overall' | 'customRange'>('overall');
   
   const [allStudents, setAllStudents] = useState<User[]>([]);
   const [allGroups, setAllGroups] = useState<Group[]>([]);
   const [allAttendanceRecords, setAllAttendanceRecords] = useState<AttendanceRecordType[]>([]);
   const [allSessions, setAllSessions] = useState<Session[]>([]);
+  const [classScheduleConfig, setClassScheduleConfig] = useState<ClassScheduleConfiguration>(DEFAULT_CLASS_SCHEDULE_CONFIG);
   
-  const [isLoading, setIsLoading] = useState(true);
+  const [customStartDate, setCustomStartDate] = useState<Date | null>(null);
+  const [customEndDate, setCustomEndDate] = useState<Date | null>(null);
+
+  const [isLoadingData, setIsLoadingData] = useState(true);
   const { toast } = useToast();
 
   useEffect(() => {
     const fetchData = async () => {
-      setIsLoading(true);
+      setIsLoadingData(true);
       try {
         const studentQuery = query(collection(db, 'students'));
         
-        const [studentsSnapshot, attendanceSnapshot, groupsSnapshot, sessionsSnapshot] = await Promise.all([
+        const [
+          studentsSnapshot, 
+          attendanceSnapshot, 
+          groupsSnapshot, 
+          sessionsSnapshot,
+          scheduleConfigSnap
+        ] = await Promise.all([
           getDocs(studentQuery),
           getDocs(collection(db, 'attendanceRecords')),
           getDocs(collection(db, 'groups')),
           getDocs(collection(db, 'sessions')),
+          getDoc(doc(db, 'appConfiguration', 'currentClassScheduleConfig'))
         ]);
 
-        setAllStudents(studentsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as User)));
-        setAllAttendanceRecords(attendanceSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AttendanceRecordType)));
-        setAllGroups(groupsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Group)));
-        setAllSessions(sessionsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Session)));
+        setAllStudents(studentsSnapshot.docs.map(d => ({ id: d.id, ...d.data() } as User)));
+        setAllAttendanceRecords(attendanceSnapshot.docs.map(d => ({ id: d.id, ...d.data() } as AttendanceRecordType)));
+        setAllGroups(groupsSnapshot.docs.map(d => ({ id: d.id, ...d.data() } as Group)));
+        setAllSessions(sessionsSnapshot.docs.map(d => ({ id: d.id, ...d.data() } as Session)));
+
+        if (scheduleConfigSnap.exists()) {
+          setClassScheduleConfig(scheduleConfigSnap.data() as ClassScheduleConfiguration);
+        } else {
+          setClassScheduleConfig(DEFAULT_CLASS_SCHEDULE_CONFIG);
+        }
 
       } catch (error) {
         console.error("Error fetching report data:", error);
         toast({ title: 'Error fetching data', description: 'Could not load data for reports.', variant: 'destructive' });
+        setClassScheduleConfig(DEFAULT_CLASS_SCHEDULE_CONFIG);
       }
-      setIsLoading(false);
+      setIsLoadingData(false);
     };
     fetchData();
   }, [toast]);
 
   const userAttendanceStats = useMemo((): UserAttendanceStats[] => {
-    if (isLoading) return [];
+    if (isLoadingData) return [];
 
     let relevantRecords = allAttendanceRecords;
+    let relevantSessionIds = new Set(allSessions.map(s => s.id));
 
-    if (reportType === 'currentMonth') {
-      const now = new Date();
-      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-      const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    if (reportType === 'customRange' && customStartDate && customEndDate) {
+      const rangeStart = new Date(customStartDate);
+      rangeStart.setHours(0, 0, 0, 0);
+      const rangeEnd = new Date(customEndDate);
+      rangeEnd.setHours(23, 59, 59, 999);
 
-      const currentMonthSessionIds = new Set<string>();
+      const rangeSessionIdsFiltered = new Set<string>();
       allSessions.forEach(session => {
+        // Assuming session.date is "YYYY-MM-DD"
         const sessionDateParts = session.date.split('-').map(Number);
         const sessionDate = new Date(sessionDateParts[0], sessionDateParts[1] - 1, sessionDateParts[2]);
-        if (sessionDate >= startOfMonth && sessionDate <= endOfMonth) {
-          currentMonthSessionIds.add(session.id);
+        if (sessionDate >= rangeStart && sessionDate <= rangeEnd) {
+          rangeSessionIdsFiltered.add(session.id);
         }
       });
-      relevantRecords = allAttendanceRecords.filter(r => currentMonthSessionIds.has(r.sessionId));
+      relevantSessionIds = rangeSessionIdsFiltered;
+      relevantRecords = allAttendanceRecords.filter(r => relevantSessionIds.has(r.sessionId));
     }
+    // If 'overall', relevantRecords is allAttendanceRecords, and relevantSessionIds covers all sessions
 
     return allStudents.map(student => {
       const studentRecords = relevantRecords.filter(r => r.userId === student.id);
@@ -98,20 +128,37 @@ export default function AttendanceReportsPage() {
       const late = studentRecords.filter(r => r.status === 'late').length;
       
       const totalAttendedOrLate = present + late;
-      const uniqueSessionIdsForStudent = new Set(studentRecords.map(r => r.sessionId));
-      const totalSessionsWithRecord = uniqueSessionIdsForStudent.size;
+      
+      // Calculate total SESSIONS the student was expected in for the given period, based on *relevantSessionIds*
+      // This requires knowing which groups the student belongs to and then which of *those groups'* sessions fall into *relevantSessionIds*
+      let actualExpectedSessionsForStudent = 0;
+      const studentGroup = allGroups.find(g => g.studentIds.includes(student.id)); // Simplified: assumes student in one group
+      if (studentGroup) {
+        allSessions.forEach(session => {
+            if (session.classId === studentGroup.id && relevantSessionIds.has(session.id)) {
+                actualExpectedSessionsForStudent++;
+            }
+        });
+      }
+      // If actualExpectedSessionsForStudent is 0 (e.g., student not in any group, or group has no relevant sessions), rate is 0 or N/A
+      // Using totalSessionsWithRecord for rate if actualExpected is problematic or 0.
+      const uniqueSessionIdsForStudentRecords = new Set(studentRecords.map(r => r.sessionId));
+      const totalSessionsWithRecord = uniqueSessionIdsForStudentRecords.size;
+
+      const baseForRate = actualExpectedSessionsForStudent > 0 ? actualExpectedSessionsForStudent : totalSessionsWithRecord;
 
       return {
         userId: student.id,
         userName: student.name,
-        totalSessionsWithRecord: totalSessionsWithRecord,
+        totalSessionsWithRecord: totalSessionsWithRecord, // Sessions they had A record for
+        // totalExpectedSessions: actualExpectedSessionsForStudent, // For potential future display
         present,
         absent,
         late,
-        attendanceRate: totalSessionsWithRecord > 0 ? (totalAttendedOrLate / totalSessionsWithRecord) * 100 : 0,
+        attendanceRate: baseForRate > 0 ? (totalAttendedOrLate / baseForRate) * 100 : 0,
       };
     });
-  }, [allStudents, allAttendanceRecords, allSessions, isLoading, reportType]);
+  }, [allStudents, allAttendanceRecords, allSessions, allGroups, isLoadingData, reportType, customStartDate, customEndDate]);
 
   const studentsForFilterDropdown = useMemo(() => {
     if (selectedGroupId === 'all') {
@@ -147,7 +194,7 @@ export default function AttendanceReportsPage() {
     Absent: stat.absent,
   }));
   
-  if (isLoading) {
+  if (isLoadingData) {
     return (
       <Card>
         <CardHeader>
@@ -162,9 +209,10 @@ export default function AttendanceReportsPage() {
     );
   }
 
-  const reportDescription = reportType === 'currentMonth' 
-    ? "Showing attendance statistics for the current month."
-    : "Showing overall attendance statistics.";
+  const reportDateDescription = reportType === 'customRange' && customStartDate && customEndDate
+    ? `from ${format(customStartDate, "PPP")} to ${format(customEndDate, "PPP")}`
+    : (reportType === 'customRange' ? "(select date range)" : "overall");
+
 
   return (
     <div className="space-y-6">
@@ -172,7 +220,8 @@ export default function AttendanceReportsPage() {
         <CardHeader>
           <CardTitle>Attendance Reports</CardTitle>
           <CardDescription>
-            View attendance statistics. {reportDescription} Filter by report type, group, and then by student.
+            View attendance statistics {reportDateDescription}. Filter by report type, group, and then by student.
+            The "Attendance Rate" is based on sessions where the student has at least one record (present, absent, or late) or expected sessions for the period if calculable.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -181,14 +230,20 @@ export default function AttendanceReportsPage() {
                 <Label htmlFor="report-type-filter">Report Type</Label>
                 <Select 
                     value={reportType} 
-                    onValueChange={(value) => setReportType(value as 'overall' | 'currentMonth')}
+                    onValueChange={(value) => {
+                        setReportType(value as 'overall' | 'customRange');
+                        if (value === 'overall') {
+                            setCustomStartDate(null);
+                            setCustomEndDate(null);
+                        }
+                    }}
                 >
-                    <SelectTrigger id="report-type-filter" className="w-full md:w-[280px]">
+                    <SelectTrigger id="report-type-filter" className="w-full">
                     <SelectValue placeholder="Select report type" />
                     </SelectTrigger>
                     <SelectContent>
                         <SelectItem value="overall">Overall Attendance</SelectItem>
-                        <SelectItem value="currentMonth">Current Month Attendance</SelectItem>
+                        <SelectItem value="customRange">Custom Date Range</SelectItem>
                     </SelectContent>
                 </Select>
             </div>
@@ -201,7 +256,7 @@ export default function AttendanceReportsPage() {
                   setSelectedUserId('all'); 
                 }}
               >
-                <SelectTrigger id="group-filter" className="w-full md:w-[280px]">
+                <SelectTrigger id="group-filter" className="w-full">
                   <SelectValue placeholder="Select a group" />
                 </SelectTrigger>
                 <SelectContent>
@@ -219,7 +274,7 @@ export default function AttendanceReportsPage() {
                 onValueChange={setSelectedUserId}
                 disabled={studentsForFilterDropdown.length === 0 && selectedGroupId !== 'all'}
               >
-                <SelectTrigger id="student-filter" className="w-full md:w-[280px]">
+                <SelectTrigger id="student-filter" className="w-full">
                   <SelectValue placeholder="Select a student" />
                 </SelectTrigger>
                 <SelectContent>
@@ -235,11 +290,69 @@ export default function AttendanceReportsPage() {
             </div>
           </div>
 
+          {reportType === 'customRange' && (
+            <div className="mb-6 grid grid-cols-1 md:grid-cols-2 gap-4 p-4 border rounded-md bg-muted/50">
+              <div>
+                <Label htmlFor="customStartDate">Start Date</Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      id="customStartDate"
+                      variant={"outline"}
+                      className={cn(
+                        "w-full justify-start text-left font-normal",
+                        !customStartDate && "text-muted-foreground"
+                      )}
+                    >
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {customStartDate ? format(customStartDate, "PPP") : <span>Pick a start date</span>}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0">
+                    <Calendar
+                      mode="single"
+                      selected={customStartDate || undefined}
+                      onSelect={(date) => setCustomStartDate(date || null)}
+                      initialFocus
+                    />
+                  </PopoverContent>
+                </Popover>
+              </div>
+              <div>
+                <Label htmlFor="customEndDate">End Date</Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      id="customEndDate"
+                      variant={"outline"}
+                      className={cn(
+                        "w-full justify-start text-left font-normal",
+                        !customEndDate && "text-muted-foreground"
+                      )}
+                    >
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {customEndDate ? format(customEndDate, "PPP") : <span>Pick an end date</span>}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0">
+                    <Calendar
+                      mode="single"
+                      selected={customEndDate || undefined}
+                      onSelect={(date) => setCustomEndDate(date || null)}
+                      disabled={(date) => customStartDate && date < customStartDate}
+                      initialFocus
+                    />
+                  </PopoverContent>
+                </Popover>
+              </div>
+            </div>
+          )}
+
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Student</TableHead>
-                <TableHead>Sessions with Records</TableHead>
+                <TableHead>Sessions w/ Record</TableHead>
                 <TableHead>Present</TableHead>
                 <TableHead>Late</TableHead>
                 <TableHead>Absent</TableHead>
@@ -276,7 +389,7 @@ export default function AttendanceReportsPage() {
           <CardHeader>
             <CardTitle>Attendance Overview Chart</CardTitle>
             <CardDescription>
-                Visual representation of student attendance based on current filters ({reportType === 'currentMonth' ? 'Current Month' : 'Overall'}).
+                Visual representation of student attendance based on current filters {reportDateDescription}.
             </CardDescription>
           </CardHeader>
           <CardContent>
