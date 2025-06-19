@@ -30,6 +30,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Calendar } from '@/components/ui/calendar';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/contexts/AuthContext';
 
 const studentAttendanceSchema = z.object({
   userId: z.string(),
@@ -49,6 +50,7 @@ type AttendanceLogFormValues = z.infer<typeof attendanceLogFormSchema>;
 
 export default function AttendanceLogPage() {
   const { toast } = useToast();
+  const { firestoreUser } = useAuth();
 
   const [groups, setGroups] = useState<Group[]>([]);
   const [allStudents, setAllStudents] = useState<User[]>([]);
@@ -99,20 +101,26 @@ export default function AttendanceLogPage() {
 
   useEffect(() => {
     const fetchData = async () => {
+      if (!firestoreUser?.institutionId) {
+        setIsLoadingData(false);
+        toast({ title: "Error", description: "Cannot load data without institution context.", variant: "destructive" });
+        return;
+      }
       setIsLoadingData(true);
       try {
-        const groupsSnapshotPromise = getDocs(collection(db, 'groups'));
-        const studentsSnapshotPromise = getDocs(collection(db, 'students'));
+        const groupsQuery = query(collection(db, 'groups'), where('institutionId', '==', firestoreUser.institutionId));
+        const studentsQuery = query(collection(db, 'users'), where('role', '==', 'student'), where('institutionId', '==', firestoreUser.institutionId));
+        // Assuming schedule config might become institution-specific or remain global
         const scheduleConfigPromise = getDoc(doc(db, 'appConfiguration', 'currentClassScheduleConfig'));
 
         const [groupsSnapshot, studentsSnapshot, scheduleConfigSnap] = await Promise.all([
-            groupsSnapshotPromise,
-            studentsSnapshotPromise,
+            getDocs(groupsQuery),
+            getDocs(studentsQuery),
             scheduleConfigPromise
         ]);
         
-        setGroups(groupsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Group)));
-        setAllStudents(studentsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as User)));
+        setGroups(groupsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as Group)));
+        setAllStudents(studentsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as User)));
 
         let loadedScheduleConfig = DEFAULT_CLASS_SCHEDULE_CONFIG;
         if (scheduleConfigSnap.exists()) {
@@ -122,19 +130,17 @@ export default function AttendanceLogPage() {
             setClassScheduleConfig(DEFAULT_CLASS_SCHEDULE_CONFIG);
         }
 
-        // Reset form with potentially new default time from schedule config
         form.reset({
-            groupId: '', // Reset group selection
+            groupId: '', 
             sessionDate: new Date(),
             sessionTime: loadedScheduleConfig.startTime || '09:00',
             attendances: [],
         });
-        remove(); // Clear any existing attendance fields
+        remove(); 
 
       } catch (error) {
         console.error("Error fetching data: ", error);
         toast({ title: 'Error fetching data', description: 'Could not load groups, students, or schedule config.', variant: 'destructive' });
-        // Ensure form is reset even on error, with application default time
         form.reset({
             groupId: '',
             sessionDate: new Date(),
@@ -146,25 +152,32 @@ export default function AttendanceLogPage() {
       setIsLoadingData(false);
     };
     fetchData();
-  }, [toast, form, remove]); // form and remove are added to dependencies
+  }, [toast, form, remove, firestoreUser]); 
 
   const findOrCreateSession = async (groupId: string, date: Date, time: string): Promise<string> => {
+    if (!firestoreUser?.institutionId) {
+        throw new Error("User institution not found. Cannot create session.");
+    }
     const sessionDateStr = format(date, 'yyyy-MM-dd');
     const sessionsRef = collection(db, 'sessions');
     const q = query(sessionsRef, 
       where('classId', '==', groupId),
       where('date', '==', sessionDateStr),
-      where('time', '==', time)
+      where('time', '==', time),
+      where('institutionId', '==', firestoreUser.institutionId)
     );
 
     const querySnapshot = await getDocs(q);
     if (!querySnapshot.empty) {
       return querySnapshot.docs[0].id;
     } else {
+      const selectedGroup = groups.find(g => g.id === groupId);
       const newSessionData: Omit<Session, 'id'> = {
         classId: groupId,
         date: sessionDateStr,
         time: time,
+        institutionId: firestoreUser.institutionId,
+        sedeId: selectedGroup?.sedeId || null,
       };
       const sessionDocRef = await addDoc(sessionsRef, newSessionData);
       return sessionDocRef.id;
@@ -172,6 +185,10 @@ export default function AttendanceLogPage() {
   };
   
   async function onSubmit(data: AttendanceLogFormValues) {
+    if (!firestoreUser?.institutionId) {
+      toast({ title: 'Error', description: 'Cannot log attendance without institution context.', variant: 'destructive' });
+      return;
+    }
     setIsSubmitting(true);
     try {
       const finalSessionId = await findOrCreateSession(data.groupId, data.sessionDate, data.sessionTime);
@@ -186,6 +203,7 @@ export default function AttendanceLogPage() {
           sessionId: finalSessionId!,
           status: att.status,
           timestamp: Timestamp.now().toDate().toISOString(),
+          institutionId: firestoreUser.institutionId,
         };
         if (att.status === 'absent' && att.observation) {
           record.observation = att.observation;
@@ -202,7 +220,7 @@ export default function AttendanceLogPage() {
       form.reset({
         groupId: '',
         sessionDate: new Date(),
-        sessionTime: classScheduleConfig.startTime || '09:00', // Use loaded config or fallback
+        sessionTime: classScheduleConfig.startTime || '09:00', 
         attendances: [],
       });
       remove(); 
@@ -213,7 +231,7 @@ export default function AttendanceLogPage() {
     setIsSubmitting(false);
   }
   
-  if (isLoadingData) {
+  if (isLoadingData || !firestoreUser) {
     return (
       <Card>
         <CardHeader>
@@ -222,7 +240,7 @@ export default function AttendanceLogPage() {
         </CardHeader>
         <CardContent className="flex items-center justify-center py-10">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
-          <p className="ml-2">Loading data...</p>
+          <p className="ml-2">{!firestoreUser ? "Verifying user..." : "Loading data..."}</p>
         </CardContent>
       </Card>
     );

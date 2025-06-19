@@ -23,7 +23,7 @@ import {
 import Image from 'next/image';
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, query, where, Timestamp, addDoc } from 'firebase/firestore';
+import { collection, getDocs, query, where, Timestamp, addDoc, limit } from 'firebase/firestore';
 import type { User, Group, AttendanceRecord as StudentAttendanceRecord, TeacherAttendanceRecord, Sede } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
@@ -78,33 +78,37 @@ export default function DashboardPage() {
 
   useEffect(() => {
     const fetchDashboardData = async () => {
-      if (!firestoreUser) {
+      if (!firestoreUser || !firestoreUser.institutionId) {
         setIsLoadingStats(false);
         return;
       }
       setIsLoadingStats(true);
+      const institutionId = firestoreUser.institutionId;
+
       try {
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         const tomorrow = new Date(today);
         tomorrow.setDate(today.getDate() + 1);
 
-        // General stats for Admin
         if (firestoreUser.role === 'admin') {
-          const studentsSnapshot = await getDocs(query(collection(db, 'users'), where('role', '==', 'student')));
+          const studentsQuery = query(collection(db, 'users'), where('role', '==', 'student'), where('institutionId', '==', institutionId));
+          const studentsSnapshot = await getDocs(studentsQuery);
           setTotalStudents(studentsSnapshot.size);
 
-          const groupsSnapshot = await getDocs(collection(db, 'groups'));
+          const groupsQuery = query(collection(db, 'groups'), where('institutionId', '==', institutionId));
+          const groupsSnapshot = await getDocs(groupsQuery);
           setTotalGroups(groupsSnapshot.size);
 
           const studentAttendanceQuery = query(
             collection(db, 'attendanceRecords'),
-            where('status', '==', 'present')
+            where('status', '==', 'present'),
+            where('institutionId', '==', institutionId)
           );
           const studentAttendanceSnapshot = await getDocs(studentAttendanceQuery);
           let presentTodayCount = 0;
-          studentAttendanceSnapshot.docs.forEach(doc => {
-            const record = doc.data() as StudentAttendanceRecord;
+          studentAttendanceSnapshot.docs.forEach(docSnap => {
+            const record = docSnap.data() as StudentAttendanceRecord;
             const recordDate = new Date(record.timestamp);
             if (recordDate >= today && recordDate < tomorrow) {
               presentTodayCount++;
@@ -113,11 +117,13 @@ export default function DashboardPage() {
           setAttendanceToday(presentTodayCount);
         }
 
-        // Teacher specific stats
         if (firestoreUser.role === 'teacher') {
-          const groupsQuery = query(collection(db, 'groups'), where('teacherId', '==', firestoreUser.id));
+          const groupsQuery = query(collection(db, 'groups'), 
+            where('teacherId', '==', firestoreUser.id),
+            where('institutionId', '==', institutionId)
+          );
           const groupsSnapshot = await getDocs(groupsQuery);
-          const fetchedTeacherGroups = groupsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Group));
+          const fetchedTeacherGroups = groupsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as Group));
           setTeacherGroups(fetchedTeacherGroups);
           const studentIdsInTeacherGroups = new Set<string>();
           fetchedTeacherGroups.forEach(g => g.studentIds.forEach(sid => studentIdsInTeacherGroups.add(sid)));
@@ -125,15 +131,26 @@ export default function DashboardPage() {
           setTotalGroups(fetchedTeacherGroups.length);
         }
 
-        // Supervisor specific stats
         if (firestoreUser.role === 'supervisor' && firestoreUser.sedeId) {
-          const sedeDoc = await getDocs(query(collection(db, 'sedes'), where('id', '==', firestoreUser.sedeId), limit(1)));
-          if (!sedeDoc.empty) setSupervisorSede(sedeDoc.docs[0].data() as Sede);
+          const sedeQuery = query(collection(db, 'sedes'), 
+            where('id', '==', firestoreUser.sedeId), 
+            where('institutionId', '==', institutionId), // Ensure Sede is from same institution
+            limit(1)
+          );
+          const sedeDocSnapshot = await getDocs(sedeQuery);
+          if (!sedeDocSnapshot.empty) setSupervisorSede(sedeDocSnapshot.docs[0].data() as Sede);
 
-          const teachersInSedeQuery = query(collection(db, 'users'), where('role', '==', 'teacher'), where('sedeId', '==', firestoreUser.sedeId));
+          const teachersInSedeQuery = query(collection(db, 'users'), 
+            where('role', '==', 'teacher'), 
+            where('sedeId', '==', firestoreUser.sedeId),
+            where('institutionId', '==', institutionId)
+          );
           const teachersSnapshot = await getDocs(teachersInSedeQuery);
 
-          const groupsInSedeQuery = query(collection(db, 'groups'), where('sedeId', '==', firestoreUser.sedeId));
+          const groupsInSedeQuery = query(collection(db, 'groups'), 
+            where('sedeId', '==', firestoreUser.sedeId),
+            where('institutionId', '==', institutionId)
+          );
           const groupsSnapshot = await getDocs(groupsInSedeQuery);
           const studentIdsInSedeGroups = new Set<string>();
           groupsSnapshot.docs.forEach(gDoc => (gDoc.data() as Group).studentIds.forEach(sid => studentIdsInSedeGroups.add(sid)));
@@ -157,6 +174,10 @@ export default function DashboardPage() {
 
   const handleTeacherAttendanceSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!firestoreUser?.institutionId) {
+        toast({ title: 'Error', description: 'Institution context is missing for this action.', variant: 'destructive' });
+        return;
+    }
     const canSubmitAttendance = firestoreUser?.role === 'admin' || firestoreUser?.role === 'teacher' || firestoreUser?.role === 'supervisor';
     if (!canSubmitAttendance) {
       toast({ title: 'Acción no Permitida', description: 'Solo administradores, supervisores o docentes pueden operar este registro.', variant: 'destructive' });
@@ -170,12 +191,13 @@ export default function DashboardPage() {
     try {
       const usersWithCodeQuery = query(
         collection(db, 'users'),
-        where('attendanceCode', '==', teacherAttendanceCode.trim())
+        where('attendanceCode', '==', teacherAttendanceCode.trim()),
+        where('institutionId', '==', firestoreUser.institutionId) // Ensure code is from same institution
       );
       const usersSnapshot = await getDocs(usersWithCodeQuery);
 
       if (usersSnapshot.empty) {
-        toast({ title: 'Código Inválido', description: 'El código de asistencia no es válido o no pertenece a un usuario con código asignado.', variant: 'destructive' });
+        toast({ title: 'Código Inválido', description: 'El código de asistencia no es válido o no pertenece a un usuario con código asignado en esta institución.', variant: 'destructive' });
       } else {
         const userDoc = usersSnapshot.docs[0];
         const userData = userDoc.data() as User;
@@ -190,6 +212,7 @@ export default function DashboardPage() {
           teacherName: userData.name,
           timestamp: new Date().toISOString(),
           attendanceCodeUsed: teacherAttendanceCode.trim(),
+          institutionId: userData.institutionId, // Save the institutionId of the staff member
         };
         await addDoc(collection(db, 'teacherAttendanceRecords'), newRecord);
         toast({ title: `¡Bienvenido, ${userData.name}!`, description: 'Tu asistencia ha sido registrada.' });
@@ -243,15 +266,16 @@ export default function DashboardPage() {
           Logged in as: {firestoreUser.email} (Role: {firestoreUser.role})
           {firestoreUser.role === 'teacher' && teacherGroups.length > 0 && `, Managing ${teacherGroups.length} group(s)`}
           {firestoreUser.role === 'supervisor' && supervisorSede && `, Supervising Sede: ${supervisorSede.name}`}
+          {firestoreUser.institutionId && ` (Institution ID: ${firestoreUser.institutionId.substring(0,6)}...)`}
         </p>
       )}
 
       {/* Role-Specific Stats */}
       {firestoreUser?.role === 'admin' && (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {renderStatCard("Total Students", totalStudents, Users, "Currently enrolled globally")}
-          {renderStatCard("Active Groups", totalGroups, FolderKanban, "Across all programs globally")}
-          {renderStatCard("Student Attendance Today", attendanceToday, BarChartBig, "Students marked present globally")}
+          {renderStatCard("Total Students", totalStudents, Users, "Currently enrolled in your institution")}
+          {renderStatCard("Active Groups", totalGroups, FolderKanban, "Across all programs in your institution")}
+          {renderStatCard("Student Attendance Today", attendanceToday, BarChartBig, "Students marked present in your institution")}
         </div>
       )}
       {firestoreUser?.role === 'teacher' && (
@@ -372,3 +396,4 @@ export default function DashboardPage() {
     </div>
   );
 }
+

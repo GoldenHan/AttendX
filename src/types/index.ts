@@ -74,7 +74,7 @@ export interface TeacherAttendanceRecord {
   teacherName: string;
   timestamp: string;
   attendanceCodeUsed: string;
-  institutionId?: string | null;
+  institutionId: string;
 }
 
 export interface Session {
@@ -82,7 +82,7 @@ export interface Session {
   classId: string; // This is the Group ID
   date: string; // YYYY-MM-DD
   time: string; // HH:MM
-  institutionId?: string | null;
+  institutionId: string;
   sedeId?: string | null;
 }
 
@@ -93,7 +93,7 @@ export interface AttendanceRecord {
   status: 'present' | 'absent' | 'late';
   timestamp: string;
   observation?: string;
-  institutionId?: string | null;
+  institutionId: string;
 }
 
 export interface Group {
@@ -104,8 +104,8 @@ export interface Group {
   endDate?: string | null;
   studentIds: string[];
   teacherId?: string | null;
-  sedeId: string | null; // Made nullable, but will be set if group is in a Sede
-  institutionId: string; // Mandatory: a group must belong to an institution
+  sedeId: string | null;
+  institutionId: string;
 }
 
 export interface GradingConfiguration {
@@ -115,7 +115,7 @@ export interface GradingConfiguration {
   maxIndividualActivityScore: number;
   maxTotalAccumulatedScore: number;
   maxExamScore: number;
-  institutionId?: string | null;
+  institutionId?: string | null; // Remains optional for now, for global or per-institution config
 }
 
 export const DEFAULT_GRADING_CONFIG: GradingConfiguration = {
@@ -131,7 +131,7 @@ export interface ClassScheduleConfiguration {
   scheduleType: 'Saturday' | 'Sunday' | 'Daily' | 'NotSet' | 'SaturdayAndSunday';
   startTime: string;
   endTime: string;
-  institutionId?: string | null;
+  institutionId?: string | null; // Remains optional for now
 }
 
 export const DEFAULT_CLASS_SCHEDULE_CONFIG: ClassScheduleConfiguration = {
