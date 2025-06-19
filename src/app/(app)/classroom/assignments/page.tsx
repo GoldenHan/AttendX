@@ -2,6 +2,8 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -54,11 +56,12 @@ type ClassroomItemFormValues = z.infer<typeof classroomItemFormSchema>;
 export default function ClassroomAssignmentsPage() {
   const { toast } = useToast();
   const { firestoreUser, institutionId, loading: authLoading } = useAuth();
-  
+  const router = useRouter();
+
   const [manageableGroups, setManageableGroups] = useState<Group[]>([]);
   const [selectedGroupId, setSelectedGroupId] = useState<string>('');
   const [classroomItems, setClassroomItems] = useState<ClassroomItemType[]>([]);
-  
+
   const [isLoadingGroups, setIsLoadingGroups] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -109,7 +112,7 @@ export default function ClassroomAssignmentsPage() {
       } else {
         setManageableGroups([]);
         setIsLoadingGroups(false);
-        return; 
+        return;
       }
 
       const snapshot = await getDocs(groupsQuery);
@@ -135,10 +138,9 @@ export default function ClassroomAssignmentsPage() {
       fetchManageableGroups();
     }
   }, [authLoading, firestoreUser, institutionId, fetchManageableGroups]);
-  
+
   useEffect(() => {
     if (selectedGroupId && firestoreUser) {
-      // console.log(`Would fetch assignments for group ${selectedGroupId} of institution ${institutionId}`);
       // Placeholder: In a real app, fetch actual items from Firestore here.
       // For now, we'll filter the demo items if any, or show empty.
       // setClassroomItems(prevItems => prevItems.filter(item => item.groupId === selectedGroupId));
@@ -152,7 +154,7 @@ export default function ClassroomAssignmentsPage() {
         return;
     }
     setIsSubmitting(true);
-    
+
     const newItemData: Omit<ClassroomItemType, 'id' | 'createdAt' | 'updatedAt'> = {
         groupId: data.groupId,
         institutionId: institutionId,
@@ -165,7 +167,7 @@ export default function ClassroomAssignmentsPage() {
     };
 
     console.log("New Item Data to save (simulation):", newItemData);
-    
+
     // Simulating API call for demo. Replace with actual Firestore save.
     // try {
     //   const docRef = await addDoc(collection(db, 'classroomItems'), {
@@ -190,7 +192,7 @@ export default function ClassroomAssignmentsPage() {
     setClassroomItems(prev => [demoItem, ...prev].filter(item => item.groupId === selectedGroupId || data.groupId === selectedGroupId));
 
     toast({ title: 'Simulated Success', description: `${data.itemType === 'assignment' ? 'Assignment' : 'Reminder'} "${data.title}" would be created.` });
-    
+
     form.reset({
       title: '',
       description: '',
@@ -240,6 +242,9 @@ export default function ClassroomAssignmentsPage() {
                             {manageableGroups.map(group => <SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>)}
                           </SelectContent>
                         </Select>
+                        {manageableGroups.length === 0 && !isLoadingGroups && (
+                             <p className="text-xs text-muted-foreground mt-1">No groups available for assignment.</p>
+                        )}
                         <FormMessage />
                       </FormItem>
                     )}/>
@@ -288,7 +293,7 @@ export default function ClassroomAssignmentsPage() {
                     )}/>
                     <DialogFooter className="pt-4">
                       <DialogClose asChild><Button type="button" variant="outline">Cancel</Button></DialogClose>
-                      <Button type="submit" disabled={isSubmitting}>{isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Create Item</Button>
+                      <Button type="submit" disabled={isSubmitting || manageableGroups.length === 0}>{isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Create Item</Button>
                     </DialogFooter>
                   </form>
                 </Form>
@@ -302,7 +307,7 @@ export default function ClassroomAssignmentsPage() {
                 form.setValue('groupId', value);
             }} disabled={isLoadingGroups || manageableGroups.length === 0}>
                 <SelectTrigger id="group-selector-classroom">
-                    <SelectValue placeholder="Select a group"/>
+                    <SelectValue placeholder={isLoadingGroups ? "Loading groups..." : (manageableGroups.length === 0 ? "No groups available" : "Select a group")}/>
                 </SelectTrigger>
                 <SelectContent>
                     {manageableGroups.map(group => (
@@ -313,22 +318,51 @@ export default function ClassroomAssignmentsPage() {
             {manageableGroups.length === 0 && !isLoadingGroups && (
                  <p className="text-sm text-muted-foreground mt-2 flex items-center gap-1">
                     <AlertTriangle className="h-4 w-4 text-orange-500" />
-                    {firestoreUser?.role === 'teacher' ? "You are not assigned to any groups." : 
+                    {firestoreUser?.role === 'teacher' ? "You are not assigned to any groups." :
                      firestoreUser?.role === 'supervisor' ? "No groups found in your Sede." :
                      "No groups found in this institution."}
-                    { (firestoreUser?.role === 'admin' || (firestoreUser?.role === 'supervisor' && firestoreUser.sedeId)) && 
-                        <span className="ml-1">You can <Button variant="link" size="sm" className="p-0 h-auto" onClick={() => setIsFormOpen(true)}>create one</Button>.</span>
+                    { (firestoreUser?.role === 'admin' || (firestoreUser?.role === 'supervisor' && firestoreUser.sedeId)) &&
+                        <span className="ml-1">You can <Button variant="link" size="sm" className="p-0 h-auto" onClick={() => router.push('/group-management')}>create groups in Group Management</Button>.</span>
                     }
                 </p>
             )}
           </div>
         </CardHeader>
         <CardContent>
-          {isLoadingGroups && <div className="text-center py-4"><Loader2 className="h-5 w-5 animate-spin mr-2 inline-block" />Loading group data...</div>}
-          {!isLoadingGroups && manageableGroups.length > 0 && !selectedGroupId && (
-             <div className="text-center py-4 text-muted-foreground">Please select a group to see its assignments.</div>
+          {isLoadingGroups && (
+            <div className="text-center py-4">
+              <Loader2 className="h-5 w-5 animate-spin mr-2 inline-block" />
+              Loading group data...
+            </div>
           )}
-          {!isLoadingGroups && selectedGroupId && (
+          {!isLoadingGroups && manageableGroups.length === 0 && (
+            <div className="text-center py-10 border-2 border-dashed rounded-lg">
+              <Info className="mx-auto h-12 w-12 text-muted-foreground mb-2" />
+              <p className="text-muted-foreground">
+                {firestoreUser?.role === 'teacher' ? "You are not assigned to any groups yet." :
+                 firestoreUser?.role === 'supervisor' ? "No groups found in your Sede." :
+                 "No groups found in this institution yet."}
+              </p>
+              <p className="text-sm text-muted-foreground mt-1">
+                {firestoreUser?.role === 'teacher' ? "Please contact an administrator to be assigned to a group." :
+                 (firestoreUser?.role === 'admin' || (firestoreUser?.role === 'supervisor' && firestoreUser.sedeId)) ?
+                 "Please create or assign groups in 'Group Management' to start adding classroom items." :
+                 "Please create groups first to manage classroom assignments."
+                }
+              </p>
+              {(firestoreUser?.role === 'admin' || (firestoreUser?.role === 'supervisor' && firestoreUser.sedeId)) && (
+                <Button asChild className="mt-4">
+                  <Link href="/group-management">Go to Group Management</Link>
+                </Button>
+              )}
+            </div>
+          )}
+          {!isLoadingGroups && manageableGroups.length > 0 && !selectedGroupId && (
+             <div className="text-center py-4 text-muted-foreground">
+                Please select a group to view or add assignments.
+             </div>
+          )}
+          {!isLoadingGroups && manageableGroups.length > 0 && selectedGroupId && (
             <div className="space-y-4">
               <h3 className="text-xl font-semibold">
                 Tasks for: {manageableGroups.find(g => g.id === selectedGroupId)?.name || 'Selected Group'}
@@ -370,4 +404,3 @@ export default function ClassroomAssignmentsPage() {
     </div>
   );
 }
-
