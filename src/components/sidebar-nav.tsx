@@ -17,7 +17,6 @@ import {
   BookUser,
   BarChart3,
   Brain,
-  QrCode,
   Settings,
   FolderKanban,
   ClipboardCheck,
@@ -59,7 +58,7 @@ const navItems: NavItem[] = [
   { href: '/user-management', label: 'Staff Management', icon: Briefcase, roles: ['admin', 'supervisor'] },
   { href: '/sede-management', label: 'Sede Management', icon: Building, roles: ['admin'] },
   { href: '/app-settings', label: 'Settings', icon: Settings, roles: ['admin'] },
-  { href: '/qr-login-setup', label: 'QR Session Setup', icon: QrCode, roles: ['admin', 'teacher', 'caja', 'supervisor'] },
+  // QR Session Setup link removed
 ];
 
 
@@ -87,7 +86,7 @@ export function SidebarNav() {
 
   const visibleNavItems = filterNavItemsForRole(navItems);
 
-  const generalItems = visibleNavItems.filter(item => ['/dashboard', '/attendance-log', '/attendance-records', '/reports', '/student-grades', '/ai-analysis', '/qr-login-setup'].includes(item.href));
+  const generalItems = visibleNavItems.filter(item => ['/dashboard', '/attendance-log', '/attendance-records', '/reports', '/student-grades', '/ai-analysis'].includes(item.href));
   const managementItems = visibleNavItems.filter(item => ['/student-management', '/group-management', '/grades-management', '/partial-grades-report', '/certificate-management'].includes(item.href));
   const adminItems = visibleNavItems.filter(item => ['/user-management', '/sede-management', '/app-settings'].includes(item.href));
 

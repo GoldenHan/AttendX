@@ -4,7 +4,7 @@
 import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Users, UserCheck, BarChartBig, ClipboardEdit, Brain, QrCode, BookUser, BarChart3, Loader2 } from 'lucide-react';
+import { Users, UserCheck, BarChartBig, ClipboardEdit, Brain, BookUser, BarChart3, Loader2 } from 'lucide-react'; // QrCode import removed
 import Image from 'next/image';
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
@@ -113,11 +113,7 @@ export default function DashboardPage() {
                 <Brain className="mr-2 h-4 w-4" /> AI Analysis
               </Link>
             </Button>
-             <Button asChild variant="outline" className="w-full">
-              <Link href="/qr-login-setup">
-                <QrCode className="mr-2 h-4 w-4" /> QR Session Login
-              </Link>
-            </Button>
+             {/* QR Session Login Button removed */}
           </CardContent>
         </Card>
         <Card className="flex flex-col">

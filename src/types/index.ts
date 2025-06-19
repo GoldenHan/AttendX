@@ -72,7 +72,7 @@ export interface Session {
   classId: string; 
   date: string; // YYYY-MM-DD
   time: string; // HH:MM
-  qrCodeValue?: string;
+  // qrCodeValue field removed
 }
 
 export interface AttendanceRecord {
