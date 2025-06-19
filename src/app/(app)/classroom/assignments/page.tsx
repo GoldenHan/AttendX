@@ -22,10 +22,10 @@ import {
 } from '@/components/ui/dialog';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Loader2, PlusCircle, CalendarIcon, AlertTriangle, Info } from 'lucide-react';
+import { Loader2, PlusCircle, CalendarIcon, AlertTriangle, Info, Edit, Trash2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, query, where, addDoc } from 'firebase/firestore';
+import { collection, getDocs, query, where, addDoc, orderBy, serverTimestamp, Timestamp } from 'firebase/firestore';
 import type { Group, ClassroomItem as ClassroomItemType } from '@/types';
 import { useAuth } from '@/contexts/AuthContext';
 import { useForm } from 'react-hook-form';
@@ -55,7 +55,7 @@ type ClassroomItemFormValues = z.infer<typeof classroomItemFormSchema>;
 
 export default function ClassroomAssignmentsPage() {
   const { toast } = useToast();
-  const { firestoreUser, institutionId, loading: authLoading } = useAuth();
+  const { firestoreUser, loading: authLoading } = useAuth(); // Renamed institutionId to firestoreUser.institutionId for clarity
   const router = useRouter();
 
   const [manageableGroups, setManageableGroups] = useState<Group[]>([]);
@@ -63,6 +63,7 @@ export default function ClassroomAssignmentsPage() {
   const [classroomItems, setClassroomItems] = useState<ClassroomItemType[]>([]);
 
   const [isLoadingGroups, setIsLoadingGroups] = useState(true);
+  const [isLoadingItems, setIsLoadingItems] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isFormOpen, setIsFormOpen] = useState(false);
 
@@ -79,7 +80,7 @@ export default function ClassroomAssignmentsPage() {
   });
 
   const fetchManageableGroups = useCallback(async () => {
-    if (!firestoreUser || !institutionId || authLoading) {
+    if (!firestoreUser || !firestoreUser.institutionId || authLoading) {
       setIsLoadingGroups(false);
       return;
     }
@@ -89,7 +90,7 @@ export default function ClassroomAssignmentsPage() {
       if (firestoreUser.role === 'admin') {
         groupsQuery = query(
           collection(db, 'groups'),
-          where('institutionId', '==', institutionId)
+          where('institutionId', '==', firestoreUser.institutionId)
         );
       } else if (firestoreUser.role === 'supervisor') {
         if (!firestoreUser.sedeId) {
@@ -100,13 +101,13 @@ export default function ClassroomAssignmentsPage() {
         }
         groupsQuery = query(
           collection(db, 'groups'),
-          where('institutionId', '==', institutionId),
+          where('institutionId', '==', firestoreUser.institutionId),
           where('sedeId', '==', firestoreUser.sedeId)
         );
       } else if (firestoreUser.role === 'teacher') {
         groupsQuery = query(
           collection(db, 'groups'),
-          where('institutionId', '==', institutionId),
+          where('institutionId', '==', firestoreUser.institutionId),
           where('teacherId', '==', firestoreUser.id)
         );
       } else {
@@ -119,8 +120,17 @@ export default function ClassroomAssignmentsPage() {
       const groups = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Group));
       setManageableGroups(groups);
       if (groups.length > 0 && !selectedGroupId) {
-        setSelectedGroupId(groups[0].id);
-        form.setValue('groupId', groups[0].id);
+        const initialGroupId = groups[0].id;
+        setSelectedGroupId(initialGroupId);
+        form.setValue('groupId', initialGroupId);
+      } else if (groups.length > 0 && selectedGroupId) {
+        // If a group was already selected, ensure it's still valid, otherwise reset
+        if (!groups.find(g => g.id === selectedGroupId)) {
+           setSelectedGroupId(groups[0].id);
+           form.setValue('groupId', groups[0].id);
+        } else {
+            form.setValue('groupId', selectedGroupId); // Ensure form is in sync
+        }
       } else if (groups.length === 0) {
         setSelectedGroupId('');
         form.setValue('groupId', '');
@@ -131,25 +141,59 @@ export default function ClassroomAssignmentsPage() {
       setManageableGroups([]);
     }
     setIsLoadingGroups(false);
-  }, [firestoreUser, institutionId, toast, form, selectedGroupId, authLoading]);
+  }, [firestoreUser, toast, form, selectedGroupId, authLoading]);
+
+  const fetchClassroomItemsForGroup = useCallback(async (groupId: string) => {
+    if (!groupId || !firestoreUser?.institutionId) {
+      setClassroomItems([]);
+      return;
+    }
+    setIsLoadingItems(true);
+    try {
+      const itemsQuery = query(
+        collection(db, 'classroomItems'),
+        where('groupId', '==', groupId),
+        where('institutionId', '==', firestoreUser.institutionId),
+        orderBy('createdAt', 'desc')
+      );
+      const snapshot = await getDocs(itemsQuery);
+      const items = snapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          ...data,
+          // Ensure timestamps are handled correctly if they come from serverTimestamp
+          createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate().toISOString() : data.createdAt,
+          updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate().toISOString() : data.updatedAt,
+          dueDate: data.dueDate instanceof Timestamp ? data.dueDate.toDate().toISOString() : data.dueDate,
+        } as ClassroomItemType;
+      });
+      setClassroomItems(items);
+    } catch (error) {
+      console.error('Error fetching classroom items:', error);
+      toast({ title: 'Error', description: 'Could not load items for the selected group.', variant: 'destructive' });
+      setClassroomItems([]);
+    }
+    setIsLoadingItems(false);
+  }, [firestoreUser?.institutionId, toast]);
 
   useEffect(() => {
-    if (!authLoading && firestoreUser && institutionId) {
+    if (!authLoading && firestoreUser && firestoreUser.institutionId) {
       fetchManageableGroups();
     }
-  }, [authLoading, firestoreUser, institutionId, fetchManageableGroups]);
+  }, [authLoading, firestoreUser, fetchManageableGroups]);
 
   useEffect(() => {
-    if (selectedGroupId && firestoreUser) {
-      // Placeholder: In a real app, fetch actual items from Firestore here.
-      // For now, we'll filter the demo items if any, or show empty.
-      // setClassroomItems(prevItems => prevItems.filter(item => item.groupId === selectedGroupId));
+    if (selectedGroupId && firestoreUser?.institutionId) {
+      fetchClassroomItemsForGroup(selectedGroupId);
+    } else {
+      setClassroomItems([]); // Clear items if no group is selected
     }
-  }, [selectedGroupId, firestoreUser, institutionId]);
+  }, [selectedGroupId, firestoreUser?.institutionId, fetchClassroomItemsForGroup]);
 
 
   const handleFormSubmit = async (data: ClassroomItemFormValues) => {
-    if (!firestoreUser || !institutionId || !data.groupId) {
+    if (!firestoreUser || !firestoreUser.institutionId || !data.groupId) {
         toast({title: "Error", description: "Missing user, institution, or group information.", variant: "destructive"});
         return;
     }
@@ -157,8 +201,8 @@ export default function ClassroomAssignmentsPage() {
 
     const newItemData: Omit<ClassroomItemType, 'id' | 'createdAt' | 'updatedAt'> = {
         groupId: data.groupId,
-        institutionId: institutionId,
-        teacherId: firestoreUser.id, // Creator's ID (admin, supervisor, or teacher)
+        institutionId: firestoreUser.institutionId,
+        teacherId: firestoreUser.id, 
         title: data.title,
         description: data.description || '',
         itemType: data.itemType,
@@ -166,46 +210,32 @@ export default function ClassroomAssignmentsPage() {
         status: data.status,
     };
 
-    console.log("New Item Data to save (simulation):", newItemData);
+    try {
+      const docRef = await addDoc(collection(db, 'classroomItems'), {
+         ...newItemData,
+         createdAt: serverTimestamp(), // Use Firestore server timestamp
+         updatedAt: serverTimestamp(),
+      });
+      toast({ title: 'Success', description: `${data.itemType === 'assignment' ? 'Assignment' : 'Reminder'} "${data.title}" created.` });
+      fetchClassroomItemsForGroup(data.groupId); // Re-fetch after creation
+      form.reset({
+        title: '',
+        description: '',
+        itemType: 'assignment',
+        dueDate: null,
+        groupId: data.groupId, 
+        status: 'published',
+      });
+      setIsFormOpen(false);
+    } catch (error) {
+      console.error("Error creating classroom item:", error);
+      toast({ title: 'Error', description: 'Could not create the item.', variant: 'destructive' });
+    }
 
-    // Simulating API call for demo. Replace with actual Firestore save.
-    // try {
-    //   const docRef = await addDoc(collection(db, 'classroomItems'), {
-    //      ...newItemData,
-    //      createdAt: new Date().toISOString(),
-    //      updatedAt: new Date().toISOString(),
-    //   });
-    //   toast({ title: 'Success', description: `${data.itemType === 'assignment' ? 'Assignment' : 'Reminder'} "${data.title}" created.` });
-    //   // fetchClassroomItemsForGroup(selectedGroupId); // Re-fetch after creation
-    // } catch (error) {
-    //   console.error("Error creating classroom item:", error);
-    //   toast({ title: 'Error', description: 'Could not create the item.', variant: 'destructive' });
-    // }
-
-    // For demo purposes, add to local state
-    const demoItem: ClassroomItemType = {
-        id: Math.random().toString(36).substring(2,9), // Temporary ID for demo
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        ...newItemData,
-    };
-    setClassroomItems(prev => [demoItem, ...prev].filter(item => item.groupId === selectedGroupId || data.groupId === selectedGroupId));
-
-    toast({ title: 'Simulated Success', description: `${data.itemType === 'assignment' ? 'Assignment' : 'Reminder'} "${data.title}" would be created.` });
-
-    form.reset({
-      title: '',
-      description: '',
-      itemType: 'assignment',
-      dueDate: null,
-      groupId: data.groupId, // Keep selected group
-      status: 'published',
-    });
-    setIsFormOpen(false);
     setIsSubmitting(false);
   };
 
-  if (authLoading || (!firestoreUser && !institutionId)) {
+  if (authLoading || (!firestoreUser && !firestoreUser?.institutionId)) {
     return <div className="flex justify-center items-center h-full"><Loader2 className="h-8 w-8 animate-spin text-primary" /> <span className="ml-2">Loading user data...</span></div>;
   }
 
@@ -221,7 +251,7 @@ export default function ClassroomAssignmentsPage() {
             <Dialog open={isFormOpen} onOpenChange={setIsFormOpen}>
               <DialogTrigger asChild>
                 <Button size="sm" className="gap-1.5 text-sm" disabled={manageableGroups.length === 0 || isLoadingGroups}>
-                  <PlusCircle className="size-3.5" /> New Assignment/Reminder
+                  <PlusCircle className="size-3.5" /> New Item
                 </Button>
               </DialogTrigger>
               <DialogContent className="sm:max-w-lg">
@@ -234,7 +264,14 @@ export default function ClassroomAssignmentsPage() {
                     <FormField control={form.control} name="groupId" render={({ field }) => (
                       <FormItem>
                         <FormLabel>Group*</FormLabel>
-                        <Select onValueChange={field.onChange} value={field.value} disabled={manageableGroups.length === 0 || isLoadingGroups}>
+                        <Select 
+                            onValueChange={(value) => {
+                                field.onChange(value);
+                                setSelectedGroupId(value); // Also update the page's selected group
+                            }} 
+                            value={field.value} 
+                            disabled={manageableGroups.length === 0 || isLoadingGroups}
+                        >
                           <FormControl>
                             <SelectTrigger><SelectValue placeholder="Select a group" /></SelectTrigger>
                           </FormControl>
@@ -293,7 +330,7 @@ export default function ClassroomAssignmentsPage() {
                     )}/>
                     <DialogFooter className="pt-4">
                       <DialogClose asChild><Button type="button" variant="outline">Cancel</Button></DialogClose>
-                      <Button type="submit" disabled={isSubmitting || manageableGroups.length === 0}>{isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Create Item</Button>
+                      <Button type="submit" disabled={isSubmitting || manageableGroups.length === 0 || !form.getValues('groupId')}>{isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Create Item</Button>
                     </DialogFooter>
                   </form>
                 </Form>
@@ -302,10 +339,14 @@ export default function ClassroomAssignmentsPage() {
           </div>
            <div className="mt-2">
             <Label htmlFor="group-selector-classroom">Select Group to View/Manage</Label>
-            <Select value={selectedGroupId} onValueChange={(value) => {
-                setSelectedGroupId(value);
-                form.setValue('groupId', value);
-            }} disabled={isLoadingGroups || manageableGroups.length === 0}>
+            <Select 
+                value={selectedGroupId} 
+                onValueChange={(value) => {
+                    setSelectedGroupId(value);
+                    form.setValue('groupId', value); // Keep form in sync for new item creation
+                }} 
+                disabled={isLoadingGroups || manageableGroups.length === 0}
+            >
                 <SelectTrigger id="group-selector-classroom">
                     <SelectValue placeholder={isLoadingGroups ? "Loading groups..." : (manageableGroups.length === 0 ? "No groups available" : "Select a group")}/>
                 </SelectTrigger>
@@ -329,10 +370,10 @@ export default function ClassroomAssignmentsPage() {
           </div>
         </CardHeader>
         <CardContent>
-          {isLoadingGroups && (
+          {(isLoadingGroups || isLoadingItems) && (
             <div className="text-center py-4">
               <Loader2 className="h-5 w-5 animate-spin mr-2 inline-block" />
-              Loading group data...
+              {isLoadingGroups ? "Loading group data..." : "Loading items..."}
             </div>
           )}
           {!isLoadingGroups && manageableGroups.length === 0 && (
@@ -357,24 +398,24 @@ export default function ClassroomAssignmentsPage() {
               )}
             </div>
           )}
-          {!isLoadingGroups && manageableGroups.length > 0 && !selectedGroupId && (
+          {!isLoadingGroups && manageableGroups.length > 0 && !selectedGroupId && !isLoadingItems && (
              <div className="text-center py-4 text-muted-foreground">
                 Please select a group to view or add assignments.
              </div>
           )}
-          {!isLoadingGroups && manageableGroups.length > 0 && selectedGroupId && (
+          {!isLoadingGroups && !isLoadingItems && manageableGroups.length > 0 && selectedGroupId && (
             <div className="space-y-4">
               <h3 className="text-xl font-semibold">
-                Tasks for: {manageableGroups.find(g => g.id === selectedGroupId)?.name || 'Selected Group'}
+                Items for: {manageableGroups.find(g => g.id === selectedGroupId)?.name || 'Selected Group'}
               </h3>
-              {classroomItems.filter(item => item.groupId === selectedGroupId).length === 0 ? (
+              {classroomItems.length === 0 ? (
                 <div className="text-center py-10 border-2 border-dashed rounded-lg">
                   <Info className="mx-auto h-12 w-12 text-muted-foreground mb-2" />
                   <p className="text-muted-foreground">No assignments or reminders found for this group yet.</p>
-                  <p className="text-sm text-muted-foreground">Click "New Assignment/Reminder" to add one.</p>
+                  <p className="text-sm text-muted-foreground">Click "New Item" to add one.</p>
                 </div>
               ) : (
-                classroomItems.filter(item => item.groupId === selectedGroupId).map(item => (
+                classroomItems.map(item => (
                   <Card key={item.id}>
                     <CardHeader>
                       <CardTitle className="flex justify-between items-center">
@@ -391,8 +432,13 @@ export default function ClassroomAssignmentsPage() {
                     <CardContent>
                       <p className="text-sm whitespace-pre-wrap">{item.description || "No description."}</p>
                     </CardContent>
-                    <CardFooter className="text-xs text-muted-foreground">
-                      Created: {isValid(parseISO(item.createdAt)) ? format(parseISO(item.createdAt), 'PPP p') : 'Invalid Date'}
+                    <CardFooter className="text-xs text-muted-foreground flex justify-between items-center">
+                      <span>Created: {item.createdAt && isValid(parseISO(item.createdAt)) ? format(parseISO(item.createdAt), 'PPP p') : 'Not available'}</span>
+                       {/* Placeholder for Edit/Delete actions */}
+                      <div className="space-x-1">
+                        <Button variant="ghost" size="icon" disabled><Edit className="h-4 w-4" /></Button>
+                        <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" disabled><Trash2 className="h-4 w-4" /></Button>
+                      </div>
                     </CardFooter>
                   </Card>
                 ))

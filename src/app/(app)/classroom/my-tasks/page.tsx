@@ -6,51 +6,72 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter }
 import { Loader2, ClipboardList, Info } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, query, where, documentId } from 'firebase/firestore';
-import type { Group, ClassroomItem as ClassroomItemType, User } from '@/types';
+import { collection, getDocs, query, where, Timestamp, orderBy } from 'firebase/firestore'; // Removed documentId
+import type { Group, ClassroomItem as ClassroomItemType } from '@/types'; // Removed User type as firestoreUser is used
 import { useAuth } from '@/contexts/AuthContext';
-import { format, parseISO, isPast } from 'date-fns';
+import { format, parseISO, isPast, isValid } from 'date-fns';
+import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
 
 export default function StudentMyTasksPage() {
   const { toast } = useToast();
-  const { firestoreUser, institutionId, loading: authLoading } = useAuth();
+  const { firestoreUser, loading: authLoading } = useAuth(); // Renamed institutionId to firestoreUser.institutionId
   
   const [studentGroups, setStudentGroups] = useState<Group[]>([]);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [classroomItems, setClassroomItems] = useState<ClassroomItemType[]>([]); // Will be used when fetching from Firestore
+  const [classroomItems, setClassroomItems] = useState<ClassroomItemType[]>([]);
   const [isLoadingData, setIsLoadingData] = useState(true);
 
   const fetchStudentData = useCallback(async () => {
-    if (!firestoreUser?.id || !institutionId) {
+    if (!firestoreUser?.id || !firestoreUser.institutionId) {
       setIsLoadingData(false);
       return;
     }
     setIsLoadingData(true);
     try {
-      // 1. Fetch groups the student is part of
       const groupsQuery = query(
         collection(db, 'groups'),
         where('studentIds', 'array-contains', firestoreUser.id),
-        where('institutionId', '==', institutionId)
+        where('institutionId', '==', firestoreUser.institutionId)
       );
       const groupsSnapshot = await getDocs(groupsQuery);
       const groups = groupsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Group));
       setStudentGroups(groups);
 
-      // 2. Fetch classroom items for those groups (placeholder)
-      // In a real scenario, you'd query 'classroomItems' where groupId is in groups.map(g => g.id)
-      // and status is 'published'
       if (groups.length > 0) {
-        // const groupIds = groups.map(g => g.id);
-        // This query might be complex for Firestore if groupIds is large.
-        // Consider restructuring or fetching per group if necessary.
-        // For now, simulating some data or an empty state:
-        console.log(`Would fetch published classroom items for groups: ${groups.map(g => g.name).join(', ')}`);
-        setClassroomItems([
-            // Example data
-            { id: 'task1', groupId: groups[0]?.id || 'group1', institutionId, teacherId: 'teacherX', title: 'Complete Chapter 1 Reading', description: 'Read pages 1-20 and prepare notes.', itemType: 'assignment', dueDate: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), status: 'published'},
-            { id: 'task2', groupId: groups[0]?.id || 'group1', institutionId, teacherId: 'teacherY', title: 'Reminder: Quiz Next Week', description: 'Remember the quiz on Monday covering Chapters 1-3.', itemType: 'reminder', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), status: 'published'},
-        ].filter(item => item.groupId === groups[0]?.id)); // Show example for first group only
+        const groupIds = groups.map(g => g.id);
+        // Firestore 'in' queries are limited to 30 items. If a student is in more groups, this needs pagination or multiple queries.
+        // For now, assuming a student won't be in an excessive number of groups simultaneously.
+        const itemsQuery = query(
+          collection(db, 'classroomItems'),
+          where('groupId', 'in', groupIds),
+          where('institutionId', '==', firestoreUser.institutionId),
+          where('status', '==', 'published'),
+          orderBy('dueDate', 'asc') // nulls last by default, or handle explicitly
+          // Consider a secondary sort for items without due dates, e.g., orderBy('createdAt', 'desc')
+        );
+        const itemsSnapshot = await getDocs(itemsQuery);
+        const fetchedItems = itemsSnapshot.docs.map(doc => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            ...data,
+            createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate().toISOString() : data.createdAt,
+            updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate().toISOString() : data.updatedAt,
+            dueDate: data.dueDate instanceof Timestamp ? data.dueDate.toDate().toISOString() : data.dueDate,
+          } as ClassroomItemType;
+        });
+        
+        // Manual sort for items without due dates to appear after those with due dates
+        fetchedItems.sort((a, b) => {
+          if (a.dueDate && b.dueDate) return parseISO(a.dueDate).getTime() - parseISO(b.dueDate).getTime();
+          if (a.dueDate) return -1; // a has due date, b doesn't, a comes first
+          if (b.dueDate) return 1;  // b has due date, a doesn't, b comes first
+          // Both don't have due dates, sort by creation (newest first)
+          return parseISO(b.createdAt).getTime() - parseISO(a.createdAt).getTime();
+        });
+
+        setClassroomItems(fetchedItems);
+
       } else {
         setClassroomItems([]);
       }
@@ -58,28 +79,22 @@ export default function StudentMyTasksPage() {
     } catch (error) {
       console.error('Error fetching student classroom data:', error);
       toast({ title: 'Error', description: 'Could not load your tasks and reminders.', variant: 'destructive' });
+      setClassroomItems([]);
     }
     setIsLoadingData(false);
-  }, [firestoreUser?.id, institutionId, toast]);
+  }, [firestoreUser?.id, firestoreUser?.institutionId, toast]);
 
   useEffect(() => {
-    if (firestoreUser && institutionId) {
+    if (!authLoading && firestoreUser && firestoreUser.institutionId) {
       fetchStudentData();
     }
-  }, [firestoreUser, institutionId, fetchStudentData]);
+  }, [authLoading, firestoreUser, fetchStudentData]);
 
   if (authLoading || isLoadingData) {
     return <div className="flex justify-center items-center h-full"><Loader2 className="h-8 w-8 animate-spin text-primary" /> <span className="ml-2">Loading your classroom tasks...</span></div>;
   }
   
-  const itemsToDisplay = classroomItems
-    .filter(item => item.status === 'published') // Only show published items to students
-    .sort((a, b) => {
-      if (a.dueDate && b.dueDate) return parseISO(a.dueDate).getTime() - parseISO(b.dueDate).getTime();
-      if (a.dueDate) return -1; // items with due date first
-      if (b.dueDate) return 1;
-      return parseISO(b.createdAt).getTime() - parseISO(a.createdAt).getTime(); // then by creation date
-    });
+  // No need for itemsToDisplay, classroomItems is already filtered and sorted by the query and sort logic.
 
   return (
     <div className="space-y-6">
@@ -96,16 +111,16 @@ export default function StudentMyTasksPage() {
               <p className="text-sm text-muted-foreground">If you believe this is an error, please contact your teacher or an administrator.</p>
             </div>
           )}
-          {studentGroups.length > 0 && itemsToDisplay.length === 0 && (
+          {studentGroups.length > 0 && classroomItems.length === 0 && (
             <div className="text-center py-10 border-2 border-dashed rounded-lg">
               <Info className="mx-auto h-12 w-12 text-muted-foreground mb-2" />
               <p className="text-muted-foreground">No tasks or reminders found for your groups at the moment.</p>
               <p className="text-sm text-muted-foreground">Check back later or ask your teacher!</p>
             </div>
           )}
-          {itemsToDisplay.map(item => {
+          {classroomItems.map(item => {
             const groupName = studentGroups.find(g => g.id === item.groupId)?.name || 'Unknown Group';
-            const isOverdue = item.dueDate && isPast(parseISO(item.dueDate));
+            const isOverdue = item.dueDate && isValid(parseISO(item.dueDate)) && isPast(parseISO(item.dueDate));
             return (
               <Card key={item.id} className="mb-4">
                 <CardHeader>
@@ -119,7 +134,9 @@ export default function StudentMyTasksPage() {
                     For Group: <span className="font-medium text-foreground">{groupName}</span>
                     {item.dueDate && (
                       <>
-                        <br />Due: <span className={cn("font-medium", isOverdue ? "text-destructive" : "text-foreground")}>{format(parseISO(item.dueDate), 'PPP p')} {isOverdue && "(Overdue)"}</span>
+                        <br />Due: <span className={cn("font-medium", isOverdue ? "text-destructive" : "text-foreground")}>
+                          {isValid(parseISO(item.dueDate)) ? format(parseISO(item.dueDate), 'PPP p') : 'Invalid Date'} {isOverdue && "(Overdue)"}
+                          </span>
                       </>
                     )}
                   </CardDescription>
@@ -127,9 +144,8 @@ export default function StudentMyTasksPage() {
                 <CardContent>
                   <p className="text-sm whitespace-pre-wrap">{item.description || "No description provided."}</p>
                 </CardContent>
-                <CardFooter className="text-xs text-muted-foreground">
-                  Posted: {format(parseISO(item.createdAt), 'PPP p')}
-                  {/* Placeholder for submission button for assignments */}
+                <CardFooter className="text-xs text-muted-foreground flex justify-between items-center">
+                  <span>Posted: {item.createdAt && isValid(parseISO(item.createdAt)) ? format(parseISO(item.createdAt), 'PPP p') : 'Not available'}</span>
                   {item.itemType === 'assignment' && (
                     <Button size="sm" variant="outline" className="ml-auto" disabled>Submit (Not Implemented)</Button>
                   )}
@@ -142,3 +158,4 @@ export default function StudentMyTasksPage() {
     </div>
   );
 }
+
