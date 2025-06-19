@@ -25,7 +25,7 @@ import {
   GraduationCap,
   ClipboardList, 
   Award, 
-  Building, // Added Building icon for Sedes
+  Building,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import type { User } from '@/types';
@@ -56,8 +56,8 @@ const managementNavItems: NavItem[] = [
 ];
 
 const adminNavItems: NavItem[] = [
-   { href: '/sede-management', label: 'Sede Management', icon: Building, roles: ['admin'] }, // Added Sede Management
-   { href: '/user-management', label: 'Staff Management', icon: Briefcase, roles: ['admin'] }, // Supervisors might also see a filtered staff view later
+   { href: '/sede-management', label: 'Sede Management', icon: Building, roles: ['admin'] },
+   { href: '/user-management', label: 'Staff Management', icon: Briefcase, roles: ['admin', 'supervisor'] },
    { href: '/app-settings', label: 'Settings', icon: Settings, roles: ['admin'] },
    { href: '/qr-login-setup', label: 'QR Session Login', icon: QrCode, roles: ['admin', 'teacher', 'caja', 'supervisor'] },
 ];
@@ -77,8 +77,13 @@ export function SidebarNav() {
     return items.filter(item => {
       if (!item.roles) return true; 
       if (item.roles.includes(userRole)) {
+        // Specific label handling for student vs staff
         if (userRole === 'student' && item.label === 'Student Grades View') return false; 
         if (userRole !== 'student' && item.label === 'My Grades') return false; 
+        
+        // Supervisor should not see "Staff Management" if the label is generic,
+        // but they should see it if it implies adding Teachers, etc.
+        // Assuming the current "Staff Management" is for all staff types, supervisor access is fine.
         return true;
       }
       return false;
@@ -136,3 +141,5 @@ export function SidebarNav() {
     </div>
   );
 }
+
+    

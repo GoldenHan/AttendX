@@ -14,8 +14,8 @@ import {
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Loader2, Pencil, Trash2, UserPlus, Search, GraduationCap, NotebookPen } from 'lucide-react';
-import type { User, Group, GradingConfiguration } from '@/types'; // Import GradingConfiguration
-import { DEFAULT_GRADING_CONFIG, getDefaultStudentGradeStructure } from '@/types'; // Import defaults
+import type { User, Group, GradingConfiguration } from '@/types';
+import { DEFAULT_GRADING_CONFIG, getDefaultStudentGradeStructure } from '@/types';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, deleteDoc, doc, updateDoc, query, where, writeBatch, arrayUnion, arrayRemove, limit } from 'firebase/firestore';
 import { useAuth } from '@/contexts/AuthContext';
@@ -47,7 +47,6 @@ import {
 } from '@/components/ui/form';
 import { Label } from "@/components/ui/label";
 
-// Schema for student form - username and email are now required for creation.
 const studentFormSchema = z.object({
   name: z.string().min(2, { message: "Name must be at least 2 characters." }),
   username: z.string().min(3, "Username must be at least 3 characters.").regex(/^[a-zA-Z0-9_.-]+$/, "Username can only contain letters, numbers, dots, underscores, or hyphens."),
@@ -69,7 +68,6 @@ type StudentFormValues = z.infer<typeof studentFormSchema>;
 
 const UNASSIGN_STUDENT_FROM_GROUP_KEY = "##NO_GROUP##";
 
-// Debounce function
 function debounce<F extends (...args: any[]) => any>(func: F, waitFor: number) {
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
   return (...args: Parameters<F>): Promise<ReturnType<F>> =>
@@ -83,8 +81,9 @@ function debounce<F extends (...args: any[]) => any>(func: F, waitFor: number) {
 
 export default function StudentManagementPage() {
   const router = useRouter();
-  const [allStudents, setAllStudents] = useState<User[]>([]); // Will store users with role: 'student'
+  const [allStudents, setAllStudents] = useState<User[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
+  const [gradingConfig, setGradingConfig] = useState<GradingConfiguration>(DEFAULT_GRADING_CONFIG);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   
@@ -105,12 +104,12 @@ export default function StudentManagementPage() {
 
 
   const { toast } = useToast();
-  const { reauthenticateCurrentUser, authUser, signUp: signUpUserInAuthContext } = useAuth();
+  const { reauthenticateCurrentUser, authUser, signUp: signUpUserInAuthContext, firestoreUser } = useAuth();
 
   const studentForm = useForm<StudentFormValues>({
     resolver: zodResolver(studentFormSchema),
     defaultValues: {
-      name: '', username: '', email: '', phoneNumber: '',
+      name: '', username: '', email: '', phoneNumber: '', photoUrl: '',
       level: undefined, notes: '', age: undefined, gender: undefined, preferredShift: undefined,
       assignedGroupId: undefined,
     },
@@ -123,11 +122,17 @@ export default function StudentManagementPage() {
     setUsernameCheckMessage(null);
   }, []);
 
-
   const fetchData = async () => {
     setIsLoading(true);
     try {
-      // Fetch users with role 'student' from the 'users' collection
+      const configDocRef = doc(db, 'appConfiguration', 'currentGradingConfig');
+      const configSnap = await getDoc(configDocRef);
+      if (configSnap.exists()) {
+        setGradingConfig(configSnap.data() as GradingConfiguration);
+      } else {
+        setGradingConfig(DEFAULT_GRADING_CONFIG);
+      }
+
       const studentsQuery = query(collection(db, 'users'), where('role', '==', 'student'));
       const studentsSnapshot = await getDocs(studentsQuery);
       const fetchedStudents = studentsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as User));
@@ -138,7 +143,7 @@ export default function StudentManagementPage() {
 
     } catch (error) {
       console.error("Error fetching data:", error);
-      toast({ title: 'Error fetching data', description: 'Could not load students or groups.', variant: 'destructive' });
+      toast({ title: 'Error fetching data', description: 'Could not load students, groups, or grading config.', variant: 'destructive' });
       setAllStudents([]);
       setGroups([]);
     } finally {
@@ -152,7 +157,6 @@ export default function StudentManagementPage() {
 
   const filteredStudents = useMemo(() => {
     let studentsToDisplay = allStudents;
-
     if (selectedGroupIdForFilter !== 'all') {
       const group = groups.find(g => g.id === selectedGroupIdForFilter);
       if (group && Array.isArray(group.studentIds)) {
@@ -172,6 +176,24 @@ export default function StudentManagementPage() {
     return studentsToDisplay;
   }, [allStudents, groups, selectedGroupIdForFilter, searchTerm]);
   
+  const canManageStudents = firestoreUser?.role === 'admin' || firestoreUser?.role === 'supervisor' || firestoreUser?.role === 'teacher';
+
+  const availableGroupsForAssignment = useMemo(() => {
+    if (!firestoreUser || !groups.length) return [];
+    if (firestoreUser.role === 'admin') {
+      return groups;
+    }
+    if (firestoreUser.role === 'supervisor') {
+      if (!firestoreUser.sedeId) return [];
+      return groups.filter(g => g.sedeId === firestoreUser.sedeId);
+    }
+    if (firestoreUser.role === 'teacher') {
+      return groups.filter(g => g.teacherId === firestoreUser.id);
+    }
+    return [];
+  }, [groups, firestoreUser]);
+
+
   const handleOpenAddDialog = () => {
     setEditingStudent(null);
     studentForm.reset({
@@ -199,14 +221,13 @@ export default function StudentManagementPage() {
       preferredShift: studentToEdit.preferredShift || undefined,
       assignedGroupId: currentGroup?.id || undefined,
     });
-    resetFieldChecks(); // Reset checks, existing username/email are fine
+    resetFieldChecks();
     setIsStudentFormDialogOpen(true);
   };
 
-  // Check functions for username and email
   const checkUsernameExistence = useCallback(async (username: string) => {
     if (editingStudent && editingStudent.username === username) {
-      setUsernameCheckStatus('idle'); setUsernameCheckMessage(null); return; // No change
+      setUsernameCheckStatus('idle'); setUsernameCheckMessage(null); return;
     }
     try {
       const q = query(collection(db, 'users'), where('username', '==', username.trim()), limit(1));
@@ -221,7 +242,7 @@ export default function StudentManagementPage() {
 
   const checkEmailExistenceInUsers = useCallback(async (email: string) => {
      if (editingStudent && editingStudent.email === email) {
-      setEmailCheckStatus('idle'); setEmailCheckMessage(null); return; // No change
+      setEmailCheckStatus('idle'); setEmailCheckMessage(null); return;
     }
     try {
       const q = query(collection(db, 'users'), where('email', '==', email.trim()), limit(1));
@@ -270,7 +291,6 @@ export default function StudentManagementPage() {
   const handleStudentFormSubmit = async (data: StudentFormValues) => {
     setIsSubmitting(true);
 
-    // Ensure username and email are not already taken when creating new student
     if (!editingStudent) {
         if (usernameCheckStatus === 'exists') {
             toast({ title: 'Validation Error', description: 'Username already taken. Please choose another.', variant: 'destructive' });
@@ -278,13 +298,11 @@ export default function StudentManagementPage() {
             return;
         }
         if (emailCheckStatus === 'exists') {
-            // Firebase Auth will ultimately handle 'auth/email-already-in-use', but this is a pre-check.
-            toast({ title: 'Validation Error', description: 'An account with this email already exists. Please use a different email or check if the student is already registered.', variant: 'destructive' });
+            toast({ title: 'Validation Error', description: 'An account with this email already exists.', variant: 'destructive' });
             setIsSubmitting(false);
             return;
         }
     }
-
 
     const studentDataForFirestore: Partial<User> = {
       name: data.name,
@@ -297,21 +315,43 @@ export default function StudentManagementPage() {
       age: data.age,
       gender: data.gender,
       preferredShift: data.preferredShift,
-      role: 'student', // Explicitly set role
+      role: 'student',
     };
+    
+    const selectedGroupForStudent = availableGroupsForAssignment.find(g => g.id === data.assignedGroupId);
+
+    if (firestoreUser?.role === 'teacher' || firestoreUser?.role === 'supervisor') {
+        if (selectedGroupForStudent && selectedGroupForStudent.sedeId !== firestoreUser.sedeId && firestoreUser.role === 'supervisor') {
+            toast({ title: "Validation Error", description: "Supervisors can only assign students to groups within their own Sede.", variant: "destructive" });
+            setIsSubmitting(false);
+            return;
+        }
+        if (selectedGroupForStudent && selectedGroupForStudent.teacherId !== firestoreUser.id && firestoreUser.role === 'teacher') {
+            toast({ title: "Validation Error", description: "Teachers can only assign students to their own groups.", variant: "destructive" });
+            setIsSubmitting(false);
+            return;
+        }
+        // Implicitly set student's Sede if added by supervisor/teacher and not assigned to a group, or group has no Sede
+        if (firestoreUser.sedeId && (!selectedGroupForStudent || !selectedGroupForStudent.sedeId)) {
+             studentDataForFirestore.sedeId = firestoreUser.sedeId;
+        } else if (selectedGroupForStudent?.sedeId) {
+             studentDataForFirestore.sedeId = selectedGroupForStudent.sedeId;
+        }
+    } else if (firestoreUser?.role === 'admin' && selectedGroupForStudent?.sedeId) {
+        studentDataForFirestore.sedeId = selectedGroupForStudent.sedeId;
+    }
+
 
     const newAssignedGroupId = data.assignedGroupId === UNASSIGN_STUDENT_FROM_GROUP_KEY ? null : data.assignedGroupId || null;
 
     try {
-      if (editingStudent) { // Editing existing student (User in 'users' collection)
+      if (editingStudent) {
         const studentRef = doc(db, "users", editingStudent.id);
         const batch = writeBatch(db);
-        // For existing students, username and email changes only affect Firestore here.
-        // Auth credentials (email/password) are managed via Auth flows (reset password, etc.)
-        const updateData = { ...studentDataForFirestore };
-        delete updateData.email; // Do not update email via this form for existing user to avoid Auth mismatches
-        delete updateData.username; // Do not update username via this form for existing user to avoid Auth mismatches
-
+        const updateData: Partial<User> = { ...studentDataForFirestore };
+        delete updateData.email; 
+        delete updateData.username;
+        
         batch.update(studentRef, updateData);
 
         const previousGroup = groups.find(g => Array.isArray(g.studentIds) && g.studentIds.includes(editingStudent.id));
@@ -325,31 +365,35 @@ export default function StudentManagementPage() {
           if (newAssignedGroupId) {
             const newGroupRef = doc(db, 'groups', newAssignedGroupId);
             batch.update(newGroupRef, { studentIds: arrayUnion(editingStudent.id) });
+             // Update student's sedeId based on new group if admin is editing
+            if (firestoreUser?.role === 'admin') {
+                const groupDetails = groups.find(g => g.id === newAssignedGroupId);
+                if (groupDetails?.sedeId) {
+                    batch.update(studentRef, { sedeId: groupDetails.sedeId });
+                }
+            }
+          } else if (firestoreUser?.role === 'admin') { // Unassigning
+            batch.update(studentRef, { sedeId: null });
           }
         }
         await batch.commit();
         toast({ title: 'Student Updated', description: `${data.name}'s record and group assignment updated successfully.` });
-      } else { // Creating new student (User in 'users' collection)
+      } else { 
         if (!data.username || !data.email || !data.level) {
-          toast({ title: "Missing Information", description: "Username, Email, and Level are required for new students.", variant: "destructive" });
+          toast({ title: "Missing Information", description: "Username, Email, and Level are required.", variant: "destructive" });
           setIsSubmitting(false);
           return;
         }
-        // `signUpUserInAuthContext` handles Firebase Auth creation AND Firestore doc creation in 'users'
+        const studentDetailsForSignUp = { level: data.level, sedeId: studentDataForFirestore.sedeId };
+
         await signUpUserInAuthContext(
           data.name,
           data.username,
           data.email,
-          data.username, // Username as initial password
+          data.username, 
           'student',
-          { level: data.level }
+          studentDetailsForSignUp
         );
-        
-        // After signUpUserInAuthContext, the user (student) exists in Auth and Firestore 'users'.
-        // Now, if a group was selected, assign the student to that group.
-        // We need the new student's UID. The AuthContext doesn't directly return it from signUp.
-        // We'll fetch it or rely on fetchData() to refresh. For now, group assignment might need a re-edit for brand new.
-        // To fix this: fetch the user after creation to get ID for group assignment
         
         const q = query(collection(db, "users"), where("email", "==", data.email), limit(1));
         const querySnapshot = await getDocs(q);
@@ -359,9 +403,9 @@ export default function StudentManagementPage() {
                 const groupRef = doc(db, 'groups', newAssignedGroupId);
                 await updateDoc(groupRef, { studentIds: arrayUnion(newStudentDocId) });
             }
-             toast({ title: 'Student Record Added', description: `${data.name} added. They can log in with username: ${data.username} (as password) and will be prompted to change it. Group assignment updated.` });
+             toast({ title: 'Student Added', description: `${data.name} added. Login with username as password. Group assignment updated.` });
         } else {
-            toast({ title: 'Student Record Added (Group Pending)', description: `${data.name} added. Login with username as password. Assign to group by editing.`, variant: 'default' });
+            toast({ title: 'Student Added (Group Pending)', description: `${data.name} added. Login with username as password. Assign to group by editing.`, variant: 'default' });
         }
       }
       studentForm.reset();
@@ -370,7 +414,7 @@ export default function StudentManagementPage() {
       resetFieldChecks();
       await fetchData();
     } catch (error: any) {
-      console.error("Error handling student form submission:", error);
+      console.error("Error student form submission:", error);
       let userMessage = editingStudent ? 'Update Student Failed' : 'Add Student Failed';
        if (error.code === 'auth/email-already-in-use') {
         userMessage = 'This email is already associated with a Firebase Authentication account.';
@@ -392,28 +436,18 @@ export default function StudentManagementPage() {
   };
 
   const confirmDeleteStudent = async () => {
-    if (!studentToDelete) {
-        toast({ title: 'Error', description: 'No student selected for deletion.', variant: 'destructive' });
-        setIsSubmitting(false);
-        return;
-    }
-    if (!deleteAdminPassword) {
+    if (!studentToDelete || !authUser) return;
+    if (!deleteAdminPassword && firestoreUser?.role === 'admin') { // Only admins require password for deletion
       toast({ title: 'Input Required', description: 'Admin password is required to delete.', variant: 'destructive' });
-      setIsSubmitting(false);
       return;
     }
-    if (!authUser) {
-        toast({ title: 'Authorization Failed', description: 'Admin user not found. Please log in.', variant: 'destructive' });
-        setIsSubmitting(false);
-        return;
-    }
-
     setIsSubmitting(true);
     try {
-      await reauthenticateCurrentUser(deleteAdminPassword);
+      if (firestoreUser?.role === 'admin') {
+        await reauthenticateCurrentUser(deleteAdminPassword);
+      }
       
       const batch = writeBatch(db);
-      // Students are in 'users' collection, their ID is their UID
       const studentRef = doc(db, 'users', studentToDelete.id); 
       batch.delete(studentRef);
 
@@ -422,8 +456,6 @@ export default function StudentManagementPage() {
         const groupRef = doc(db, 'groups', groupWithStudent.id);
         batch.update(groupRef, { studentIds: arrayRemove(studentToDelete.id) });
       }
-      // Note: Deleting from Firestore does NOT delete the Firebase Auth account.
-      // This needs to be handled separately if full deletion is required, typically via Admin SDK.
       await batch.commit();
       toast({ title: 'Student Record Deleted', description: `${studentToDelete.name}'s Firestore record and group memberships removed. Auth account NOT deleted.` });
       
@@ -433,25 +465,13 @@ export default function StudentManagementPage() {
       await fetchData();
     } catch (error: any) {
       let errorMessage = 'Failed to delete student record.';
-      const reAuthErrorCodes = ['auth/wrong-password', 'auth/invalid-credential', 'auth/user-mismatch'];
-      
-      if (reAuthErrorCodes.includes(error.code)) {
-        errorMessage = 'Admin re-authentication failed: Incorrect password or credential mismatch.';
-      } else if (error.code === 'auth/too-many-requests') {
-        errorMessage = 'Admin re-authentication failed: Too many attempts. Try again later.';
-      } else if (error.code === 'auth/requires-recent-login'){
-        errorMessage = 'Admin re-authentication required. Please log out and log back in.';
+       const reAuthErrorCodes = ['auth/wrong-password', 'auth/invalid-credential', 'auth/user-mismatch', 'auth/requires-recent-login'];
+      if (firestoreUser?.role === 'admin' && reAuthErrorCodes.includes(error.code)) {
+        errorMessage = `Admin re-authentication failed: ${error.message}.`;
       } else if (error.message) {
         errorMessage = error.message;
       }
       toast({ title: 'Delete Failed', description: errorMessage, variant: 'destructive' });
-      
-      if (reAuthErrorCodes.includes(error.code) || error.code === 'auth/too-many-requests' || error.code === 'auth/requires-recent-login') {
-         setIsDeleteStudentDialogOpen(true);
-      } else {
-         setIsDeleteStudentDialogOpen(false);
-         setDeleteAdminPassword('');
-      }
     } finally {
       setIsSubmitting(false);
     }
@@ -500,6 +520,7 @@ export default function StudentManagementPage() {
                 <CardTitle className="flex items-center gap-2"><GraduationCap className="h-6 w-6 text-primary" /> Student Management</CardTitle>
                 <CardDescription>Manage student records. Assign username/email for login. Students will use username as initial password.</CardDescription>
             </div>
+            {canManageStudents && (
             <Dialog open={isStudentFormDialogOpen} onOpenChange={(isOpen) => {
                 setIsStudentFormDialogOpen(isOpen);
                 if (!isOpen) {
@@ -518,7 +539,7 @@ export default function StudentManagementPage() {
                 <DialogHeader>
                     <DialogTitle>{editingStudent ? 'Edit Student Record' : 'Add New Student Record'}</DialogTitle>
                     <DialogPrimitiveDescription>
-                    {editingStudent ? "Update student's details and group assignment. Username and email cannot be changed here for existing students." : "Fill in student details. Username and Email are required for login. Username will be the initial password."}
+                    {editingStudent ? "Update student's details and group assignment. Username and email cannot be changed here." : "Fill in student details. Username and Email are required for login. Username will be the initial password."}
                     </DialogPrimitiveDescription>
                 </DialogHeader>
                 <Form {...studentForm}>
@@ -573,9 +594,11 @@ export default function StudentManagementPage() {
                               <FormControl><SelectTrigger><SelectValue placeholder="Select a group or unassign" /></SelectTrigger></FormControl>
                               <SelectContent>
                                 <SelectItem value={UNASSIGN_STUDENT_FROM_GROUP_KEY}>Unassigned</SelectItem>
-                                {groups.map((group) => (<SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>))}
+                                {availableGroupsForAssignment.map((group) => (<SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>))}
                               </SelectContent>
-                            </Select><FormMessage />
+                            </Select>
+                             {availableGroupsForAssignment.length === 0 && <FormDescription className="text-xs">No groups available for assignment based on your role/Sede.</FormDescription>}
+                            <FormMessage />
                           </FormItem>
                      )}/>
                     <FormField control={studentForm.control} name="phoneNumber" render={({ field }) => (
@@ -621,6 +644,7 @@ export default function StudentManagementPage() {
                 </Form>
                 </DialogContent>
             </Dialog>
+            )}
         </div>
         <div className="mt-4 flex flex-col sm:flex-row gap-4">
             <div className="flex-1 min-w-[200px]">
@@ -665,15 +689,23 @@ export default function StudentManagementPage() {
                 <TableCell>{student.phoneNumber || 'N/A'}</TableCell>
                 <TableCell className="space-x-1">
                   <Button variant="ghost" size="icon" onClick={() => handleGoToManageGrades(student.id)} title="Manage Grades"><NotebookPen className="h-4 w-4" /><span className="sr-only">Manage Grades</span></Button>
-                  <Button variant="ghost" size="icon" onClick={() => handleOpenEditDialog(student)} title="Edit Student"><Pencil className="h-4 w-4" /><span className="sr-only">Edit Student</span></Button>
-                  <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => handleOpenDeleteDialog(student)} title="Delete Student"><Trash2 className="h-4 w-4" /><span className="sr-only">Delete Student</span></Button>
+                  {canManageStudents && (
+                    <>
+                    <Button variant="ghost" size="icon" onClick={() => handleOpenEditDialog(student)} title="Edit Student"><Pencil className="h-4 w-4" /><span className="sr-only">Edit Student</span></Button>
+                    <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => handleOpenDeleteDialog(student)} title="Delete Student"><Trash2 className="h-4 w-4" /><span className="sr-only">Delete Student</span></Button>
+                    </>
+                  )}
                 </TableCell>
               </TableRow>
             )) : (
               !isLoading && (
                 <TableRow><TableCell colSpan={9} className="text-center py-10">
                     {allStudents.length === 0 && selectedGroupIdForFilter === 'all' && !searchTerm ? (
-                      <div><p className="text-lg font-semibold">No student records found.</p><p className="text-muted-foreground mt-2">Add new student records to see them here.</p><Button className="mt-6" onClick={handleOpenAddDialog}><UserPlus className="mr-2 h-4 w-4" /> Add First Student Record</Button></div>
+                      <div><p className="text-lg font-semibold">No student records found.</p><p className="text-muted-foreground mt-2">Add new student records to see them here.</p>
+                      {canManageStudents && 
+                        <Button className="mt-6" onClick={handleOpenAddDialog}><UserPlus className="mr-2 h-4 w-4" /> Add First Student Record</Button>
+                      }
+                      </div>
                     ) : (<p>No students found matching your current filter criteria.</p>)}
                 </TableCell></TableRow>
               ))}
@@ -684,14 +716,16 @@ export default function StudentManagementPage() {
     <Dialog open={isDeleteStudentDialogOpen} onOpenChange={(isOpen) => { if (!isOpen) { setStudentToDelete(null); setDeleteAdminPassword(''); } setIsDeleteStudentDialogOpen(isOpen); }}>
         <DialogContent className="sm:max-w-md">
             <DialogHeader><DialogTitle>Delete Student Record</DialogTitle>
-                <DialogPrimitiveDescription>Are you sure you want to delete the Firestore record for {studentToDelete?.name}? Admin password required. Auth account NOT deleted.</DialogPrimitiveDescription>
+                <DialogPrimitiveDescription>Are you sure you want to delete the Firestore record for {studentToDelete?.name}? Admin password required for Admins. Auth account NOT deleted.</DialogPrimitiveDescription>
             </DialogHeader>
             <div className="space-y-4 py-4">
-                 <div className="space-y-1.5"><Label htmlFor="deleteAdminPasswordStudent">Admin's Current Password</Label><Input id="deleteAdminPasswordStudent" type="password" placeholder="Enter admin password" value={deleteAdminPassword} onChange={(e) => setDeleteAdminPassword(e.target.value)}/></div>
+                 {firestoreUser?.role === 'admin' && (
+                  <div className="space-y-1.5"><Label htmlFor="deleteAdminPasswordStudent">Admin's Current Password</Label><Input id="deleteAdminPasswordStudent" type="password" placeholder="Enter admin password" value={deleteAdminPassword} onChange={(e) => setDeleteAdminPassword(e.target.value)}/></div>
+                 )}
             </div>
             <DialogFooter>
                 <DialogClose asChild><Button type="button" variant="outline">Cancel</Button></DialogClose>
-                <Button type="button" variant="destructive" onClick={confirmDeleteStudent} disabled={isSubmitting || !deleteAdminPassword.trim()}>
+                <Button type="button" variant="destructive" onClick={confirmDeleteStudent} disabled={isSubmitting || (firestoreUser?.role === 'admin' && !deleteAdminPassword.trim())}>
                     {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Delete Student Record
                 </Button>
             </DialogFooter>
@@ -700,3 +734,5 @@ export default function StudentManagementPage() {
     </>
   );
 }
+
+    
