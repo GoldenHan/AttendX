@@ -6,7 +6,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, Mail, Lock, User as UserIcon, Building } from 'lucide-react'; // Added Building icon
+import { Loader2, Mail, Lock, User as UserIcon, Building } from 'lucide-react'; 
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -19,15 +19,24 @@ import {
   FormMessage,
 } from '@/components/ui/form';
 import { cn } from '@/lib/utils';
-import { collection, query, where, getDocs, limit } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { auth } from '@/lib/firebase'; // Import auth for sendPasswordResetEmail
+import { sendPasswordResetEmail } from 'firebase/auth';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription as DialogPrimitiveDescription,
+  DialogFooter,
+  DialogTrigger,
+  DialogClose,
+} from "@/components/ui/dialog";
 
 const loginFormSchema = z.object({
   identifier: z.string().min(1, { message: "El nombre de usuario o email es requerido." }),
   password: z.string().min(1, { message: "La contraseña es requerida." }),
 });
 
-// Schema for new institution admin signup
 const newAdminSignupFormSchema = z.object({
   institutionName: z.string().min(2, { message: "El nombre de la institución debe tener al menos 2 caracteres." }),
   adminName: z.string().min(2, { message: "El nombre del administrador debe tener al menos 2 caracteres." }),
@@ -40,14 +49,21 @@ const newAdminSignupFormSchema = z.object({
   path: ["confirmAdminPassword"],
 });
 
+const forgotPasswordSchema = z.object({
+  email: z.string().email({ message: "Por favor, ingresa un correo electrónico válido." }),
+});
+
+
 type LoginFormValues = z.infer<typeof loginFormSchema>;
 type NewAdminSignupFormValues = z.infer<typeof newAdminSignupFormSchema>;
+type ForgotPasswordFormValues = z.infer<typeof forgotPasswordSchema>;
 
 export default function AuthPage() {
   const [isSignUpActive, setIsSignUpActive] = useState(false);
   const { signIn, signUp, loading: authLoading } = useAuth();
   const { toast } = useToast();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isForgotPasswordDialogOpen, setIsForgotPasswordDialogOpen] = useState(false);
 
   const loginForm = useForm<LoginFormValues>({
     resolver: zodResolver(loginFormSchema),
@@ -57,6 +73,11 @@ export default function AuthPage() {
   const newAdminSignupForm = useForm<NewAdminSignupFormValues>({
     resolver: zodResolver(newAdminSignupFormSchema),
     defaultValues: { institutionName: '', adminName: '', adminUsername: '', adminEmail: '', adminPassword: '', confirmAdminPassword: '' },
+  });
+
+  const forgotPasswordForm = useForm<ForgotPasswordFormValues>({
+    resolver: zodResolver(forgotPasswordSchema),
+    defaultValues: { email: '' },
   });
 
   const currentLoadingState = authLoading || isSubmitting;
@@ -88,28 +109,62 @@ export default function AuthPage() {
   const handleNewAdminSignupSubmit = async (data: NewAdminSignupFormValues) => {
     setIsSubmitting(true);
     try {
-      // Call AuthContext.signUp with role 'admin'
-      // Institution name is for context/UX, actual user details are adminName, adminUsername, etc.
       await signUp(
         data.adminName, 
         data.adminUsername, 
         data.adminEmail, 
         data.adminPassword, 
-        'admin' // Crucial: role is 'admin'
-        // No studentDetails or staffDetails needed for primary admin signup
+        'admin' 
       );
       toast({ title: 'Registro de Administrador Exitoso', description: `Bienvenido/a, ${data.adminName}. Tu institución ha sido registrada.` });
-      // User will be redirected by AuthContext after signup
     } catch (error: any) {
       let errorMessage = 'Fallo al registrar la nueva institución. Por favor, inténtalo de nuevo.';
       if (error.code === 'auth/email-already-in-use') errorMessage = 'Este correo electrónico ya está en uso.';
       else if (error.code === 'auth/weak-password') errorMessage = 'La contraseña es demasiado débil.';
       else if (error.message?.includes("Username already exists")) errorMessage = "Este nombre de usuario ya está en uso.";
+      else if (error.message) errorMessage = `Error: ${error.message}`;
       toast({ title: 'Fallo de Registro', description: errorMessage, variant: 'destructive' });
     } finally {
       setIsSubmitting(false);
     }
   };
+
+  const handleForgotPasswordSubmit = async (data: ForgotPasswordFormValues) => {
+    setIsSubmitting(true);
+    try {
+      await sendPasswordResetEmail(auth, data.email);
+      toast({
+        title: 'Email de Restablecimiento Enviado',
+        description: `Si existe una cuenta con ${data.email}, se ha enviado un enlace para restablecer la contraseña.`,
+      });
+      setIsForgotPasswordDialogOpen(false);
+      forgotPasswordForm.reset();
+    } catch (error: any) {
+      console.error("Forgot password error:", error);
+      let errorMessage = "No se pudo enviar el correo de restablecimiento.";
+      if (error.code === 'auth/user-not-found') {
+        // Still show a generic success message to avoid user enumeration
+         toast({
+            title: 'Email de Restablecimiento Enviado',
+            description: `Si existe una cuenta con ${data.email}, se ha enviado un enlace para restablecer la contraseña.`,
+          });
+          setIsForgotPasswordDialogOpen(false);
+          forgotPasswordForm.reset();
+          setIsSubmitting(false);
+          return;
+      } else if (error.code === 'auth/invalid-email') {
+        errorMessage = "La dirección de correo electrónico no es válida.";
+      }
+      toast({
+        title: 'Error',
+        description: errorMessage,
+        variant: 'destructive',
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
 
   return (
     <div className={cn(
@@ -119,7 +174,7 @@ export default function AuthPage() {
     >
       <div
         className={cn(
-          "relative h-[750px] sm:h-[700px] w-full max-w-4xl overflow-hidden rounded-2xl shadow-2xl", // Increased height
+          "relative h-[750px] sm:h-[700px] w-full max-w-4xl overflow-hidden rounded-2xl shadow-2xl", 
           "container"
         )}
       >
@@ -267,9 +322,47 @@ export default function AuthPage() {
                 )}
               />
               <div className="w-full text-right mt-1">
-                <a href="#" className="text-xs text-primary hover:underline">
-                  ¿Olvidaste tu contraseña?
-                </a>
+                <Dialog open={isForgotPasswordDialogOpen} onOpenChange={setIsForgotPasswordDialogOpen}>
+                  <DialogTrigger asChild>
+                    <Button type="button" variant="link" className="text-xs text-primary hover:underline p-0 h-auto">
+                      ¿Olvidaste tu contraseña?
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                      <DialogTitle>Restablecer Contraseña</DialogTitle>
+                      <DialogPrimitiveDescription>
+                        Ingresa tu correo electrónico y te enviaremos un enlace para restablecer tu contraseña.
+                      </DialogPrimitiveDescription>
+                    </DialogHeader>
+                    <Form {...forgotPasswordForm}>
+                      <form onSubmit={forgotPasswordForm.handleSubmit(handleForgotPasswordSubmit)} className="space-y-4">
+                        <FormField
+                          control={forgotPasswordForm.control}
+                          name="email"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel htmlFor="forgot-email">Correo Electrónico</FormLabel>
+                              <FormControl>
+                                <Input id="forgot-email" type="email" placeholder="tu@email.com" {...field} />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                        <DialogFooter>
+                          <DialogClose asChild>
+                            <Button type="button" variant="outline">Cancelar</Button>
+                          </DialogClose>
+                          <Button type="submit" disabled={isSubmitting}>
+                            {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                            Enviar Email
+                          </Button>
+                        </DialogFooter>
+                      </form>
+                    </Form>
+                  </DialogContent>
+                </Dialog>
               </div>
               <Button type="submit" variant="default" className="mt-4 rounded-full px-8 py-3 text-sm font-semibold uppercase tracking-wider" disabled={currentLoadingState}>
                 {currentLoadingState && !isSignUpActive ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Ingresar'}
@@ -300,7 +393,7 @@ export default function AuthPage() {
             >
               <h1 className="text-3xl font-bold text-signup-panel-foreground">¡Bienvenido de Nuevo!</h1>
               <p className="mt-4 text-sm font-light leading-relaxed text-signup-panel-foreground">
-                Si ya tienes una cuenta con tu institución, por favor inicia sesión aquí.
+                Si tu institución ya está registrada, por favor inicia sesión aquí.
               </p>
               <Button
                 variant="outline"
@@ -324,7 +417,7 @@ export default function AuthPage() {
             >
               <h1 className="text-3xl font-bold">¿Nueva Institución?</h1>
               <p className="mt-4 text-sm font-light leading-relaxed">
-                Registra tu institución educativa y configura la cuenta de administrador principal.
+                Registra tu institución educativa y configura la cuenta de administrador principal para comenzar.
               </p>
               <Button
                 variant="secondary"

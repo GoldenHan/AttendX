@@ -87,10 +87,12 @@ export default function StaffManagementPage() {
   const [deleteAdminPassword, setDeleteAdminPassword] = useState('');
   const [emailCheckStatus, setEmailCheckStatus] = useState<'idle' | 'checking' | 'exists' | 'not_found' | 'error'>('idle');
   const [emailCheckMessage, setEmailCheckMessage] = useState<string | null>(null);
+  const [usernameCheckStatus, setUsernameCheckStatus] = useState<'idle' | 'checking' | 'exists' | 'not_found' | 'error'>('idle');
+  const [usernameCheckMessage, setUsernameCheckMessage] = useState<string | null>(null);
 
   // All other custom hooks and built-in hooks (useContext, useForm, useCallback, useMemo, useEffect)
   const { toast } = useToast();
-  const { reauthenticateCurrentUser, authUser, firestoreUser } = useAuth();
+  const { reauthenticateCurrentUser, authUser, firestoreUser, signUp: signUpInAuthContext } = useAuth();
 
   const form = useForm<StaffFormValues>({
     resolver: zodResolver(staffFormSchema),
@@ -98,6 +100,11 @@ export default function StaffManagementPage() {
       name: '', username: '', email: '', phoneNumber: '', role: 'teacher', photoUrl: '', assignedGroupId: undefined, attendanceCode: '', sedeId: '',
     },
   });
+  
+  const resetFieldChecks = useCallback(() => {
+    setEmailCheckStatus('idle'); setEmailCheckMessage(null);
+    setUsernameCheckStatus('idle'); setUsernameCheckMessage(null);
+  }, []);
 
   const fetchData = useCallback(async () => {
     setIsLoading(true);
@@ -124,25 +131,42 @@ export default function StaffManagementPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [toast]); // No dependency on firestoreUser here as queries are general or based on component logic
+  }, [toast]); 
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
 
+  const checkUsernameExistence = useCallback(async (username: string) => {
+    if (editingStaff && editingStaff.username === username) {
+      setUsernameCheckStatus('idle'); setUsernameCheckMessage(null); return;
+    }
+    setUsernameCheckStatus('checking'); setUsernameCheckMessage('Checking username...');
+    try {
+      const q = query(collection(db, 'users'), where('username', '==', username.trim()), limit(1));
+      const querySnapshot = await getDocs(q);
+      if (!querySnapshot.empty) {
+        setUsernameCheckStatus('exists'); setUsernameCheckMessage('Username already taken.');
+      } else {
+        setUsernameCheckStatus('not_found'); setUsernameCheckMessage('Username available.');
+      }
+    } catch (error) { setUsernameCheckStatus('error'); setUsernameCheckMessage('Error checking username.'); }
+  }, [editingStaff]);
 
   const checkEmailExistence = useCallback(async (email: string) => {
-    setEmailCheckStatus('checking');
-    setEmailCheckMessage(`Verifying email...`);
+     if (editingStaff && editingStaff.email === email) {
+      setEmailCheckStatus('idle'); setEmailCheckMessage(null); return;
+    }
+    setEmailCheckStatus('checking'); setEmailCheckMessage(`Verifying email...`);
     try {
       const q = query(collection(db, 'users'), where('email', '==', email.trim()), limit(1));
       const querySnapshot = await getDocs(q);
-      if (!querySnapshot.empty && (!editingStaff || querySnapshot.docs[0].id !== editingStaff.id)) {
+      if (!querySnapshot.empty) {
         setEmailCheckStatus('exists');
-        setEmailCheckMessage(`An account with this email already exists. Password reset will target this account.`);
+        setEmailCheckMessage(`An account with this email already exists in Firestore.`);
       } else {
         setEmailCheckStatus('not_found');
-        setEmailCheckMessage(`Email available.`);
+        setEmailCheckMessage(`Email available in Firestore.`);
       }
     } catch (error) {
       console.error("Error checking email existence:", error);
@@ -151,16 +175,22 @@ export default function StaffManagementPage() {
     }
   }, [editingStaff]);
 
+  const debouncedCheckUsername = useMemo(() => debounce(checkUsernameExistence, 700), [checkUsernameExistence]);
   const debouncedCheckEmail = useMemo(() => debounce(checkEmailExistence, 700), [checkEmailExistence]);
-
-  const resetEmailCheck = useCallback(() => {
-    setEmailCheckStatus('idle');
-    setEmailCheckMessage(null);
-  }, []);
   
   const canAddStaff = useMemo(() => firestoreUser?.role === 'admin' || firestoreUser?.role === 'supervisor', [firestoreUser]);
 
+  const watchedUsername = form.watch('username');
   const watchedEmailValue = form.watch('email');
+
+  useEffect(() => {
+    if (isStaffFormDialogOpen && watchedUsername && (!editingStaff || watchedUsername !== editingStaff.username)) {
+        if (watchedUsername.length >= 3) debouncedCheckUsername(watchedUsername);
+        else { setUsernameCheckStatus('idle'); setUsernameCheckMessage('Username must be at least 3 characters.'); }
+    } else if (!watchedUsername && isStaffFormDialogOpen) {
+      resetFieldChecks();
+    }
+  }, [watchedUsername, isStaffFormDialogOpen, editingStaff, debouncedCheckUsername, resetFieldChecks]);
 
   useEffect(() => {
     if (isStaffFormDialogOpen && watchedEmailValue && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(watchedEmailValue)) {
@@ -178,7 +208,7 @@ export default function StaffManagementPage() {
   }, [watchedEmailValue, isStaffFormDialogOpen, editingStaff, debouncedCheckEmail, resetEmailCheck]);
 
   const displayedStaffUsers = useMemo(() => {
-    if (!firestoreUser) return []; // Ensure firestoreUser is available
+    if (!firestoreUser) return []; 
     if (firestoreUser.role === 'supervisor') {
         return staffUsers.filter(staff => staff.sedeId === firestoreUser.sedeId && (staff.role === 'teacher' || staff.id === firestoreUser.id));
     }
@@ -225,7 +255,7 @@ export default function StaffManagementPage() {
     );
   }
 
-  if (!firestoreUser) { // Check if firestoreUser is loaded
+  if (!firestoreUser) { 
     return (
       <Card>
         <CardHeader>
@@ -248,7 +278,6 @@ export default function StaffManagementPage() {
     );
   }
 
-  // Form submission and other handlers remain largely the same, but are now correctly placed after all hooks.
   const handleOpenAddDialog = () => {
     setEditingStaff(null);
     const defaultValues: StaffFormValues = {
@@ -259,7 +288,7 @@ export default function StaffManagementPage() {
       defaultValues.sedeId = firestoreUser.sedeId || ''; 
     }
     form.reset(defaultValues);
-    resetEmailCheck();
+    resetFieldChecks();
     setIsStaffFormDialogOpen(true);
   };
 
@@ -277,84 +306,89 @@ export default function StaffManagementPage() {
       attendanceCode: staffToEdit.attendanceCode || '',
       sedeId: staffToEdit.sedeId || '',
     });
-    resetEmailCheck();
+    resetFieldChecks();
     setIsStaffFormDialogOpen(true);
   };
 
   const handleStaffFormSubmit = async (data: StaffFormValues) => {
     setIsSubmitting(true);
-
-    if (!data.email && !editingStaff) {
-        toast({ title: 'Email Required', description: 'Email is required for new staff members.', variant: 'destructive' });
-        setIsSubmitting(false);
-        return;
-    }
-    if (!data.username && !editingStaff) {
-        toast({ title: 'Username Required', description: 'Username is required for identification.', variant: 'destructive' });
-        setIsSubmitting(false);
-        return;
-    }
-     if (!editingStaff && emailCheckStatus === 'exists') {
-        toast({ title: 'Email Exists in Firestore', description: `A user record with email ${data.email} already exists.`, variant: 'destructive' });
+    if (!data.email || !data.username) {
+        toast({ title: 'Email and Username Required', description: 'Email and Username are required for all staff members.', variant: 'destructive' });
         setIsSubmitting(false);
         return;
     }
     
-    // Supervisor specific validations
+    if (!editingStaff) { // Only check for new users
+        if (usernameCheckStatus === 'exists') {
+            toast({ title: 'Validation Error', description: 'Username already taken. Please choose another.', variant: 'destructive' });
+            setIsSubmitting(false); return;
+        }
+        if (emailCheckStatus === 'exists') {
+            toast({ title: 'Email Exists in Firestore', description: `A user record with email ${data.email} already exists.`, variant: 'destructive' });
+            setIsSubmitting(false); return;
+        }
+    }
+    
     if (firestoreUser?.role === 'supervisor') {
-        if (!editingStaff && data.role !== 'teacher') { // Supervisor creating new staff
+        if (!editingStaff && data.role !== 'teacher') { 
             toast({ title: "Action Denied", description: "Supervisors can only add users with the 'Teacher' role.", variant: "destructive" });
-            setIsSubmitting(false);
-            return;
+            setIsSubmitting(false); return;
         }
         if (data.sedeId !== firestoreUser.sedeId) {
             toast({ title: "Action Denied", description: `Teachers must be assigned to your Sede (${getSedeName(firestoreUser.sedeId)}).`, variant: "destructive" });
-            setIsSubmitting(false);
-            return;
+            setIsSubmitting(false); return;
         }
-    }
-
-
-    const firestoreUserData: Omit<User, 'id' | 'uid' | 'gradesByLevel' | 'requiresPasswordChange'> & { id?: string, uid?: string, requiresPasswordChange?: boolean } = {
-      name: data.name,
-      username: data.username || null,
-      email: data.email || null,
-      phoneNumber: data.phoneNumber || null,
-      role: data.role,
-      photoUrl: data.photoUrl || null,
-      attendanceCode: (data.role === 'teacher' || data.role === 'admin' || data.role === 'supervisor') ? (data.attendanceCode || null) : null,
-      sedeId: (data.role === 'teacher' || data.role === 'supervisor' || data.role === 'admin') ? (data.sedeId === UNASSIGN_VALUE_KEY ? null : data.sedeId || null) : null,
-    };
-    if (!editingStaff) {
-        firestoreUserData.requiresPasswordChange = false;
     }
 
     let staffMemberId: string | undefined = editingStaff?.id;
+    const staffDetailsForAuthContext = {
+        sedeId: (data.role === 'teacher' || data.role === 'supervisor' || data.role === 'admin') ? (data.sedeId === UNASSIGN_VALUE_KEY ? undefined : data.sedeId) : undefined,
+        attendanceCode: (data.role === 'teacher' || data.role === 'admin' || data.role === 'supervisor') ? data.attendanceCode : undefined,
+    };
 
     try {
-      if (editingStaff) {
+      if (editingStaff) { // Editing existing staff
         const staffRef = doc(db, 'users', editingStaff.id);
-        const { email, username, ...updateData } = firestoreUserData;
+        const updateData: Partial<User> = {
+            name: data.name,
+            phoneNumber: data.phoneNumber || null,
+            role: data.role,
+            photoUrl: data.photoUrl || null,
+            attendanceCode: (data.role === 'teacher' || data.role === 'admin' || data.role === 'supervisor') ? (data.attendanceCode || null) : null,
+            sedeId: (data.role === 'teacher' || data.role === 'supervisor' || data.role === 'admin') ? (data.sedeId === UNASSIGN_VALUE_KEY ? null : data.sedeId || null) : null,
+        };
+        // Email and Username are not updated here to avoid desync with Firebase Auth for existing users.
+        // Password resets are handled separately.
         await updateDoc(staffRef, updateData);
         staffMemberId = editingStaff.id;
         toast({ title: 'Staff User Updated', description: `${data.name}'s Firestore record updated successfully.` });
-      } else { 
-        if (!data.username || !data.email) {
-            toast({ title: 'Error', description: 'Username and Email are required for new staff.', variant: 'destructive'});
-            setIsSubmitting(false);
-            return;
+
+      } else { // Adding new staff
+        await signUpInAuthContext(
+            data.name,
+            data.username,
+            data.email,
+            data.username, // Username as initial password
+            data.role,
+            undefined, // No studentDetails
+            staffDetailsForAuthContext
+        );
+        // AuthContext's signUp now handles Firestore doc creation with requiresPasswordChange: true.
+        // We need to get the UID of the newly created user to handle group assignments.
+        const q = query(collection(db, "users"), where("email", "==", data.email), limit(1));
+        const querySnapshot = await getDocs(q);
+        if (!querySnapshot.empty) {
+            staffMemberId = querySnapshot.docs[0].id;
+        } else {
+             throw new Error("Could not retrieve newly created staff user from Firestore.");
         }
-        const newStaffDocRef = await addDoc(collection(db, 'users'), {
-          ...firestoreUserData,
-        });
-        staffMemberId = newStaffDocRef.id;
-        await updateDoc(newStaffDocRef, { uid: newStaffDocRef.id });
         toast({
-          title: 'Staff User Record Added',
-          description: `${data.name}'s record added. Use 'Send Password Reset' to enable their login.`
+          title: 'Staff User Added',
+          description: `${data.name}'s record and Auth account created. They will be prompted to change password (which is their username) on first login.`
         });
       }
 
+      // Handle Group and Sede assignments (common for both add and edit)
       if (staffMemberId && data.role === 'teacher') {
         const newlySelectedGroupId = data.assignedGroupId === UNASSIGN_VALUE_KEY ? null : data.assignedGroupId || null;
         const previouslyAssignedGroup = allGroups.find(g => g.teacherId === staffMemberId);
@@ -388,22 +422,25 @@ export default function StaffManagementPage() {
         }
       }
 
-      if (staffMemberId && (data.role === 'teacher' || data.role === 'supervisor' || data.role === 'admin')) {
+      // Handle Sede assignment for Supervisor role when editing/creating
+      if (staffMemberId && data.role === 'supervisor') {
           const newSedeId = data.sedeId === UNASSIGN_VALUE_KEY ? null : data.sedeId || null;
-          const userSedeRef = doc(db, 'users', staffMemberId);
-          await updateDoc(userSedeRef, { sedeId: newSedeId });
-
-          if (data.role === 'supervisor' && newSedeId) {
+          // Firestore user document's sedeId is already set by signUpInAuthContext or direct update logic for editing.
+          // Now update the Sede document itself if this supervisor is assigned.
+          if (newSedeId) {
               const sedeRef = doc(db, 'sedes', newSedeId);
               const currentSedeDoc = allSedes.find(s => s.id === newSedeId);
-              if (currentSedeDoc?.supervisorId !== staffMemberId) {
-                 await updateDoc(sedeRef, { supervisorId: staffMemberId });
+              if (currentSedeDoc?.supervisorId !== staffMemberId) { // If not already supervising this Sede
+                 const batch = writeBatch(db);
+                 batch.update(sedeRef, { supervisorId: staffMemberId });
+                 // Unassign from any old Sede they might have been supervising
                  const oldSedeSupervised = allSedes.find(s => s.supervisorId === staffMemberId && s.id !== newSedeId);
                  if (oldSedeSupervised) {
-                     await updateDoc(doc(db, 'sedes', oldSedeSupervised.id), {supervisorId: null});
+                     batch.update(doc(db, 'sedes', oldSedeSupervised.id), {supervisorId: null});
                  }
+                 await batch.commit();
               }
-          } else if (data.role === 'supervisor' && !newSedeId) {
+          } else { // Unassigning supervisor from any Sede
              const oldSedeSupervised = allSedes.find(s => s.supervisorId === staffMemberId);
              if (oldSedeSupervised) {
                  await updateDoc(doc(db, 'sedes', oldSedeSupervised.id), {supervisorId: null});
@@ -411,18 +448,21 @@ export default function StaffManagementPage() {
           }
       }
 
+
       form.reset({ name: '', username:'', email: '', phoneNumber: '', role: 'teacher', photoUrl: '', assignedGroupId: undefined, attendanceCode: '', sedeId: '' });
       setEditingStaff(null);
       setIsStaffFormDialogOpen(false);
-      resetEmailCheck();
+      resetFieldChecks();
       await fetchData();
     } catch (error: any) {
-      toast({
-        title: 'Operation Failed',
-        description: editingStaff ? `Update failed: ${error.message}` : `Add failed: ${error.message}`,
-        variant: 'destructive'
-      });
-      console.error("Firestore operation error:", error);
+      let userMessage = editingStaff ? 'Update Failed' : 'Add Failed';
+      if (error.code === 'auth/email-already-in-use') userMessage = 'This email is already associated with a Firebase Authentication account.';
+      else if (error.code === 'auth/username-already-exists') userMessage = 'This username is already in use in the system (Firestore).';
+      else if (error.code === 'auth/weak-password') userMessage = 'Password is too weak (must be at least 6 characters for Firebase Auth).';
+      else if (error.message) userMessage += `: ${error.message}`;
+      
+      toast({ title: 'Operation Failed', description: userMessage, variant: 'destructive'});
+      console.error("Form submission error:", error);
     } finally {
       setIsSubmitting(false);
     }
@@ -440,47 +480,27 @@ export default function StaffManagementPage() {
 
   const handleSendPasswordReset = async (staffEmail: string | null | undefined, staffName: string) => {
     if (!staffEmail) {
-      toast({
-        title: 'Cannot Reset Password',
-        description: `User ${staffName} does not have an email address registered.`,
-        variant: 'destructive',
-      });
+      toast({ title: 'Cannot Reset Password', description: `User ${staffName} does not have an email address registered.`, variant: 'destructive'});
       return;
     }
     setIsSendingResetEmail(staffEmail);
     try {
       await sendPasswordResetEmail(auth, staffEmail);
-      toast({
-        title: 'Password Setup Email Sent',
-        description: `An email has been sent to ${staffEmail} for password setup/reset.`,
-      });
+      toast({ title: 'Password Reset Email Sent', description: `An email has been sent to ${staffEmail} to reset their password.`});
     } catch (error: any) {
-      console.error("Password reset/setup error:", error);
-      let errorMessage = "Failed to send password setup/reset email.";
-      if (error.code === 'auth/user-not-found') {
-         toast({
-            title: 'Password Setup Email Sent (New User)',
-            description: `An email has been sent to ${staffEmail} to create their account and set a password.`,
-         });
-         setIsSendingResetEmail(null);
-         return;
-      } else if (error.code === 'auth/invalid-email') {
-        errorMessage = `The email address ${staffEmail} is not valid.`;
-      } else {
-        errorMessage = `Error: ${error.message} (Code: ${error.code})`;
-      }
-      toast({
-        title: 'Password Setup/Reset Failed',
-        description: errorMessage,
-        variant: 'destructive',
-      });
+      console.error("Password reset error:", error);
+      let errorMessage = "Failed to send password reset email.";
+      if (error.code === 'auth/user-not-found') errorMessage = `No Firebase Authentication account found for ${staffEmail}. They might need to be added first or there's a typo.`;
+      else if (error.code === 'auth/invalid-email') errorMessage = `The email address ${staffEmail} is not valid.`;
+      else errorMessage = `Error: ${error.message} (Code: ${error.code})`;
+      toast({ title: 'Password Reset Failed', description: errorMessage, variant: 'destructive'});
     } finally {
       setIsSendingResetEmail(null);
     }
   };
 
   const confirmDeleteStaffUser = async () => {
-    if (!staffToDelete || !authUser || !firestoreUser) return; // Added firestoreUser check for safety
+    if (!staffToDelete || !authUser || !firestoreUser) return; 
     
     const isAdminDeleting = firestoreUser.role === 'admin';
     const isSupervisorDeleting = firestoreUser.role === 'supervisor';
@@ -498,13 +518,16 @@ export default function StaffManagementPage() {
         return;
     }
 
-
     setIsSubmitting(true);
     try {
       if (isAdminDeleting) {
         await reauthenticateCurrentUser(deleteAdminPassword);
       }
       
+      // Note: Deleting the Firebase Auth user is a more destructive operation and
+      // usually requires a backend function for safety. Here, we are only deleting the Firestore record.
+      // If you want to delete the Firebase Auth user, you'd need to call an admin SDK function.
+      // For now, we'll just delete the Firestore user document.
       const batch = writeBatch(db);
       const userRef = doc(db, 'users', staffToDelete.id);
       batch.delete(userRef);
@@ -526,7 +549,7 @@ export default function StaffManagementPage() {
       
       await batch.commit();
 
-      toast({ title: 'Staff User Record Deleted', description: `${staffToDelete.name}'s Firestore record removed. Auth account (if any) NOT deleted.` });
+      toast({ title: 'Staff User Record Deleted', description: `${staffToDelete.name}'s Firestore record removed. Firebase Auth account (if any) is NOT deleted by this action.` });
 
       setStaffToDelete(null);
       setDeleteAdminPassword('');
@@ -556,6 +579,16 @@ export default function StaffManagementPage() {
       default: return 'text-muted-foreground';
     }
   };
+
+  const getUsernameCheckMessageColor = () => {
+    switch (usernameCheckStatus) {
+        case 'checking': return 'text-muted-foreground';
+        case 'exists': return 'text-destructive';
+        case 'not_found': return 'text-green-600 dark:text-green-400';
+        case 'error': return 'text-destructive';
+        default: return 'text-muted-foreground';
+    }
+  };
   
   return (
     <>
@@ -565,8 +598,8 @@ export default function StaffManagementPage() {
           <CardTitle className="flex items-center gap-2"><Briefcase className="h-6 w-6 text-primary" /> Staff Management</CardTitle>
           <CardDescription>
             {firestoreUser?.role === 'supervisor' 
-              ? "Manage teachers within your Sede. New staff will receive an email to set their password."
-              : "Manage all staff accounts. New staff will receive an email to set their password."
+              ? "Manage teachers within your Sede. New staff use username as temporary password and change it on first login."
+              : "Manage all staff accounts. New staff use username as temporary password and change it on first login."
             }
           </CardDescription>
         </div>
@@ -595,7 +628,7 @@ export default function StaffManagementPage() {
               form.reset({
                   name: '', username: '', email: '', phoneNumber: '', role: 'teacher', photoUrl: '', assignedGroupId: undefined, attendanceCode: '', sedeId: ''
               });
-              resetEmailCheck();
+              resetFieldChecks();
             }
           }}>
             <DialogTrigger asChild>
@@ -608,7 +641,7 @@ export default function StaffManagementPage() {
               <DialogHeader>
                 <DialogTitle>{editingStaff ? 'Edit Staff Record' : 'Add New Staff Record'}</DialogTitle>
                 <DialogPrimitiveDescription>
-                  {editingStaff ? "Update staff details." : "Fill in staff details. New staff set password via email link."}
+                  {editingStaff ? "Update staff details." : "Fill in staff details. Username will be the initial password. Staff will be prompted to change it on first login."}
                 </DialogPrimitiveDescription>
               </DialogHeader>
               <Form {...form}>
@@ -617,7 +650,13 @@ export default function StaffManagementPage() {
                       <FormItem><FormLabel>Full Name*</FormLabel><FormControl><Input placeholder="Jane Doe" {...field} /></FormControl><FormMessage /></FormItem>
                   )}/>
                   <FormField control={form.control} name="username" render={({ field }) => (
-                      <FormItem><FormLabel>Username (for login)*</FormLabel><FormControl><Input placeholder="janedoe_staff" {...field} disabled={!!editingStaff} /></FormControl>
+                      <FormItem><FormLabel>Username (for login & initial password)*</FormLabel><FormControl><Input placeholder="janedoe_staff" {...field} disabled={!!editingStaff} /></FormControl>
+                      {!editingStaff && usernameCheckMessage && (
+                        <p className={`text-xs mt-1 ${getUsernameCheckMessageColor()}`}>
+                            {usernameCheckStatus === 'checking' && <Loader2 className="inline h-3 w-3 mr-1 animate-spin" />}
+                            {usernameCheckMessage}
+                        </p>
+                      )}
                       {!!editingStaff && <p className="text-xs text-muted-foreground mt-1">Username cannot be changed.</p>}
                       <FormMessage />
                       </FormItem>
@@ -625,7 +664,7 @@ export default function StaffManagementPage() {
                   <FormField control={form.control} name="email" render={({ field }) => (
                       <FormItem><FormLabel>Email (for login & password resets)*</FormLabel>
                           <FormControl><Input type="email" placeholder="jane.doe@example.com" {...field} disabled={!!editingStaff} /></FormControl>
-                          {editingStaff && <p className="text-xs text-muted-foreground mt-1">Email cannot be changed.</p>}
+                          {!!editingStaff && <p className="text-xs text-muted-foreground mt-1">Email cannot be changed.</p>}
                           {!editingStaff && emailCheckMessage && (<p className={`text-xs mt-1 ${getEmailCheckMessageColor()}`}>{emailCheckStatus === 'checking' && <Loader2 className="inline h-3 w-3 mr-1 animate-spin" />}{emailCheckMessage}</p>)}
                           <FormMessage />
                       </FormItem>
@@ -641,8 +680,8 @@ export default function StaffManagementPage() {
                           defaultValue={field.value}
                           disabled={
                             (!!editingStaff && editingStaff.role === 'admin' && authUser?.uid === editingStaff.id) ||
-                            (firestoreUser?.role === 'supervisor' && !!editingStaff && editingStaff.role !== 'teacher') || // Supervisor can only edit teachers
-                            (firestoreUser?.role === 'supervisor' && !editingStaff) // Supervisor can only add teachers
+                            (firestoreUser?.role === 'supervisor' && !!editingStaff && editingStaff.role !== 'teacher') || 
+                            (firestoreUser?.role === 'supervisor' && !editingStaff) 
                           }
                         >
                           <FormControl><SelectTrigger><SelectValue placeholder="Select a role" /></SelectTrigger></FormControl>
@@ -715,8 +754,8 @@ export default function StaffManagementPage() {
                       <FormItem><FormLabel>Photo URL (Optional)</FormLabel><FormControl><Input type="url" placeholder="https://placehold.co/100x100.png" {...field} /></FormControl><FormMessage /></FormItem>
                    )}/>
                   <DialogFooter className="pt-4">
-                    <DialogClose asChild><Button type="button" variant="outline" onClick={resetEmailCheck}>Cancel</Button></DialogClose>
-                    <Button type="submit" disabled={isSubmitting || (!editingStaff && emailCheckStatus === 'exists') }>
+                    <DialogClose asChild><Button type="button" variant="outline" onClick={resetFieldChecks}>Cancel</Button></DialogClose>
+                    <Button type="submit" disabled={isSubmitting || (!editingStaff && (usernameCheckStatus === 'exists' || emailCheckStatus === 'exists')) }>
                       {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                       {editingStaff ? 'Save Changes' : 'Add Staff Record'}
                     </Button>
@@ -769,7 +808,7 @@ export default function StaffManagementPage() {
                   <Button variant="ghost" size="icon" className="mr-1" onClick={() => handleOpenEditDialog(staff)} title="Edit User"
                     disabled={!canEditThisStaff}
                   ><Pencil className="h-4 w-4" /><span className="sr-only">Edit</span></Button>
-                  <Button variant="ghost" size="icon" className="mr-1" onClick={() => handleSendPasswordReset(staff.email, staff.name)} disabled={!staff.email || isSendingResetEmail === staff.email} title={staff.email ? "Send Password Setup/Reset Email" : "Cannot reset (no email)"}><KeyRound className="h-4 w-4" /><span className="sr-only">Send Password Reset</span></Button>
+                  <Button variant="ghost" size="icon" className="mr-1" onClick={() => handleSendPasswordReset(staff.email, staff.name)} disabled={!staff.email || isSendingResetEmail === staff.email} title={staff.email ? "Send Password Reset Email" : "Cannot reset (no email)"}><KeyRound className="h-4 w-4" /><span className="sr-only">Send Password Reset</span></Button>
                   <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => handleOpenDeleteDialog(staff)} title="Delete User"
                     disabled={!canDeleteThisStaff}
                   ><Trash2 className="h-4 w-4" /><span className="sr-only">Delete</span></Button>
@@ -787,7 +826,7 @@ export default function StaffManagementPage() {
     <Dialog open={isDeleteStaffDialogOpen} onOpenChange={(isOpen) => { setIsDeleteStaffDialogOpen(isOpen); if (!isOpen) { setStaffToDelete(null); setDeleteAdminPassword('');}}}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader><DialogTitle>Delete Staff User Record</DialogTitle>
-          <DialogPrimitiveDescription>Are you sure you want to delete {staffToDelete?.name}? This only removes the Firestore record. Auth account (if any) is NOT deleted.
+          <DialogPrimitiveDescription>Are you sure you want to delete {staffToDelete?.name}? This only removes the Firestore record. Firebase Auth account (if any) is NOT deleted by this action.
             {firestoreUser?.role === 'admin' && " Admin password required."}
           </DialogPrimitiveDescription>
         </DialogHeader>
@@ -802,3 +841,4 @@ export default function StaffManagementPage() {
     </>
   );
 }
+
