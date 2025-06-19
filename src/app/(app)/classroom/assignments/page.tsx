@@ -26,7 +26,7 @@ import { db } from '@/lib/firebase';
 import { collection, getDocs, query, where, addDoc } from 'firebase/firestore';
 import type { Group, ClassroomItem as ClassroomItemType } from '@/types';
 import { useAuth } from '@/contexts/AuthContext';
-import { useForm, Controller } from 'react-hook-form';
+import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { format, isValid, parseISO } from 'date-fns';
@@ -34,12 +34,11 @@ import { cn } from '@/lib/utils';
 import {
   Form,
   FormControl,
-  FormDescription,
   FormField,
   FormItem,
   FormLabel,
   FormMessage,
-} from '@/components/ui/form'; // Added missing imports
+} from '@/components/ui/form';
 
 const classroomItemFormSchema = z.object({
   title: z.string().min(3, { message: 'Title must be at least 3 characters.' }).max(100, {message: 'Title cannot exceed 100 characters.'}),
@@ -56,10 +55,9 @@ export default function ClassroomAssignmentsPage() {
   const { toast } = useToast();
   const { firestoreUser, institutionId, loading: authLoading } = useAuth();
   
-  const [teacherGroups, setTeacherGroups] = useState<Group[]>([]);
+  const [manageableGroups, setManageableGroups] = useState<Group[]>([]);
   const [selectedGroupId, setSelectedGroupId] = useState<string>('');
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [classroomItems, setClassroomItems] = useState<ClassroomItemType[]>([]); // Will be used when fetching from Firestore
+  const [classroomItems, setClassroomItems] = useState<ClassroomItemType[]>([]);
   
   const [isLoadingGroups, setIsLoadingGroups] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -77,43 +75,73 @@ export default function ClassroomAssignmentsPage() {
     },
   });
 
-  const fetchTeacherGroups = useCallback(async () => {
-    if (!firestoreUser?.id || !institutionId) {
+  const fetchManageableGroups = useCallback(async () => {
+    if (!firestoreUser || !institutionId || authLoading) {
       setIsLoadingGroups(false);
       return;
     }
     setIsLoadingGroups(true);
     try {
-      const groupsQuery = query(
-        collection(db, 'groups'),
-        where('teacherId', '==', firestoreUser.id),
-        where('institutionId', '==', institutionId)
-      );
+      let groupsQuery;
+      if (firestoreUser.role === 'admin') {
+        groupsQuery = query(
+          collection(db, 'groups'),
+          where('institutionId', '==', institutionId)
+        );
+      } else if (firestoreUser.role === 'supervisor') {
+        if (!firestoreUser.sedeId) {
+          toast({ title: "Sede Requerida", description: "Como supervisor, debes estar asignado a una Sede para gestionar tareas de classroom.", variant: "destructive"});
+          setManageableGroups([]);
+          setIsLoadingGroups(false);
+          return;
+        }
+        groupsQuery = query(
+          collection(db, 'groups'),
+          where('institutionId', '==', institutionId),
+          where('sedeId', '==', firestoreUser.sedeId)
+        );
+      } else if (firestoreUser.role === 'teacher') {
+        groupsQuery = query(
+          collection(db, 'groups'),
+          where('institutionId', '==', institutionId),
+          where('teacherId', '==', firestoreUser.id)
+        );
+      } else {
+        setManageableGroups([]);
+        setIsLoadingGroups(false);
+        return; 
+      }
+
       const snapshot = await getDocs(groupsQuery);
       const groups = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Group));
-      setTeacherGroups(groups);
+      setManageableGroups(groups);
       if (groups.length > 0 && !selectedGroupId) {
         setSelectedGroupId(groups[0].id);
         form.setValue('groupId', groups[0].id);
+      } else if (groups.length === 0) {
+        setSelectedGroupId('');
+        form.setValue('groupId', '');
       }
     } catch (error) {
-      console.error('Error fetching teacher groups:', error);
+      console.error('Error fetching manageable groups:', error);
       toast({ title: 'Error', description: 'Could not load your groups.', variant: 'destructive' });
+      setManageableGroups([]);
     }
     setIsLoadingGroups(false);
-  }, [firestoreUser?.id, institutionId, toast, form, selectedGroupId]);
+  }, [firestoreUser, institutionId, toast, form, selectedGroupId, authLoading]);
 
   useEffect(() => {
-    if (firestoreUser && institutionId) {
-      fetchTeacherGroups();
+    if (!authLoading && firestoreUser && institutionId) {
+      fetchManageableGroups();
     }
-  }, [firestoreUser, institutionId, fetchTeacherGroups]);
+  }, [authLoading, firestoreUser, institutionId, fetchManageableGroups]);
   
-  // Placeholder for fetching assignments for the selected group - to be implemented later
   useEffect(() => {
     if (selectedGroupId && firestoreUser) {
       // console.log(`Would fetch assignments for group ${selectedGroupId} of institution ${institutionId}`);
-      // setClassroomItems([]); // Clear previous items for now
+      // Placeholder: In a real app, fetch actual items from Firestore here.
+      // For now, we'll filter the demo items if any, or show empty.
+      // setClassroomItems(prevItems => prevItems.filter(item => item.groupId === selectedGroupId));
     }
   }, [selectedGroupId, firestoreUser, institutionId]);
 
@@ -125,11 +153,10 @@ export default function ClassroomAssignmentsPage() {
     }
     setIsSubmitting(true);
     
-    // Placeholder for Firestore save logic
     const newItemData: Omit<ClassroomItemType, 'id' | 'createdAt' | 'updatedAt'> = {
         groupId: data.groupId,
         institutionId: institutionId,
-        teacherId: firestoreUser.id,
+        teacherId: firestoreUser.id, // Creator's ID (admin, supervisor, or teacher)
         title: data.title,
         description: data.description || '',
         itemType: data.itemType,
@@ -138,10 +165,8 @@ export default function ClassroomAssignmentsPage() {
     };
 
     console.log("New Item Data to save (simulation):", newItemData);
-    // Simulating API call
-    await new Promise(resolve => setTimeout(resolve, 1000));
-
-    // In a real scenario, you would save to Firestore and then refresh the list:
+    
+    // Simulating API call for demo. Replace with actual Firestore save.
     // try {
     //   const docRef = await addDoc(collection(db, 'classroomItems'), {
     //      ...newItemData,
@@ -149,25 +174,23 @@ export default function ClassroomAssignmentsPage() {
     //      updatedAt: new Date().toISOString(),
     //   });
     //   toast({ title: 'Success', description: `${data.itemType === 'assignment' ? 'Assignment' : 'Reminder'} "${data.title}" created.` });
-    //   form.reset();
-    //   setIsFormOpen(false);
-    //   // fetchAssignmentsForGroup(selectedGroupId); // Re-fetch
+    //   // fetchClassroomItemsForGroup(selectedGroupId); // Re-fetch after creation
     // } catch (error) {
     //   console.error("Error creating classroom item:", error);
     //   toast({ title: 'Error', description: 'Could not create the item.', variant: 'destructive' });
     // }
 
-    toast({ title: 'Simulated Success', description: `${data.itemType === 'assignment' ? 'Assignment' : 'Reminder'} "${data.title}" would be created.` });
-    // For now, just add to local state for demo
+    // For demo purposes, add to local state
     const demoItem: ClassroomItemType = {
-        id: Math.random().toString(36).substring(2,9),
+        id: Math.random().toString(36).substring(2,9), // Temporary ID for demo
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         ...newItemData,
     };
-    setClassroomItems(prev => [demoItem, ...prev]);
+    setClassroomItems(prev => [demoItem, ...prev].filter(item => item.groupId === selectedGroupId || data.groupId === selectedGroupId));
 
-
+    toast({ title: 'Simulated Success', description: `${data.itemType === 'assignment' ? 'Assignment' : 'Reminder'} "${data.title}" would be created.` });
+    
     form.reset({
       title: '',
       description: '',
@@ -195,7 +218,7 @@ export default function ClassroomAssignmentsPage() {
             </div>
             <Dialog open={isFormOpen} onOpenChange={setIsFormOpen}>
               <DialogTrigger asChild>
-                <Button size="sm" className="gap-1.5 text-sm" disabled={teacherGroups.length === 0 || isLoadingGroups}>
+                <Button size="sm" className="gap-1.5 text-sm" disabled={manageableGroups.length === 0 || isLoadingGroups}>
                   <PlusCircle className="size-3.5" /> New Assignment/Reminder
                 </Button>
               </DialogTrigger>
@@ -204,17 +227,17 @@ export default function ClassroomAssignmentsPage() {
                   <DialogTitle>Create New Classroom Item</DialogTitle>
                   <DialogPrimitiveDescription>Fill in the details for the new assignment or reminder.</DialogPrimitiveDescription>
                 </DialogHeader>
-                <Form {...form}> {/* Encapsulate with Form provider */}
+                <Form {...form}>
                   <form onSubmit={form.handleSubmit(handleFormSubmit)} className="space-y-4 py-4 max-h-[70vh] overflow-y-auto pr-2">
                     <FormField control={form.control} name="groupId" render={({ field }) => (
                       <FormItem>
                         <FormLabel>Group*</FormLabel>
-                        <Select onValueChange={field.onChange} value={field.value} disabled={teacherGroups.length === 0}>
+                        <Select onValueChange={field.onChange} value={field.value} disabled={manageableGroups.length === 0 || isLoadingGroups}>
                           <FormControl>
                             <SelectTrigger><SelectValue placeholder="Select a group" /></SelectTrigger>
                           </FormControl>
                           <SelectContent>
-                            {teacherGroups.map(group => <SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>)}
+                            {manageableGroups.map(group => <SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>)}
                           </SelectContent>
                         </Select>
                         <FormMessage />
@@ -239,7 +262,7 @@ export default function ClassroomAssignmentsPage() {
                         </Select><FormMessage />
                       </FormItem>
                     )}/>
-                    <FormField control={form.control} name="dueDate" render={({ field }) => ( // Changed Controller to FormField
+                    <FormField control={form.control} name="dueDate" render={({ field }) => (
                       <FormItem className="flex flex-col"><FormLabel>Due Date (Optional)</FormLabel>
                         <Popover><PopoverTrigger asChild>
                           <FormControl>
@@ -276,34 +299,39 @@ export default function ClassroomAssignmentsPage() {
             <Label htmlFor="group-selector-classroom">Select Group to View/Manage</Label>
             <Select value={selectedGroupId} onValueChange={(value) => {
                 setSelectedGroupId(value);
-                form.setValue('groupId', value); // Update form if dialog is opened for this group
-            }} disabled={isLoadingGroups || teacherGroups.length === 0}>
+                form.setValue('groupId', value);
+            }} disabled={isLoadingGroups || manageableGroups.length === 0}>
                 <SelectTrigger id="group-selector-classroom">
                     <SelectValue placeholder="Select a group"/>
                 </SelectTrigger>
                 <SelectContent>
-                    {teacherGroups.map(group => (
+                    {manageableGroups.map(group => (
                         <SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>
                     ))}
                 </SelectContent>
             </Select>
-            {teacherGroups.length === 0 && !isLoadingGroups && (
+            {manageableGroups.length === 0 && !isLoadingGroups && (
                  <p className="text-sm text-muted-foreground mt-2 flex items-center gap-1">
                     <AlertTriangle className="h-4 w-4 text-orange-500" />
-                    You are not assigned to any groups. Please contact an administrator.
+                    {firestoreUser?.role === 'teacher' ? "You are not assigned to any groups." : 
+                     firestoreUser?.role === 'supervisor' ? "No groups found in your Sede." :
+                     "No groups found in this institution."}
+                    { (firestoreUser?.role === 'admin' || (firestoreUser?.role === 'supervisor' && firestoreUser.sedeId)) && 
+                        <span className="ml-1">You can <Button variant="link" size="sm" className="p-0 h-auto" onClick={() => setIsFormOpen(true)}>create one</Button>.</span>
+                    }
                 </p>
             )}
           </div>
         </CardHeader>
         <CardContent>
           {isLoadingGroups && <div className="text-center py-4"><Loader2 className="h-5 w-5 animate-spin mr-2 inline-block" />Loading group data...</div>}
-          {!isLoadingGroups && teacherGroups.length > 0 && !selectedGroupId && (
+          {!isLoadingGroups && manageableGroups.length > 0 && !selectedGroupId && (
              <div className="text-center py-4 text-muted-foreground">Please select a group to see its assignments.</div>
           )}
           {!isLoadingGroups && selectedGroupId && (
             <div className="space-y-4">
               <h3 className="text-xl font-semibold">
-                Tasks for: {teacherGroups.find(g => g.id === selectedGroupId)?.name || 'Selected Group'}
+                Tasks for: {manageableGroups.find(g => g.id === selectedGroupId)?.name || 'Selected Group'}
               </h3>
               {classroomItems.filter(item => item.groupId === selectedGroupId).length === 0 ? (
                 <div className="text-center py-10 border-2 border-dashed rounded-lg">
@@ -317,20 +345,20 @@ export default function ClassroomAssignmentsPage() {
                     <CardHeader>
                       <CardTitle className="flex justify-between items-center">
                         {item.title}
-                        <span className={`text-xs px-2 py-0.5 rounded-full ${item.itemType === 'assignment' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'}`}>
+                        <span className={`text-xs px-2 py-0.5 rounded-full ${item.itemType === 'assignment' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300' : 'bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300'}`}>
                           {item.itemType.charAt(0).toUpperCase() + item.itemType.slice(1)}
                         </span>
                       </CardTitle>
                       <CardDescription>
-                        Status: <span className={item.status === 'published' ? 'text-green-600' : 'text-orange-600'}>{item.status.charAt(0).toUpperCase() + item.status.slice(1)}</span>
-                        {item.dueDate && ` | Due: ${format(parseISO(item.dueDate), 'PPP p')}`}
+                        Status: <span className={item.status === 'published' ? 'text-green-600 dark:text-green-400' : 'text-orange-600 dark:text-orange-400'}>{item.status.charAt(0).toUpperCase() + item.status.slice(1)}</span>
+                        {item.dueDate && ` | Due: ${isValid(parseISO(item.dueDate)) ? format(parseISO(item.dueDate), 'PPP p') : 'Invalid Date'}`}
                       </CardDescription>
                     </CardHeader>
                     <CardContent>
                       <p className="text-sm whitespace-pre-wrap">{item.description || "No description."}</p>
                     </CardContent>
                     <CardFooter className="text-xs text-muted-foreground">
-                      Created: {format(parseISO(item.createdAt), 'PPP p')}
+                      Created: {isValid(parseISO(item.createdAt)) ? format(parseISO(item.createdAt), 'PPP p') : 'Invalid Date'}
                     </CardFooter>
                   </Card>
                 ))
@@ -342,3 +370,4 @@ export default function ClassroomAssignmentsPage() {
     </div>
   );
 }
+
