@@ -106,6 +106,11 @@ export default function StaffManagementPage() {
     setUsernameCheckStatus('idle'); setUsernameCheckMessage(null);
   }, []);
 
+  const resetEmailCheck = useCallback(() => {
+    setEmailCheckStatus('idle');
+    setEmailCheckMessage(null);
+  }, []);
+
   const fetchData = useCallback(async () => {
     setIsLoading(true);
     try {
@@ -841,4 +846,3 @@ export default function StaffManagementPage() {
     </>
   );
 }
-
