@@ -31,107 +31,110 @@ export interface StudentGradeStructure {
   certificateCode?: string; // For physical certificate codes per level
 }
 
+export interface Institution {
+  id: string;
+  name: string;
+  adminUids: string[]; // UIDs of users with admin role for this institution
+  createdAt: string; // ISO date string
+}
+
 export interface Sede {
   id: string;
   name: string;
   supervisorId?: string | null; // UID of the user with role 'supervisor' assigned to this Sede
+  institutionId?: string | null; // ID of the institution this Sede belongs to
 }
 
 export interface User {
   id: string; // Firestore document ID (for users collection, this will be the Firebase Auth UID)
   uid?: string; // Firebase Auth UID (explicitly ensure it's here, often same as id for 'users' collection)
   name: string;
-  username?: string | null; 
-  role: 'student' | 'teacher' | 'admin' | 'caja' | 'supervisor'; // Added 'supervisor' role
-  email?: string | null; 
+  username?: string | null;
+  role: 'student' | 'teacher' | 'admin' | 'caja' | 'supervisor';
+  email?: string | null;
   phoneNumber?: string | null;
   photoUrl?: string | null;
-  attendanceCode?: string | null; 
-  requiresPasswordChange?: boolean; 
+  attendanceCode?: string | null;
+  requiresPasswordChange?: boolean;
   sedeId?: string | null; // For teachers and supervisors to link them to a Sede
+  institutionId?: string | null; // ID of the institution this user belongs to
 
-  // Student-specific fields (will be part of the User document if role is 'student')
-  level?: 'Beginner' | 'Intermediate' | 'Advanced' | 'Other'; 
+  // Student-specific fields
+  level?: 'Beginner' | 'Intermediate' | 'Advanced' | 'Other';
   notes?: string;
   age?: number;
   gender?: 'male' | 'female' | 'other';
   preferredShift?: 'Saturday' | 'Sunday';
-  gradesByLevel?: Record<string, StudentGradeStructure>; 
+  gradesByLevel?: Record<string, StudentGradeStructure>;
 }
 
 export interface TeacherAttendanceRecord {
-  id: string; 
-  teacherId: string; 
+  id: string;
+  teacherId: string;
   teacherName: string;
-  timestamp: string; 
+  timestamp: string;
   attendanceCodeUsed: string;
 }
 
 export interface Session {
-  id: string; 
-  classId: string; 
+  id: string;
+  classId: string;
   date: string; // YYYY-MM-DD
   time: string; // HH:MM
 }
 
 export interface AttendanceRecord {
-  id: string; 
-  sessionId: string; 
-  userId: string; // This will refer to User.id (which is UID) from 'users' collection if student logs in
+  id: string;
+  sessionId: string;
+  userId: string;
   status: 'present' | 'absent' | 'late';
-  timestamp: string; 
+  timestamp: string;
   observation?: string;
 }
 
 export interface Group {
-  id: string; 
+  id: string;
   name: string;
-  type: 'Saturday' | 'Sunday' | 'SaturdayAndSunday' | 'Daily'; 
-  startDate: string; 
-  endDate?: string | null; 
-  studentIds: string[]; // Array of User.id (UIDs from 'users' collection for students)
-  teacherId?: string | null; // User.id of the assigned teacher (from 'users' collection)
-  sedeId?: string | null; // ID of the Sede this group belongs to
+  type: 'Saturday' | 'Sunday' | 'SaturdayAndSunday' | 'Daily';
+  startDate: string;
+  endDate?: string | null;
+  studentIds: string[];
+  teacherId?: string | null;
+  sedeId?: string | null;
 }
 
-// Configuration for the grading system
 export interface GradingConfiguration {
-  id?: string; 
+  id?: string;
   numberOfPartials: 1 | 2 | 3 | 4;
   passingGrade: number;
   maxIndividualActivityScore: number;
-  maxTotalAccumulatedScore: number; 
-  maxExamScore: number; 
+  maxTotalAccumulatedScore: number;
+  maxExamScore: number;
 }
 
-// Default values for GradingConfiguration
 export const DEFAULT_GRADING_CONFIG: GradingConfiguration = {
   numberOfPartials: 3,
   passingGrade: 70,
-  maxIndividualActivityScore: 10, 
-  maxTotalAccumulatedScore: 50,  
+  maxIndividualActivityScore: 10,
+  maxTotalAccumulatedScore: 50,
   maxExamScore: 50,
 };
 
-// Configuration for Class Schedules
 export interface ClassScheduleConfiguration {
-  id?: string; // Typically "currentClassScheduleConfig"
+  id?: string;
   scheduleType: 'Saturday' | 'Sunday' | 'Daily' | 'NotSet' | 'SaturdayAndSunday';
-  startTime: string; // Format HH:MM
-  endTime: string;   // Format HH:MM
+  startTime: string;
+  endTime: string;
 }
 
-// Default values for ClassScheduleConfiguration
 export const DEFAULT_CLASS_SCHEDULE_CONFIG: ClassScheduleConfiguration = {
   scheduleType: 'NotSet',
   startTime: '09:00',
   endTime: '17:00',
 };
 
-
-// Extended User type for grades report pages
 export interface StudentWithDetailedGrades extends User {
-  gradesDisplayLevel?: string; 
+  gradesDisplayLevel?: string;
   calculatedAccumulatedTotalP1?: number | null;
   calculatedAccumulatedTotalP2?: number | null;
   calculatedAccumulatedTotalP3?: number | null;
@@ -143,13 +146,11 @@ export interface StudentWithDetailedGrades extends User {
   calculatedFinalGrade?: number | null;
 }
 
-// Helper to get default partial scores
 export const getDefaultPartialScores = (): PartialScores => ({
   accumulatedActivities: [],
   exam: { name: 'Examen', score: null },
 });
 
-// Helper to get default grade structure for a new level
 export const getDefaultStudentGradeStructure = (config: GradingConfiguration): StudentGradeStructure => {
   const structure: StudentGradeStructure = {
     partial1: getDefaultPartialScores(),
@@ -160,4 +161,3 @@ export const getDefaultStudentGradeStructure = (config: GradingConfiguration): S
   };
   return structure;
 };
-

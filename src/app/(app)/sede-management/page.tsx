@@ -28,7 +28,7 @@ import { Loader2, PlusCircle, Edit, Trash2, Building, UserCircle, ShieldCheck } 
 import { useToast } from '@/hooks/use-toast';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, doc, deleteDoc, updateDoc, query, where, writeBatch } from 'firebase/firestore';
-import type { Sede, User } from '@/types';
+import type { Sede, User, Institution } from '@/types';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -45,7 +45,7 @@ import { useAuth } from '@/contexts/AuthContext';
 
 const sedeFormSchema = z.object({
   name: z.string().min(2, { message: "Sede name must be at least 2 characters." }),
-  supervisorId: z.string().optional().or(z.literal('')), // UID of the supervisor
+  supervisorId: z.string().optional().or(z.literal('')),
 });
 
 type SedeFormValues = z.infer<typeof sedeFormSchema>;
@@ -54,12 +54,12 @@ const UNASSIGN_SUPERVISOR_KEY = "##NO_SUPERVISOR##";
 
 export default function SedeManagementPage() {
   const [sedes, setSedes] = useState<Sede[]>([]);
-  const [supervisors, setSupervisors] = useState<User[]>([]); // Users with role 'supervisor'
+  const [supervisors, setSupervisors] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSedeFormDialogOpen, setIsSedeFormDialogOpen] = useState(false);
   const [editingSede, setEditingSede] = useState<Sede | null>(null);
-  
+
   const { toast } = useToast();
   const { firestoreUser } = useAuth();
 
@@ -69,10 +69,23 @@ export default function SedeManagementPage() {
   });
 
   const fetchSedesAndSupervisors = useCallback(async () => {
+    if (!firestoreUser || !firestoreUser.institutionId) {
+      setIsLoading(false);
+      if (firestoreUser?.role === 'admin' && !firestoreUser.institutionId) {
+        toast({ title: "Configuración Incompleta", description: "El administrador no está asociado a una institución.", variant: "destructive"});
+      }
+      return;
+    }
     setIsLoading(true);
     try {
-      const sedesSnapshotPromise = getDocs(collection(db, 'sedes'));
-      const supervisorsQuery = query(collection(db, 'users'), where('role', '==', 'supervisor'));
+      const sedesQuery = query(collection(db, 'sedes'), where('institutionId', '==', firestoreUser.institutionId));
+      const sedesSnapshotPromise = getDocs(sedesQuery);
+      
+      // Fetch supervisors that belong to the admin's institution
+      const supervisorsQuery = query(collection(db, 'users'), 
+        where('role', '==', 'supervisor'), 
+        where('institutionId', '==', firestoreUser.institutionId)
+      );
       const supervisorsSnapshotPromise = getDocs(supervisorsQuery);
 
       const [sedesSnapshot, supervisorsSnapshot] = await Promise.all([
@@ -84,16 +97,15 @@ export default function SedeManagementPage() {
       setSupervisors(supervisorsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as User)));
     } catch (error) {
       console.error("Error fetching sedes or supervisors:", error);
-      toast({ title: 'Error fetching data', description: 'Could not load sedes or supervisors.', variant: 'destructive' });
+      toast({ title: 'Error fetching data', description: 'Could not load sedes or supervisors for your institution.', variant: 'destructive' });
     }
     setIsLoading(false);
-  }, [toast]);
+  }, [toast, firestoreUser]);
 
   useEffect(() => {
     fetchSedesAndSupervisors();
   }, [fetchSedesAndSupervisors]);
 
-  // Only admins can manage sedes
   if (firestoreUser?.role !== 'admin') {
     return (
       <Card>
@@ -102,68 +114,73 @@ export default function SedeManagementPage() {
       </Card>
     );
   }
+  
+  if (!firestoreUser?.institutionId && firestoreUser?.role === 'admin' && !isLoading) {
+    return (
+      <Card>
+        <CardHeader><CardTitle>Institución no Asignada</CardTitle></CardHeader>
+        <CardContent><p>Esta cuenta de administrador no está asignada a ninguna institución. Por favor, contacte al soporte de la plataforma.</p></CardContent>
+      </Card>
+    );
+  }
+
 
   const handleSedeFormSubmit = async (data: SedeFormValues) => {
+    if (!firestoreUser?.institutionId) {
+        toast({ title: 'Error', description: 'No se pudo determinar la institución del administrador.', variant: 'destructive'});
+        return;
+    }
     setIsSubmitting(true);
     const supervisorIdToSave = data.supervisorId === UNASSIGN_SUPERVISOR_KEY ? null : data.supervisorId || null;
 
     try {
       const batch = writeBatch(db);
+      const institutionId = firestoreUser.institutionId;
 
-      // If assigning a new supervisor, unassign them from their previous Sede (if any)
       if (supervisorIdToSave && (!editingSede || editingSede.supervisorId !== supervisorIdToSave)) {
-        const currentSedeOfNewSupervisor = sedes.find(s => s.supervisorId === supervisorIdToSave && s.id !== editingSede?.id);
+        const currentSedeOfNewSupervisor = sedes.find(s => s.supervisorId === supervisorIdToSave && s.id !== editingSede?.id && s.institutionId === institutionId);
         if (currentSedeOfNewSupervisor) {
           const oldSedeRef = doc(db, 'sedes', currentSedeOfNewSupervisor.id);
           batch.update(oldSedeRef, { supervisorId: null });
         }
-        // Also update the supervisor's user document with the new sedeId
         const supervisorUserRef = doc(db, 'users', supervisorIdToSave);
-        batch.update(supervisorUserRef, { sedeId: editingSede ? editingSede.id : null /* Needs ID of new Sede if creating */ });
+        batch.update(supervisorUserRef, { sedeId: editingSede ? editingSede.id : null });
       }
-      // If unassigning a supervisor from the current Sede being edited
       if (editingSede && editingSede.supervisorId && supervisorIdToSave === null && editingSede.supervisorId !== supervisorIdToSave) {
          const supervisorUserRef = doc(db, 'users', editingSede.supervisorId);
          batch.update(supervisorUserRef, { sedeId: null });
       }
 
-
       if (editingSede) {
         const sedeRef = doc(db, 'sedes', editingSede.id);
-        batch.update(sedeRef, { name: data.name, supervisorId: supervisorIdToSave });
-        // If the supervisor changed, update the old supervisor's sedeId to null if they are no longer supervising this sede.
+        batch.update(sedeRef, { name: data.name, supervisorId: supervisorIdToSave, institutionId });
         if (editingSede.supervisorId && editingSede.supervisorId !== supervisorIdToSave) {
             const oldSupervisorUserRef = doc(db, 'users', editingSede.supervisorId);
-            // Check if this old supervisor is now supervising NO sede, then set sedeId to null
-            const isOldSupervisorStillAssignedElsewhere = sedes.some(s => s.supervisorId === editingSede.supervisorId && s.id !== editingSede.id);
-            if (!isOldSupervisorStillAssignedElsewhere) {
+            const isOldSupervisorStillAssignedElsewhereInInstitution = sedes.some(s => s.supervisorId === editingSede.supervisorId && s.id !== editingSede.id && s.institutionId === institutionId);
+            if (!isOldSupervisorStillAssignedElsewhereInInstitution) {
                  batch.update(oldSupervisorUserRef, { sedeId: null });
             }
         }
-        // Update new supervisor's document
         if (supervisorIdToSave) {
             const newSupervisorUserRef = doc(db, 'users', supervisorIdToSave);
             batch.update(newSupervisorUserRef, { sedeId: editingSede.id });
         }
-
         await batch.commit();
         toast({ title: 'Sede Updated', description: `Sede "${data.name}" updated successfully.` });
       } else {
-        // For new Sede, we first add the Sede document, then update the chosen supervisor.
-        const newSedeData: Omit<Sede, 'id'> = { name: data.name, supervisorId: supervisorIdToSave };
+        const newSedeData: Omit<Sede, 'id'> = { name: data.name, supervisorId: supervisorIdToSave, institutionId };
         const newSedeRef = await addDoc(collection(db, 'sedes'), newSedeData);
         if (supervisorIdToSave) {
             const supervisorUserRef = doc(db, 'users', supervisorIdToSave);
-            // No batch here, as we need newSedeRef.id
             await updateDoc(supervisorUserRef, { sedeId: newSedeRef.id });
         }
         toast({ title: 'Sede Created', description: `Sede "${data.name}" created successfully.` });
       }
-      
+
       form.reset({ name: '', supervisorId: '' });
       setEditingSede(null);
       setIsSedeFormDialogOpen(false);
-      await fetchSedesAndSupervisors(); // Refresh list
+      await fetchSedesAndSupervisors();
     } catch (error) {
       console.error("Error saving Sede:", error);
       toast({ title: editingSede ? 'Update Sede Failed' : 'Create Sede Failed', description: 'Could not save the Sede.', variant: 'destructive' });
@@ -173,6 +190,10 @@ export default function SedeManagementPage() {
   };
 
   const openEditSedeDialog = (sede: Sede) => {
+    if (sede.institutionId !== firestoreUser?.institutionId) {
+        toast({title: "Acción no permitida", description: "No puedes editar una Sede de otra institución.", variant: "destructive"});
+        return;
+    }
     setEditingSede(sede);
     form.reset({
       name: sede.name,
@@ -188,31 +209,33 @@ export default function SedeManagementPage() {
   };
 
   const handleDeleteSede = async (sedeId: string, sedeName: string) => {
+     const sedeToDelete = sedes.find(s => s.id === sedeId);
+     if (sedeToDelete?.institutionId !== firestoreUser?.institutionId) {
+        toast({title: "Acción no permitida", description: "No puedes eliminar una Sede de otra institución.", variant: "destructive"});
+        return;
+    }
     if (!confirm(`Are you sure you want to delete Sede "${sedeName}"? This may affect assigned supervisors and teachers.`)) return;
     setIsSubmitting(true);
     try {
       const batch = writeBatch(db);
       const sedeRef = doc(db, 'sedes', sedeId);
-      
-      const sedeDoc = sedes.find(s => s.id === sedeId);
-      if (sedeDoc?.supervisorId) {
-        const supervisorUserRef = doc(db, 'users', sedeDoc.supervisorId);
+
+      if (sedeToDelete?.supervisorId) {
+        const supervisorUserRef = doc(db, 'users', sedeToDelete.supervisorId);
         batch.update(supervisorUserRef, { sedeId: null });
       }
-      
-      // Future: Handle teachers assigned to this Sede (set their sedeId to null)
+
       const teachersInSedeQuery = query(collection(db, "users"), where("sedeId", "==", sedeId), where("role", "==", "teacher"));
       const teachersSnapshot = await getDocs(teachersInSedeQuery);
       teachersSnapshot.forEach(teacherDoc => {
         batch.update(doc(db, "users", teacherDoc.id), { sedeId: null });
       });
 
-
       batch.delete(sedeRef);
       await batch.commit();
 
       toast({ title: 'Sede Deleted', description: `Sede "${sedeName}" removed successfully.` });
-      await fetchSedesAndSupervisors(); // Refresh
+      await fetchSedesAndSupervisors();
     } catch (error) {
       console.error("Error deleting Sede:", error);
       toast({ title: 'Delete Failed', description: 'Could not delete the Sede.', variant: 'destructive' });
@@ -223,17 +246,23 @@ export default function SedeManagementPage() {
 
   const getSupervisorName = (supervisorId?: string | null) => {
     if (!supervisorId) return <span className="text-muted-foreground">Not Assigned</span>;
+    // Supervisors are already filtered by the admin's institutionId
     const supervisor = supervisors.find(s => s.id === supervisorId);
     return supervisor ? supervisor.name : <span className="text-destructive">Unknown Supervisor</span>;
   };
-  
-  // Supervisors who are not already assigned to another Sede (unless it's the Sede being edited)
+
   const availableSupervisorsForAssignment = useMemo(() => {
+    // Filter supervisors who are not already assigned to another Sede within the same institution
+    // (unless it's the Sede being edited)
     return supervisors.filter(sup => {
-        const isAssignedToAnotherSede = sedes.some(s => s.supervisorId === sup.id && s.id !== editingSede?.id);
-        return !isAssignedToAnotherSede;
+        const isAssignedToAnotherSedeInThisInstitution = sedes.some(s => 
+            s.supervisorId === sup.id && 
+            s.id !== editingSede?.id && 
+            s.institutionId === firestoreUser?.institutionId
+        );
+        return !isAssignedToAnotherSedeInThisInstitution;
     });
-  }, [supervisors, sedes, editingSede]);
+  }, [supervisors, sedes, editingSede, firestoreUser?.institutionId]);
 
 
   if (isLoading) {
@@ -255,7 +284,7 @@ export default function SedeManagementPage() {
         <CardHeader className="flex flex-row items-center justify-between">
           <div>
             <CardTitle className="flex items-center gap-2"><Building className="h-6 w-6 text-primary" /> Sede Management</CardTitle>
-            <CardDescription>Create, manage, and assign supervisors to your academy's branches or locations (Sedes).</CardDescription>
+            <CardDescription>Create, manage, and assign supervisors to your institution's branches or locations (Sedes).</CardDescription>
           </div>
           <Dialog open={isSedeFormDialogOpen} onOpenChange={setIsSedeFormDialogOpen}>
             <DialogTrigger asChild>
@@ -282,14 +311,13 @@ export default function SedeManagementPage() {
                             <SelectItem key={sup.id} value={sup.id}>{sup.name} ({sup.username})</SelectItem>
                           ))}
                            {editingSede?.supervisorId && !availableSupervisorsForAssignment.find(s => s.id === editingSede.supervisorId) && supervisors.find(s => s.id === editingSede.supervisorId) && (
-                            // If current supervisor is assigned to THIS sede, show them
                              <SelectItem key={editingSede.supervisorId} value={editingSede.supervisorId}>
                                 {supervisors.find(s => s.id === editingSede.supervisorId)?.name} (Currently Assigned)
                              </SelectItem>
                            )}
                         </SelectContent>
                       </Select>
-                      {availableSupervisorsForAssignment.length === 0 && (!editingSede || !editingSede.supervisorId) && <p className="text-xs text-muted-foreground mt-1">No unassigned supervisors available. Create one in Staff Management.</p>}
+                      {availableSupervisorsForAssignment.length === 0 && (!editingSede || !editingSede.supervisorId) && <p className="text-xs text-muted-foreground mt-1">No unassigned supervisors available in this institution. Create one in Staff Management.</p>}
                       <FormMessage />
                     </FormItem>
                   )}/>
@@ -304,7 +332,7 @@ export default function SedeManagementPage() {
         </CardHeader>
         <CardContent>
           {sedes.length === 0 ? (
-            <div className="text-center py-10"><p className="text-muted-foreground">No Sedes found. Get started by adding a new Sede.</p></div>
+            <div className="text-center py-10"><p className="text-muted-foreground">No Sedes found for your institution. Get started by adding a new Sede.</p></div>
           ) : (
             <Table>
               <TableHeader><TableRow>

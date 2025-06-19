@@ -1,12 +1,12 @@
 
 'use client';
 
-import React, { useState, useEffect } from 'react'; 
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, Mail, Lock, User as UserIcon, Building } from 'lucide-react'; 
+import { Loader2, Mail, Lock, User as UserIcon, Building } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -83,7 +83,6 @@ export default function AuthPage() {
   const currentLoadingState = authLoading || isSubmitting;
 
    useEffect(() => {
-    // Remove dark class on mount if present from other pages
     document.documentElement.classList.remove('dark');
   }, []);
 
@@ -115,15 +114,18 @@ export default function AuthPage() {
     setIsSubmitting(true);
     try {
       await signUp(
-        data.adminName, 
-        data.adminUsername, 
-        data.adminEmail, 
-        data.adminPassword, 
-        'admin' // Explicitly role 'admin' for this signup form
+        data.adminName,
+        data.adminUsername,
+        data.adminEmail,
+        data.adminPassword,
+        'admin',
+        undefined, // No studentDetails for admin
+        undefined, // No specific staffDetails for this initial admin signup
+        data.institutionName // Pass institutionName
       );
       toast({ title: 'Registro de Institución Exitoso', description: `Bienvenido/a, ${data.adminName}. Tu institución "${data.institutionName}" ha sido registrada. Serás redirigido/a para iniciar sesión.` });
-      setIsSignUpActive(false); 
-      loginForm.setValue('identifier', data.adminEmail); 
+      setIsSignUpActive(false);
+      loginForm.setValue('identifier', data.adminEmail);
     } catch (error: any) {
       let errorMessage = 'Fallo al registrar la nueva institución. Por favor, inténtalo de nuevo.';
       if (error.code === 'auth/email-already-in-use') errorMessage = 'Este correo electrónico ya está en uso.';
@@ -151,7 +153,7 @@ export default function AuthPage() {
       let errorMessage = "No se pudo enviar el correo de restablecimiento.";
       if (error.code === 'auth/user-not-found') {
          toast({
-            title: 'Email de Restablecimiento Enviado', 
+            title: 'Email de Restablecimiento Enviado',
             description: `Si existe una cuenta con ${data.email}, se ha enviado un enlace para restablecer la contraseña.`,
           });
           setIsForgotPasswordDialogOpen(false);
@@ -180,11 +182,10 @@ export default function AuthPage() {
     >
       <div
         className={cn(
-          "relative h-[750px] sm:h-[700px] w-full max-w-4xl overflow-hidden rounded-2xl shadow-2xl", 
+          "relative h-[750px] sm:h-[700px] w-full max-w-4xl overflow-hidden rounded-2xl shadow-2xl",
           "container"
         )}
       >
-        {/* New Institution Admin Sign Up Form Container */}
         <div
           className={cn(
             "form-container sign-up-container absolute top-0 left-0 h-full w-1/2 z-10 transition-all duration-700 ease-in-out",
@@ -198,7 +199,7 @@ export default function AuthPage() {
             >
               <h1 className="text-3xl font-bold mb-4 text-primary">Registrar Nueva Institución</h1>
               <p className="text-xs text-muted-foreground mb-3">Crea la cuenta principal de administrador para tu institución educativa.</p>
-              
+
               <FormField control={newAdminSignupForm.control} name="institutionName" render={({ field }) => (
                 <FormItem className="w-full">
                   <FormLabel className="sr-only">Nombre de la Institución</FormLabel>
@@ -278,7 +279,6 @@ export default function AuthPage() {
           </Form>
         </div>
 
-        {/* Sign In Form Container */}
         <div
           className={cn(
             "form-container sign-in-container absolute top-0 left-0 h-full w-1/2 z-20 transition-all duration-700 ease-in-out",
@@ -377,7 +377,6 @@ export default function AuthPage() {
           </Form>
         </div>
 
-        {/* Overlay Container */}
         <div
           className={cn(
             "overlay-container absolute top-0 left-1/2 h-full w-1/2 overflow-hidden z-50 transition-transform duration-700 ease-in-out",
@@ -386,15 +385,14 @@ export default function AuthPage() {
         >
           <div
             className={cn(
-              "overlay relative -left-full h-full w-[200%] transform transition-transform duration-700 ease-in-out",
+              "overlay relative -left-full h-full w-[200%] transition-transform duration-700 ease-in-out",
               isSignUpActive ? "translate-x-1/2" : "translate-x-0"
             )}
           >
-            {/* Overlay Left Panel (Prompts to Sign In, visible when SignUp form is active) */}
             <div
               className={cn(
                 "overlay-panel overlay-left absolute top-0 flex h-full w-1/2 flex-col items-center justify-center px-10 text-center",
-                "bg-primary" 
+                "bg-primary"
               )}
             >
               <h1 className="text-3xl font-bold text-primary-foreground">¡Bienvenido de Nuevo!</h1>
@@ -414,11 +412,10 @@ export default function AuthPage() {
               </Button>
             </div>
 
-            {/* Overlay Right Panel (Prompts to Sign Up, visible when SignIn form is active) */}
             <div
               className={cn(
                 "overlay-panel overlay-right absolute top-0 right-0 flex h-full w-1/2 flex-col items-center justify-center px-10 text-center",
-                "bg-signup-panel text-signup-panel-foreground"
+                 "bg-signup-panel text-signup-panel-foreground"
               )}
             >
               <h1 className="text-3xl font-bold">¿Nueva Institución?</h1>
@@ -457,4 +454,3 @@ export default function AuthPage() {
     </div>
   );
 }
-

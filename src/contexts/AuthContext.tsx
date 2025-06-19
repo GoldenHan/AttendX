@@ -11,11 +11,11 @@ import {
   createUserWithEmailAndPassword,
   reauthenticateWithCredential,
   EmailAuthProvider,
-  updatePassword as firebaseUpdatePassword, 
+  updatePassword as firebaseUpdatePassword,
 } from 'firebase/auth';
-import { doc, getDoc, collection, query, where, getDocs, setDoc, limit, updateDoc } from 'firebase/firestore';
-import type { User as FirestoreUserType, GradingConfiguration, Sede } from '@/types';
-import { DEFAULT_GRADING_CONFIG, getDefaultStudentGradeStructure } from '@/types'; 
+import { doc, getDoc, collection, query, where, getDocs, setDoc, limit, updateDoc, addDoc, serverTimestamp } from 'firebase/firestore';
+import type { User as FirestoreUserType, GradingConfiguration, Sede, Institution } from '@/types';
+import { DEFAULT_GRADING_CONFIG, getDefaultStudentGradeStructure } from '@/types';
 import { useRouter, usePathname } from 'next/navigation';
 
 interface AuthContextType {
@@ -24,13 +24,14 @@ interface AuthContextType {
   loading: boolean;
   signIn: (identifier: string, pass: string) => Promise<void>;
   signUp: (
-    name: string, 
-    username: string, 
-    email: string, 
-    initialPasswordAsUsername: string, 
+    name: string,
+    username: string,
+    email: string,
+    initialPasswordAsUsername: string,
     role: FirestoreUserType['role'],
     studentDetails?: { level: FirestoreUserType['level'] },
-    staffDetails?: Partial<Pick<FirestoreUserType, 'sedeId' | 'attendanceCode'>>
+    staffDetails?: Partial<Pick<FirestoreUserType, 'sedeId' | 'attendanceCode'>>,
+    institutionName?: string // Added for admin signup
   ) => Promise<void>;
   signOut: () => Promise<void>;
   reauthenticateCurrentUser: (password: string) => Promise<void>;
@@ -71,23 +72,19 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setLoading(true);
       if (user) {
         setAuthUser(user);
-        // All users (students, teachers, admins, etc.) are in the 'users' collection
         const userDocRef = doc(db, 'users', user.uid);
         const userDocSnapshot = await getDoc(userDocRef);
 
         if (userDocSnapshot.exists()) {
-          const userData = { 
-            id: userDocSnapshot.id, 
-            ...userDocSnapshot.data() 
+          const userData = {
+            id: userDocSnapshot.id,
+            ...userDocSnapshot.data()
           } as FirestoreUserType;
           setFirestoreUser(userData);
           console.log(`[AuthContext] User data loaded from 'users' for UID: ${user.uid}`);
         } else {
-          console.warn(`[AuthContext] Firestore document not found in 'users' for authenticated user UID: ${user.uid}. This may happen if the user was deleted from Firestore but not Auth, or if the user is new and the Firestore doc creation is pending or failed.`);
+          console.warn(`[AuthContext] Firestore document not found in 'users' for authenticated user UID: ${user.uid}.`);
           setFirestoreUser(null);
-          // Optional: Sign out if Firestore record is crucial for app functionality.
-          // await firebaseSignOut(auth); 
-          // setAuthUser(null);
         }
       } else {
         setAuthUser(null);
@@ -107,10 +104,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     try {
       if (!identifier.includes('@')) {
         console.log(`[AuthContext] Identifier "${identifier}" is not an email. Searching for username in 'users' collection.`);
-        // All users, including admins, are in the 'users' collection.
         const usernameQuery = query(collection(db, 'users'), where('username', '==', identifier.trim()), limit(1));
         const usernameSnapshot = await getDocs(usernameQuery);
-        
+
         if (!usernameSnapshot.empty) {
           const userDoc = usernameSnapshot.docs[0].data() as FirestoreUserType;
           console.log(`[AuthContext] Found user document for username "${identifier.trim()}" in 'users':`, userDoc);
@@ -119,7 +115,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             console.log(`[AuthContext] Using email "${emailToAuth}" from 'users' for Firebase Auth.`);
           } else {
             console.error(`[AuthContext] User document from 'users' for username "${identifier.trim()}" is missing an email field.`);
-            // Distinguish error message if role is student
             throw new Error(userDoc.role === 'student' ? 'El usuario (estudiante) no tiene un correo electrónico asociado. Contacta al administrador.' : 'El usuario no tiene un correo electrónico asociado. Contacta al administrador.');
           }
         } else {
@@ -129,10 +124,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       } else {
          console.log(`[AuthContext] Identifier "${identifier}" is an email. Proceeding directly with Firebase Auth.`);
       }
-      
+
       await signInWithEmailAndPassword(auth, emailToAuth, pass);
       console.log(`[AuthContext] Firebase Auth successful for email: ${emailToAuth}`);
-      // Firestore user will be set by onAuthStateChanged.
     } catch (error: any) {
       console.error(`[AuthContext] signIn error:`, error.code, error.message, error);
       setLoading(false);
@@ -141,17 +135,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const signUp = async (
-    name: string, 
-    username: string, 
-    email: string, 
-    initialPasswordAsUsername: string, 
+    name: string,
+    username: string,
+    email: string,
+    initialPasswordAsUsername: string,
     role: FirestoreUserType['role'],
     studentDetails?: { level: FirestoreUserType['level'] },
-    staffDetails?: Partial<Pick<FirestoreUserType, 'sedeId' | 'attendanceCode'>>
+    staffDetails?: Partial<Pick<FirestoreUserType, 'sedeId' | 'attendanceCode'>>,
+    institutionName?: string // Added for admin signup
   ) => {
     setLoading(true);
     try {
-      // All users, including admins, are stored in the 'users' collection.
       const targetCollection = 'users';
       console.log(`[AuthContext] signUp: Attempting to create user in '${targetCollection}' collection.`);
 
@@ -159,20 +153,32 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       const usernameSnapshot = await getDocs(usernameQuery);
       if (!usernameSnapshot.empty) {
         const error = new Error("Username already exists in the 'users' collection. Please choose a different one.");
-        (error as any).code = "auth/username-already-exists"; // Custom code for easier handling
+        (error as any).code = "auth/username-already-exists";
         throw error;
       }
-      
+
       const userCredential = await createUserWithEmailAndPassword(auth, email, initialPasswordAsUsername);
       const firebaseUser = userCredential.user;
+      let newInstitutionId: string | null = null;
+
+      if (role === 'admin' && institutionName) {
+        const institutionRef = await addDoc(collection(db, 'institutions'), {
+          name: institutionName,
+          adminUids: [firebaseUser.uid],
+          createdAt: new Date().toISOString(),
+        });
+        newInstitutionId = institutionRef.id;
+        console.log(`[AuthContext] Institution document created with ID: ${newInstitutionId}`);
+      }
 
       const newUserDocData: Omit<FirestoreUserType, 'id'> = {
         uid: firebaseUser.uid,
         name: name,
         username: username.trim(),
-        email: firebaseUser.email || email.trim(), // Ensure email is stored
+        email: firebaseUser.email || email.trim(),
         role: role,
-        requiresPasswordChange: true, // All new users must change their password
+        requiresPasswordChange: true,
+        institutionId: newInstitutionId, // Assign institutionId if admin
         ...(role === 'student' && studentDetails?.level && {
           level: studentDetails.level,
           gradesByLevel: {
@@ -185,19 +191,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             attendanceCode: staffDetails.attendanceCode || null,
         })
       };
-      
+
       await setDoc(doc(db, targetCollection, firebaseUser.uid), newUserDocData);
       console.log(`[AuthContext] User document created in '${targetCollection}' for UID: ${firebaseUser.uid}`);
-      
-      // Set authUser and firestoreUser immediately after successful creation
+
       setAuthUser(firebaseUser);
       setFirestoreUser({ id: firebaseUser.uid, ...newUserDocData } as FirestoreUserType);
 
     } catch (error) {
-      setLoading(false); // Ensure loading is set to false on error
+      setLoading(false);
       throw error;
     }
-    // setLoading(false); // Moved to finally or error block if needed consistently
   };
 
   const signOut = async () => {
@@ -209,7 +213,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       router.push('/login');
     } catch (error) {
       console.error('Sign out error', error);
-      // Potentially set an error state here
     } finally {
       setLoading(false);
     }
@@ -217,30 +220,26 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const reauthenticateCurrentUser = async (password: string) => {
     if (!authUser) throw new Error("User not authenticated.");
-    if (!authUser.email) throw new Error("Authenticated user does not have an email."); // Should not happen if user is auth'd
+    if (!authUser.email) throw new Error("Authenticated user does not have an email.");
     const credential = EmailAuthProvider.credential(authUser.email, password);
     await reauthenticateWithCredential(authUser, credential);
   };
 
   const updateUserPassword = async (currentPasswordFromUser: string, newPasswordFromUser: string) => {
     if (!authUser) throw new Error("No user is currently signed in.");
-    await reauthenticateCurrentUser(currentPasswordFromUser); // Re-authenticate first
-    await firebaseUpdatePassword(authUser, newPasswordFromUser); // Then update
+    await reauthenticateCurrentUser(currentPasswordFromUser);
+    await firebaseUpdatePassword(authUser, newPasswordFromUser);
   };
 
   const clearRequiresPasswordChangeFlag = async () => {
     if (!authUser || !firestoreUser) throw new Error("No user or Firestore user data available.");
     try {
-      // All users are in the 'users' collection
       const userDocRef = doc(db, 'users', authUser.uid);
-      
       const docSnap = await getDoc(userDocRef);
       if (!docSnap.exists()) {
         throw new Error(`User document for ${authUser.uid} not found in 'users' collection when trying to clear password change flag.`);
       }
-      
       await updateDoc(userDocRef, { requiresPasswordChange: false });
-      
       setFirestoreUser(prev => prev ? { ...prev, requiresPasswordChange: false } : null);
       console.log(`[AuthContext] Cleared requiresPasswordChange flag for user ${authUser.uid} in 'users' collection.`);
     } catch (error) {
@@ -249,22 +248,18 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  // Effect for routing logic based on auth state
   useEffect(() => {
     if (!loading) {
-      const isAuthPage = pathname === '/login' || pathname === '/signup'; // Assuming /signup might still be accessible
+      const isAuthPage = pathname === '/login' || pathname === '/signup';
       const isForcePasswordChangePage = pathname === '/force-password-change';
 
       if (authUser && firestoreUser?.requiresPasswordChange && !isForcePasswordChangePage) {
         router.push('/force-password-change');
       } else if (authUser && !firestoreUser?.requiresPasswordChange && (isAuthPage || isForcePasswordChangePage)) {
-        // If user is logged in, doesn't need password change, but is on an auth page or force change page, redirect
         router.push('/dashboard');
       } else if (!authUser && !isAuthPage && !isForcePasswordChangePage) {
-        // If user is not logged in and not on an auth/force-change page, redirect to login
         router.push('/login');
       }
-      // No else needed: if conditions not met, user stays on current page (e.g. authenticated on dashboard, or unauthenticated on login)
     }
   }, [authUser, firestoreUser, loading, pathname, router]);
 
