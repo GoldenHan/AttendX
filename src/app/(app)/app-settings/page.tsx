@@ -13,8 +13,8 @@ import { useToast } from '@/hooks/use-toast';
 import React, { useState, useEffect, useCallback } from 'react';
 import { db } from '@/lib/firebase';
 import { doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore';
-import type { GradingConfiguration, User } from '@/types'; // Import User type
-import { DEFAULT_GRADING_CONFIG } from '@/types'; // Import defaults
+import type { GradingConfiguration, User } from '@/types';
+import { DEFAULT_GRADING_CONFIG } from '@/types';
 
 export default function AppSettingsPage() {
   const { toast } = useToast();
@@ -27,17 +27,14 @@ export default function AppSettingsPage() {
   const [isLoadingGradingConfig, setIsLoadingGradingConfig] = useState(true);
 
   useEffect(() => {
-    // Load theme
-    const storedTheme = typeof window !== 'undefined' ? localStorage.getItem('theme') : null;
-    if (storedTheme === 'dark') {
-      setIsDarkMode(true);
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
+    // Initialize dark mode switch state from document class or localStorage
+    // The RootLayout already applies the theme on initial load.
+    // This useEffect ensures the switch is in sync.
+    const currentThemeIsDark = document.documentElement.classList.contains('dark');
+    setIsDarkMode(currentThemeIsDark);
 
     // Load app name
-    const storedAppName = typeof window !== 'undefined' ? localStorage.getItem('appName') : null;
+    const storedAppName = localStorage.getItem('appName');
     if (storedAppName) {
       setAppName(storedAppName);
     }
@@ -78,27 +75,31 @@ export default function AppSettingsPage() {
 
   const handleThemeToggle = (checked: boolean) => {
     setIsDarkMode(checked);
-    if (typeof window !== 'undefined') {
-      document.documentElement.classList.toggle('dark', checked);
-      localStorage.setItem('theme', checked ? 'dark' : 'light');
-      toast({ title: 'Theme Changed', description: `Switched to ${checked ? 'Dark' : 'Light'} Mode.` });
+    // The RootLayout handles initial load. This function handles user toggle.
+    if (checked) {
+      document.documentElement.classList.add('dark');
+      localStorage.setItem('theme', 'dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+      localStorage.setItem('theme', 'light');
     }
+    toast({ title: 'Theme Changed', description: `Switched to ${checked ? 'Dark' : 'Light'} Mode.` });
   };
 
   const handleAppNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newName = e.target.value;
     setAppName(newName);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('appName', newName);
-    }
+    localStorage.setItem('appName', newName);
   };
 
   const handleExportStudentData = async () => {
     setIsExporting(true);
     toast({ title: 'Iniciando Exportación', description: 'Preparando datos de estudiantes...' });
     try {
-      const studentsSnapshot = await getDocs(collection(db, 'students'));
+      // Assuming 'students' collection stores student users directly
+      const studentsSnapshot = await getDocs(query(collection(db, 'users'), where('role', '==', 'student')));
       const studentsData = studentsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as User));
+
 
       if (studentsData.length === 0) {
         toast({ title: 'Sin Datos', description: 'No hay estudiantes para exportar.', variant: 'default' });
@@ -136,7 +137,7 @@ export default function AppSettingsPage() {
     let processedValue = value;
     if (field === 'numberOfPartials' || field === 'passingGrade' || field === 'maxIndividualActivityScore' || field === 'maxTotalAccumulatedScore' || field === 'maxExamScore') {
         processedValue = Number(value);
-        if (isNaN(processedValue as number)) processedValue = 0; // default to 0 if NaN
+        if (isNaN(processedValue as number)) processedValue = 0; 
          if (field === 'numberOfPartials') processedValue = Math.max(1, Math.min(4, processedValue as number));
          if (field === 'passingGrade') processedValue = Math.max(0, Math.min(100, processedValue as number));
          if (field === 'maxIndividualActivityScore') processedValue = Math.max(0, processedValue as number);
@@ -265,7 +266,7 @@ export default function AppSettingsPage() {
                  <div>
                     <Label className="text-base">Export Student Data</Label>
                     <p className="text-xs text-muted-foreground">
-                        Export all student records (from 'students' collection) to a JSON file.
+                        Export all student records (from 'users' collection, role 'student') to a JSON file.
                     </p>
                  </div>
                 <Button variant="outline" onClick={handleExportStudentData} disabled={isExporting}>
