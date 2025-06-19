@@ -72,7 +72,6 @@ export interface Session {
   classId: string; 
   date: string; // YYYY-MM-DD
   time: string; // HH:MM
-  // qrCodeValue field removed
 }
 
 export interface AttendanceRecord {
@@ -114,6 +113,22 @@ export const DEFAULT_GRADING_CONFIG: GradingConfiguration = {
   maxExamScore: 50,
 };
 
+// Configuration for Class Schedules
+export interface ClassScheduleConfiguration {
+  id?: string; // Typically "currentClassScheduleConfig"
+  scheduleType: 'Saturday' | 'Sunday' | 'Daily' | 'NotSet';
+  startTime: string; // Format HH:MM
+  endTime: string;   // Format HH:MM
+}
+
+// Default values for ClassScheduleConfiguration
+export const DEFAULT_CLASS_SCHEDULE_CONFIG: ClassScheduleConfiguration = {
+  scheduleType: 'NotSet',
+  startTime: '09:00',
+  endTime: '17:00',
+};
+
+
 // Extended User type for grades report pages
 export interface StudentWithDetailedGrades extends User {
   gradesDisplayLevel?: string; 
@@ -135,11 +150,6 @@ export const getDefaultPartialScores = (): PartialScores => ({
 });
 
 // Helper to get default grade structure for a new level
-// This version directly initializes all 4 partials, matching the effective outcome
-// of the original user-provided code but in a more concise way.
-// The `config` parameter is not strictly necessary for this function if the goal is
-// to always produce a structure with all 4 partials initialized. It's kept for signature consistency
-// if it's used elsewhere, but its `numberOfPartials` doesn't change *which* partials are initialized here.
 export const getDefaultStudentGradeStructure = (config: GradingConfiguration): StudentGradeStructure => {
   const structure: StudentGradeStructure = {
     partial1: getDefaultPartialScores(),

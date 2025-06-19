@@ -8,32 +8,32 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
-import { Settings, Download, RefreshCw, Moon, Sun, Save, Loader2, AlertTriangle } from 'lucide-react';
+import { Settings, Download, RefreshCw, Moon, Sun, Save, Loader2, AlertTriangle, Clock } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import React, { useState, useEffect, useCallback } from 'react';
 import { db } from '@/lib/firebase';
-import { doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore';
-import type { GradingConfiguration, User } from '@/types';
-import { DEFAULT_GRADING_CONFIG } from '@/types';
+import { doc, getDoc, setDoc, collection, getDocs, query, where } from 'firebase/firestore';
+import type { GradingConfiguration, User, ClassScheduleConfiguration } from '@/types';
+import { DEFAULT_GRADING_CONFIG, DEFAULT_CLASS_SCHEDULE_CONFIG } from '@/types';
 
 export default function AppSettingsPage() {
   const { toast } = useToast();
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [appName, setAppName] = useState("SERVEX");
   const [isExporting, setIsExporting] = useState(false);
+  
   const [isSavingGradingConfig, setIsSavingGradingConfig] = useState(false);
-
   const [gradingConfig, setGradingConfig] = useState<GradingConfiguration>(DEFAULT_GRADING_CONFIG);
   const [isLoadingGradingConfig, setIsLoadingGradingConfig] = useState(true);
 
+  const [isSavingScheduleConfig, setIsSavingScheduleConfig] = useState(false);
+  const [classScheduleConfig, setClassScheduleConfig] = useState<ClassScheduleConfiguration>(DEFAULT_CLASS_SCHEDULE_CONFIG);
+  const [isLoadingScheduleConfig, setIsLoadingScheduleConfig] = useState(true);
+
+
   useEffect(() => {
-    // Initialize dark mode switch state from document class or localStorage
-    // The RootLayout already applies the theme on initial load.
-    // This useEffect ensures the switch is in sync.
     const currentThemeIsDark = document.documentElement.classList.contains('dark');
     setIsDarkMode(currentThemeIsDark);
-
-    // Load app name
     const storedAppName = localStorage.getItem('appName');
     if (storedAppName) {
       setAppName(storedAppName);
@@ -50,8 +50,8 @@ export default function AppSettingsPage() {
       } else {
         setGradingConfig(DEFAULT_GRADING_CONFIG);
         toast({
-          title: "Configuración por Defecto",
-          description: "No se encontró configuración de calificación. Se cargaron valores por defecto. Por favor, guárdelos.",
+          title: "Configuración por Defecto (Calificación)",
+          description: "No se encontró configuración de calificación. Se cargaron valores por defecto.",
           variant: "default",
         });
       }
@@ -59,8 +59,8 @@ export default function AppSettingsPage() {
       console.error("Error fetching grading configuration:", error);
       setGradingConfig(DEFAULT_GRADING_CONFIG);
       toast({
-        title: "Error al Cargar Configuración",
-        description: "No se pudo cargar la configuración de calificación. Se usan valores por defecto.",
+        title: "Error al Cargar Configuración de Calificación",
+        description: "No se pudo cargar. Se usan valores por defecto.",
         variant: "destructive",
       });
     } finally {
@@ -68,14 +68,42 @@ export default function AppSettingsPage() {
     }
   }, [toast]);
 
+  const fetchClassScheduleConfiguration = useCallback(async () => {
+    setIsLoadingScheduleConfig(true);
+    try {
+      const configDocRef = doc(db, 'appConfiguration', 'currentClassScheduleConfig');
+      const docSnap = await getDoc(configDocRef);
+      if (docSnap.exists()) {
+        setClassScheduleConfig(docSnap.data() as ClassScheduleConfiguration);
+      } else {
+        setClassScheduleConfig(DEFAULT_CLASS_SCHEDULE_CONFIG);
+        toast({
+          title: "Configuración por Defecto (Horario)",
+          description: "No se encontró configuración de horario. Se cargaron valores por defecto.",
+          variant: "default",
+        });
+      }
+    } catch (error) {
+      console.error("Error fetching class schedule configuration:", error);
+      setClassScheduleConfig(DEFAULT_CLASS_SCHEDULE_CONFIG);
+      toast({
+        title: "Error al Cargar Configuración de Horario",
+        description: "No se pudo cargar. Se usan valores por defecto.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoadingScheduleConfig(false);
+    }
+  }, [toast]);
+
   useEffect(() => {
     fetchGradingConfiguration();
-  }, [fetchGradingConfiguration]);
+    fetchClassScheduleConfiguration();
+  }, [fetchGradingConfiguration, fetchClassScheduleConfiguration]);
 
 
   const handleThemeToggle = (checked: boolean) => {
     setIsDarkMode(checked);
-    // The RootLayout handles initial load. This function handles user toggle.
     if (checked) {
       document.documentElement.classList.add('dark');
       localStorage.setItem('theme', 'dark');
@@ -96,10 +124,8 @@ export default function AppSettingsPage() {
     setIsExporting(true);
     toast({ title: 'Iniciando Exportación', description: 'Preparando datos de estudiantes...' });
     try {
-      // Assuming 'students' collection stores student users directly
       const studentsSnapshot = await getDocs(query(collection(db, 'users'), where('role', '==', 'student')));
       const studentsData = studentsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as User));
-
 
       if (studentsData.length === 0) {
         toast({ title: 'Sin Datos', description: 'No hay estudiantes para exportar.', variant: 'default' });
@@ -161,6 +187,24 @@ export default function AppSettingsPage() {
     }
   };
 
+  const handleClassScheduleConfigChange = (field: keyof ClassScheduleConfiguration, value: string) => {
+    setClassScheduleConfig(prev => ({ ...prev, [field]: value }));
+  };
+
+  const handleSaveClassScheduleConfiguration = async () => {
+    setIsSavingScheduleConfig(true);
+    try {
+      const configDocRef = doc(db, 'appConfiguration', 'currentClassScheduleConfig');
+      await setDoc(configDocRef, classScheduleConfig, { merge: true });
+      toast({ title: 'Configuración Guardada', description: 'La configuración de horario de clases ha sido guardada.' });
+    } catch (error) {
+      console.error("Error saving class schedule configuration:", error);
+      toast({ title: 'Error al Guardar', description: 'No se pudo guardar la configuración de horario.', variant: 'destructive' });
+    } finally {
+      setIsSavingScheduleConfig(false);
+    }
+  };
+
 
   return (
     <div className="space-y-8">
@@ -200,6 +244,69 @@ export default function AppSettingsPage() {
               </div>
             </div>
           </div>
+          
+          <div className="space-y-3">
+            <h3 className="text-lg font-medium text-foreground flex items-center gap-2">
+              <Clock className="h-5 w-5 text-primary" />
+              Class Schedule Configuration
+            </h3>
+            <Separator />
+            {isLoadingScheduleConfig ? (
+              <div className="flex items-center justify-center py-6">
+                <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading class schedule configuration...
+              </div>
+            ) : (
+              <div className="space-y-4 pt-2">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="flex flex-col space-y-1.5">
+                    <Label htmlFor="scheduleType">Schedule Type</Label>
+                    <Select
+                      value={classScheduleConfig.scheduleType}
+                      onValueChange={(val) => handleClassScheduleConfigChange('scheduleType', val)}
+                    >
+                      <SelectTrigger id="scheduleType"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="NotSet">Not Set / Varies</SelectItem>
+                        <SelectItem value="Saturday">Sabatino (Saturday Only)</SelectItem>
+                        <SelectItem value="Sunday">Dominical (Sunday Only)</SelectItem>
+                        <SelectItem value="Daily">Diario (Weekdays)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex flex-col space-y-1.5">
+                    <Label htmlFor="startTime">Default Start Time</Label>
+                    <Input 
+                      id="startTime" 
+                      type="time" 
+                      value={classScheduleConfig.startTime} 
+                      onChange={(e) => handleClassScheduleConfigChange('startTime', e.target.value)} 
+                    />
+                  </div>
+                  <div className="flex flex-col space-y-1.5">
+                    <Label htmlFor="endTime">Default End Time</Label>
+                    <Input 
+                      id="endTime" 
+                      type="time" 
+                      value={classScheduleConfig.endTime} 
+                      onChange={(e) => handleClassScheduleConfigChange('endTime', e.target.value)} 
+                    />
+                  </div>
+                </div>
+                <div className="mt-1 p-3 border border-blue-500/50 bg-blue-50 dark:bg-blue-900/30 rounded-md text-sm text-blue-700 dark:text-blue-300 flex items-start gap-2">
+                    <AlertTriangle className="h-5 w-5 mt-0.5 shrink-0 text-blue-500"/>
+                    <div>
+                        <p className="font-medium">Informational Note:</p>
+                        <p>This configuration sets default schedule types and times. Specific groups may override these if group-level scheduling is implemented.</p>
+                    </div>
+                </div>
+                <Button onClick={handleSaveClassScheduleConfiguration} disabled={isSavingScheduleConfig || isLoadingScheduleConfig}>
+                  {isSavingScheduleConfig ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                  Save Schedule Configuration
+                </Button>
+              </div>
+            )}
+          </div>
+
 
           <div className="space-y-3">
             <h3 className="text-lg font-medium text-foreground">Grading System Configuration</h3>
@@ -291,7 +398,7 @@ export default function AppSettingsPage() {
         </CardContent>
       </Card>
       <p className="text-sm text-muted-foreground text-center">
-        Note: Changes to grading configuration are global. Ensure data consistency if modified after grades have been entered.
+        Note: Changes to grading or schedule configuration are global. Ensure data consistency if modified after grades or schedules have been entered.
       </p>
     </div>
   );
