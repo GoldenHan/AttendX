@@ -1,7 +1,7 @@
 
 'use client';
 
-import React, { useState, useEffect } from 'react'; // Added useEffect here
+import React, { useState, useEffect } from 'react'; 
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -47,6 +47,11 @@ export default function ForcePasswordChangePage() {
       confirmNewPassword: '',
     },
   });
+
+  useEffect(() => {
+    // Ensure this page is not in dark mode
+    document.documentElement.classList.remove('dark');
+  }, []);
 
   // Redirect if password change is not required or user not loaded
   useEffect(() => {
@@ -94,8 +99,6 @@ export default function ForcePasswordChangePage() {
     );
   }
   
-  // If for some reason this page is reached but password change isn't required, show a message or redirect.
-  // The useEffect above should handle redirection, but this is a fallback.
   if (firestoreUser && !firestoreUser.requiresPasswordChange && authUser) {
      return (
       <div className="flex min-h-screen flex-col items-center justify-center p-4">

@@ -1,7 +1,7 @@
 
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react'; // Added useEffect
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -19,7 +19,7 @@ import {
   FormMessage,
 } from '@/components/ui/form';
 import { cn } from '@/lib/utils';
-import { auth } from '@/lib/firebase'; // Import auth for sendPasswordResetEmail
+import { auth } from '@/lib/firebase';
 import { sendPasswordResetEmail } from 'firebase/auth';
 import {
   Dialog,
@@ -80,6 +80,11 @@ export default function AuthPage() {
     defaultValues: { email: '' },
   });
 
+  useEffect(() => {
+    // Ensure login page is not in dark mode, overriding RootLayout's initial theme setting
+    document.documentElement.classList.remove('dark');
+  }, []);
+
   const currentLoadingState = authLoading || isSubmitting;
 
   const handleLoginSubmit = async (data: LoginFormValues) => {
@@ -113,10 +118,12 @@ export default function AuthPage() {
         data.adminName, 
         data.adminUsername, 
         data.adminEmail, 
-        data.adminPassword, 
+        data.adminPassword, // For new admin signup, they set their own password directly
         'admin' 
       );
       toast({ title: 'Registro de Administrador Exitoso', description: `Bienvenido/a, ${data.adminName}. Tu institución ha sido registrada.` });
+      setIsSignUpActive(false); // Switch back to login view
+      loginForm.setValue('identifier', data.adminEmail); // Pre-fill login form
     } catch (error: any) {
       let errorMessage = 'Fallo al registrar la nueva institución. Por favor, inténtalo de nuevo.';
       if (error.code === 'auth/email-already-in-use') errorMessage = 'Este correo electrónico ya está en uso.';
@@ -143,9 +150,8 @@ export default function AuthPage() {
       console.error("Forgot password error:", error);
       let errorMessage = "No se pudo enviar el correo de restablecimiento.";
       if (error.code === 'auth/user-not-found') {
-        // Still show a generic success message to avoid user enumeration
          toast({
-            title: 'Email de Restablecimiento Enviado',
+            title: 'Email de Restablecimiento Enviado', // Generic message
             description: `Si existe una cuenta con ${data.email}, se ha enviado un enlace para restablecer la contraseña.`,
           });
           setIsForgotPasswordDialogOpen(false);
@@ -190,7 +196,7 @@ export default function AuthPage() {
               onSubmit={newAdminSignupForm.handleSubmit(handleNewAdminSignupSubmit)}
               className="flex h-full flex-col items-center justify-center space-y-3 bg-card px-10 text-center text-card-foreground"
             >
-              <h1 className="text-3xl font-bold mb-4 text-signup-panel-foreground">Registrar Nueva Institución</h1>
+              <h1 className="text-3xl font-bold mb-4 text-primary">Registrar Nueva Institución</h1>
               <p className="text-xs text-muted-foreground mb-3">Crea la cuenta principal de administrador para tu institución educativa.</p>
               
               <FormField control={newAdminSignupForm.control} name="institutionName" render={({ field }) => (
@@ -265,7 +271,7 @@ export default function AuthPage() {
                   <FormMessage className="text-xs text-left" />
                 </FormItem>
               )}/>
-              <Button type="submit" variant="default" className="mt-3 rounded-full px-8 py-3 text-sm font-semibold uppercase tracking-wider bg-signup-panel text-signup-panel-foreground hover:bg-signup-panel/90" disabled={currentLoadingState}>
+              <Button type="submit" variant="default" className="mt-3 rounded-full px-8 py-3 text-sm font-semibold uppercase tracking-wider bg-primary text-primary-foreground hover:bg-primary/90" disabled={currentLoadingState}>
                 {currentLoadingState && isSignUpActive ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Registrar Institución'}
               </Button>
             </form>
@@ -284,7 +290,7 @@ export default function AuthPage() {
               onSubmit={loginForm.handleSubmit(handleLoginSubmit)}
               className="flex h-full flex-col items-center justify-center space-y-4 bg-card px-10 text-center text-card-foreground"
             >
-              <h1 className="text-3xl font-bold mb-6">Iniciar Sesión</h1>
+              <h1 className="text-3xl font-bold mb-6 text-primary">Iniciar Sesión</h1>
                <FormField
                 control={loginForm.control}
                 name="identifier"
@@ -388,18 +394,18 @@ export default function AuthPage() {
             <div
               className={cn(
                 "overlay-panel overlay-left absolute top-0 flex h-full w-1/2 flex-col items-center justify-center px-10 text-center transform clip-edge-right-gearish",
-                "bg-signup-panel"
+                "bg-primary" 
               )}
             >
-              <h1 className="text-3xl font-bold text-signup-panel-foreground">¡Bienvenido de Nuevo!</h1>
-              <p className="mt-4 text-sm font-light leading-relaxed text-signup-panel-foreground">
-                Si tu institución ya está registrada, por favor inicia sesión aquí.
+              <h1 className="text-3xl font-bold text-primary-foreground">¡Bienvenido de Nuevo!</h1>
+              <p className="mt-4 text-sm font-light leading-relaxed text-primary-foreground">
+                Si ya tienes una cuenta de administrador para tu institución, por favor inicia sesión aquí.
               </p>
               <Button
                 variant="outline"
                 className={cn(
                     "mt-8 rounded-full px-8 py-3 text-sm font-semibold uppercase tracking-wider",
-                    "bg-signup-panel-foreground text-signup-panel-bg hover:bg-signup-panel-foreground/90 focus:bg-signup-panel-foreground/90"
+                    "bg-primary-foreground text-primary hover:bg-primary-foreground/90 focus:bg-primary-foreground/90"
                 )}
                 onClick={() => { loginForm.reset(); setIsSignUpActive(false); }}
                 disabled={currentLoadingState}
@@ -412,7 +418,7 @@ export default function AuthPage() {
             <div
               className={cn(
                 "overlay-panel overlay-right absolute top-0 right-0 flex h-full w-1/2 flex-col items-center justify-center px-10 text-center transform clip-edge-left-gearish",
-                "bg-primary text-primary-foreground"
+                "bg-signup-panel text-signup-panel-foreground" 
               )}
             >
               <h1 className="text-3xl font-bold">¿Nueva Institución?</h1>
@@ -420,8 +426,8 @@ export default function AuthPage() {
                 Registra tu institución educativa y configura la cuenta de administrador principal para comenzar.
               </p>
               <Button
-                variant="secondary"
-                className="mt-8 rounded-full px-8 py-3 text-sm font-semibold uppercase tracking-wider"
+                variant="secondary" 
+                className="mt-8 rounded-full px-8 py-3 text-sm font-semibold uppercase tracking-wider bg-signup-panel-foreground text-signup-panel-bg hover:bg-signup-panel-foreground/90"
                 onClick={() => { newAdminSignupForm.reset(); setIsSignUpActive(true); }}
                 disabled={currentLoadingState}
               >
@@ -449,5 +455,3 @@ export default function AuthPage() {
     </div>
   );
 }
-
-    
