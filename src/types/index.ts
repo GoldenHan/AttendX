@@ -135,16 +135,18 @@ export const getDefaultPartialScores = (): PartialScores => ({
 });
 
 // Helper to get default grade structure for a new level
+// This version directly initializes all 4 partials, matching the effective outcome
+// of the original user-provided code but in a more concise way.
+// The `config` parameter is not strictly necessary for this function if the goal is
+// to always produce a structure with all 4 partials initialized. It's kept for signature consistency
+// if it's used elsewhere, but its `numberOfPartials` doesn't change *which* partials are initialized here.
 export const getDefaultStudentGradeStructure = (config: GradingConfiguration): StudentGradeStructure => {
-  const structure: StudentGradeStructure = {};
-  for (let i = 1; i <= config.numberOfPartials; i++) {
-    structure[`partial${i as 1 | 2 | 3 | 4}` as keyof StudentGradeStructure] = getDefaultPartialScores();
-  }
-  for (let i = config.numberOfPartials + 1; i <= 4; i++) {
-     if (!structure[`partial${i as 1 | 2 | 3 | 4}` as keyof StudentGradeStructure]) {
-        structure[`partial${i as 1 | 2 | 3 | 4}` as keyof StudentGradeStructure] = getDefaultPartialScores();
-     }
-  }
-  structure.certificateCode = '';
+  const structure: StudentGradeStructure = {
+    partial1: getDefaultPartialScores(),
+    partial2: getDefaultPartialScores(),
+    partial3: getDefaultPartialScores(),
+    partial4: getDefaultPartialScores(),
+    certificateCode: '',
+  };
   return structure;
 };
