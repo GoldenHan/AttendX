@@ -19,7 +19,7 @@ import { DEFAULT_GRADING_CONFIG, DEFAULT_CLASS_SCHEDULE_CONFIG } from '@/types';
 export default function AppSettingsPage() {
   const { toast } = useToast();
   const [isDarkMode, setIsDarkMode] = useState(false);
-  const [appName, setAppName] = useState("SERVEX");
+  const [appName, setAppName] = useState("AttendX"); // Changed from SERVEX to AttendX
   const [isExporting, setIsExporting] = useState(false);
   
   const [isSavingGradingConfig, setIsSavingGradingConfig] = useState(false);
@@ -32,13 +32,21 @@ export default function AppSettingsPage() {
 
 
   useEffect(() => {
-    const currentThemeIsDark = document.documentElement.classList.contains('dark');
-    setIsDarkMode(currentThemeIsDark);
+    // Apply theme from localStorage on mount for this page
+    const storedTheme = localStorage.getItem('theme');
+    if (storedTheme === 'dark') {
+      document.documentElement.classList.add('dark');
+      setIsDarkMode(true);
+    } else {
+      document.documentElement.classList.remove('dark');
+      setIsDarkMode(false);
+    }
     const storedAppName = localStorage.getItem('appName');
     if (storedAppName) {
       setAppName(storedAppName);
     }
   }, []);
+
 
   const fetchGradingConfiguration = useCallback(async () => {
     setIsLoadingGradingConfig(true);
@@ -50,8 +58,8 @@ export default function AppSettingsPage() {
       } else {
         setGradingConfig(DEFAULT_GRADING_CONFIG);
         toast({
-          title: "Configuración por Defecto (Calificación)",
-          description: "No se encontró configuración de calificación. Se cargaron valores por defecto.",
+          title: "Default Grading Config",
+          description: "No grading configuration found. Loaded default values.",
           variant: "default",
         });
       }
@@ -59,8 +67,8 @@ export default function AppSettingsPage() {
       console.error("Error fetching grading configuration:", error);
       setGradingConfig(DEFAULT_GRADING_CONFIG);
       toast({
-        title: "Error al Cargar Configuración de Calificación",
-        description: "No se pudo cargar. Se usan valores por defecto.",
+        title: "Error Loading Grading Config",
+        description: "Could not load. Using default values.",
         variant: "destructive",
       });
     } finally {
@@ -78,8 +86,8 @@ export default function AppSettingsPage() {
       } else {
         setClassScheduleConfig(DEFAULT_CLASS_SCHEDULE_CONFIG);
         toast({
-          title: "Configuración por Defecto (Horario)",
-          description: "No se encontró configuración de horario. Se cargaron valores por defecto.",
+          title: "Default Schedule Config",
+          description: "No schedule configuration found. Loaded default values.",
           variant: "default",
         });
       }
@@ -87,8 +95,8 @@ export default function AppSettingsPage() {
       console.error("Error fetching class schedule configuration:", error);
       setClassScheduleConfig(DEFAULT_CLASS_SCHEDULE_CONFIG);
       toast({
-        title: "Error al Cargar Configuración de Horario",
-        description: "No se pudo cargar. Se usan valores por defecto.",
+        title: "Error Loading Schedule Config",
+        description: "Could not load. Using default values.",
         variant: "destructive",
       });
     } finally {
@@ -122,13 +130,13 @@ export default function AppSettingsPage() {
 
   const handleExportStudentData = async () => {
     setIsExporting(true);
-    toast({ title: 'Iniciando Exportación', description: 'Preparando datos de estudiantes...' });
+    toast({ title: 'Initiating Export', description: 'Preparing student data...' });
     try {
       const studentsSnapshot = await getDocs(query(collection(db, 'users'), where('role', '==', 'student')));
       const studentsData = studentsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as User));
 
       if (studentsData.length === 0) {
-        toast({ title: 'Sin Datos', description: 'No hay estudiantes para exportar.', variant: 'default' });
+        toast({ title: 'No Data', description: 'No students to export.', variant: 'default' });
         return;
       }
 
@@ -143,17 +151,17 @@ export default function AppSettingsPage() {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
 
-      toast({ title: 'Exportación Completa', description: 'Datos de estudiantes descargados como JSON.' });
+      toast({ title: 'Export Complete', description: 'Student data downloaded as JSON.' });
     } catch (error) {
       console.error("Error exporting student data:", error);
-      toast({ title: 'Exportación Fallida', description: 'No se pudieron exportar los datos.', variant: 'destructive' });
+      toast({ title: 'Export Failed', description: 'Could not export data.', variant: 'destructive' });
     } finally {
       setIsExporting(false);
     }
   };
 
   const handleRefreshData = () => {
-    toast({ title: 'Refrescando Datos', description: 'La página se recargará para obtener los datos más recientes.' });
+    toast({ title: 'Refreshing Data', description: 'The page will reload to fetch the latest data.' });
     setTimeout(() => {
       window.location.reload();
     }, 1500);
@@ -178,10 +186,10 @@ export default function AppSettingsPage() {
     try {
       const configDocRef = doc(db, 'appConfiguration', 'currentGradingConfig');
       await setDoc(configDocRef, gradingConfig, { merge: true });
-      toast({ title: 'Configuración Guardada', description: 'La configuración de calificación ha sido guardada.' });
+      toast({ title: 'Configuration Saved', description: 'Grading configuration has been saved.' });
     } catch (error) {
       console.error("Error saving grading configuration:", error);
-      toast({ title: 'Error al Guardar', description: 'No se pudo guardar la configuración de calificación.', variant: 'destructive' });
+      toast({ title: 'Save Error', description: 'Could not save grading configuration.', variant: 'destructive' });
     } finally {
       setIsSavingGradingConfig(false);
     }
@@ -196,10 +204,10 @@ export default function AppSettingsPage() {
     try {
       const configDocRef = doc(db, 'appConfiguration', 'currentClassScheduleConfig');
       await setDoc(configDocRef, classScheduleConfig, { merge: true });
-      toast({ title: 'Configuración Guardada', description: 'La configuración de horario de clases ha sido guardada.' });
+      toast({ title: 'Configuration Saved', description: 'Class schedule configuration has been saved.' });
     } catch (error) {
       console.error("Error saving class schedule configuration:", error);
-      toast({ title: 'Error al Guardar', description: 'No se pudo guardar la configuración de horario.', variant: 'destructive' });
+      toast({ title: 'Save Error', description: 'Could not save schedule configuration.', variant: 'destructive' });
     } finally {
       setIsSavingScheduleConfig(false);
     }
@@ -267,10 +275,10 @@ export default function AppSettingsPage() {
                       <SelectTrigger id="scheduleType"><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="NotSet">Not Set / Varies</SelectItem>
-                        <SelectItem value="Saturday">Sabatino (Saturday Only)</SelectItem>
-                        <SelectItem value="Sunday">Dominical (Sunday Only)</SelectItem>
-                        <SelectItem value="SaturdayAndSunday">Ambos Fines de Semana (Sábado y Domingo)</SelectItem>
-                        <SelectItem value="Daily">Diario (Weekdays)</SelectItem>
+                        <SelectItem value="Saturday">Saturday Only</SelectItem>
+                        <SelectItem value="Sunday">Sunday Only</SelectItem>
+                        <SelectItem value="SaturdayAndSunday">Both Weekends (Saturday and Sunday)</SelectItem>
+                        <SelectItem value="Daily">Daily (Weekdays)</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
