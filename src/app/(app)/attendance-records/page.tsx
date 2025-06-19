@@ -1,7 +1,7 @@
 
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Table,
   TableBody,
@@ -17,7 +17,7 @@ import { Label } from '@/components/ui/label';
 import { Pencil, Trash2, Download, Loader2, MessageSquareText } from 'lucide-react';
 import type { AttendanceRecord as AttendanceRecordType, User, Session, Group } from '@/types';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, deleteDoc, doc } from 'firebase/firestore';
+import { collection, getDocs, deleteDoc, doc, query, where } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import {
   Tooltip,
@@ -25,6 +25,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { useAuth } from '@/contexts/AuthContext';
 
 export default function AttendanceRecordsPage() {
   const [allRecords, setAllRecords] = useState<AttendanceRecordType[]>([]);
@@ -34,15 +35,27 @@ export default function AttendanceRecordsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [selectedGroupId, setSelectedGroupId] = useState<string | 'all'>('all');
   const { toast } = useToast();
+  const { firestoreUser } = useAuth();
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
+    if (!firestoreUser?.institutionId) {
+      setIsLoading(false);
+      toast({ title: "Error", description: "No institution context found.", variant: "destructive" });
+      return;
+    }
     setIsLoading(true);
     try {
+      const institutionId = firestoreUser.institutionId;
+      const recordsQuery = query(collection(db, 'attendanceRecords'), where('institutionId', '==', institutionId));
+      const usersQuery = query(collection(db, 'users'), where('institutionId', '==', institutionId)); // All users in institution
+      const sessionsQuery = query(collection(db, 'sessions'), where('institutionId', '==', institutionId));
+      const groupsQuery = query(collection(db, 'groups'), where('institutionId', '==', institutionId));
+
       const [recordsSnapshot, usersSnapshot, sessionsSnapshot, groupsSnapshot] = await Promise.all([
-        getDocs(collection(db, 'attendanceRecords')),
-        getDocs(collection(db, 'users')),
-        getDocs(collection(db, 'sessions')),
-        getDocs(collection(db, 'groups')),
+        getDocs(recordsQuery),
+        getDocs(usersQuery),
+        getDocs(sessionsQuery),
+        getDocs(groupsQuery),
       ]);
 
       setAllRecords(recordsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AttendanceRecordType)));
@@ -55,14 +68,20 @@ export default function AttendanceRecordsPage() {
       toast({ title: 'Error fetching records', description: 'Could not load data from Firestore.', variant: 'destructive' });
     }
     setIsLoading(false);
-  };
+  }, [toast, firestoreUser]);
 
   useEffect(() => {
     fetchData();
-  }, [toast]);
+  }, [fetchData]);
 
   const handleDeleteRecord = async (recordId: string) => {
     if (!confirm('Are you sure you want to delete this record?')) return;
+    // Add institution check before deleting if necessary, though records are already filtered
+    const recordToDelete = allRecords.find(r => r.id === recordId);
+    if (recordToDelete?.institutionId !== firestoreUser?.institutionId) {
+        toast({ title: 'Permission Denied', description: 'Cannot delete record from another institution.', variant: 'destructive' });
+        return;
+    }
     try {
       await deleteDoc(doc(db, 'attendanceRecords', recordId));
       setAllRecords(prevRecords => prevRecords.filter(r => r.id !== recordId));
@@ -93,7 +112,7 @@ export default function AttendanceRecordsPage() {
     return allRecords.filter(record => groupSessionIds.includes(record.sessionId));
   }, [allRecords, sessions, selectedGroupId]);
   
-  if (isLoading) {
+  if (isLoading || !firestoreUser) {
     return (
       <Card>
         <CardHeader>
@@ -102,7 +121,7 @@ export default function AttendanceRecordsPage() {
         </CardHeader>
         <CardContent className="flex items-center justify-center py-10">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
-           <p className="ml-2">Loading records...</p>
+           <p className="ml-2">{!firestoreUser ? "Verifying user..." : "Loading records..."}</p>
         </CardContent>
       </Card>
     );
@@ -115,11 +134,11 @@ export default function AttendanceRecordsPage() {
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div>
               <CardTitle>Attendance Records</CardTitle>
-              <CardDescription>View and manage logged attendance records. Filter by group.</CardDescription>
+              <CardDescription>View and manage logged attendance records for your institution. Filter by group.</CardDescription>
             </div>
             <div className="w-full sm:w-auto min-w-[200px]">
               <Label htmlFor="group-filter" className="sr-only">Filter by Group</Label>
-              <Select value={selectedGroupId} onValueChange={setSelectedGroupId} disabled={isLoading}>
+              <Select value={selectedGroupId} onValueChange={setSelectedGroupId} disabled={isLoading || groups.length === 0}>
                 <SelectTrigger id="group-filter">
                   <SelectValue placeholder="Select a group" />
                 </SelectTrigger>
@@ -134,12 +153,6 @@ export default function AttendanceRecordsPage() {
               </Select>
             </div>
           </div>
-          {/* TODO: Implement Export CSV
-          <Button variant="outline" size="sm" className="ml-auto gap-1.5 text-sm">
-            <Download className="size-3.5" />
-            Export CSV (Coming Soon)
-          </Button>
-          */}
         </CardHeader>
         <CardContent>
           <Table>
@@ -162,7 +175,7 @@ export default function AttendanceRecordsPage() {
                     <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
                       record.status === 'present' ? 'bg-green-500/20 text-green-700 dark:text-green-400' :
                       record.status === 'absent' ? 'bg-red-500/20 text-red-700 dark:text-red-400' :
-                      'bg-yellow-500/20 text-yellow-700 dark:text-yellow-400' // Assuming 'late' might be a status
+                      'bg-yellow-500/20 text-yellow-700 dark:text-yellow-400' 
                     }`}>
                       {record.status.charAt(0).toUpperCase() + record.status.slice(1)}
                     </span>
@@ -185,12 +198,6 @@ export default function AttendanceRecordsPage() {
                     )}
                   </TableCell>
                   <TableCell>
-                    {/* TODO: Implement Edit Record
-                    <Button variant="ghost" size="icon" className="mr-2" onClick={() => alert('Edit not implemented yet.')}>
-                      <Pencil className="h-4 w-4" />
-                      <span className="sr-only">Edit</span>
-                    </Button>
-                    */}
                     <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => handleDeleteRecord(record.id)}>
                       <Trash2 className="h-4 w-4" />
                       <span className="sr-only">Delete</span>
@@ -200,7 +207,7 @@ export default function AttendanceRecordsPage() {
               )) : (
                 <TableRow>
                   <TableCell colSpan={6} className="text-center">
-                    {selectedGroupId === 'all' ? 'No attendance records found.' : 'No attendance records found for the selected group.'}
+                    {selectedGroupId === 'all' ? 'No attendance records found for your institution.' : 'No attendance records found for the selected group.'}
                   </TableCell>
                 </TableRow>
               )}
@@ -211,3 +218,4 @@ export default function AttendanceRecordsPage() {
     </TooltipProvider>
   );
 }
+

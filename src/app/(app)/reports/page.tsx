@@ -1,7 +1,7 @@
 
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Table,
   TableBody,
@@ -16,7 +16,7 @@ import type { User, AttendanceRecord as AttendanceRecordType, Group, Session, Cl
 import { DEFAULT_CLASS_SCHEDULE_CONFIG } from '@/types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, query, doc, getDoc } from 'firebase/firestore';
+import { collection, getDocs, query, doc, getDoc, where } from 'firebase/firestore';
 import { Loader2, CalendarIcon } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Label } from '@/components/ui/label';
@@ -25,6 +25,7 @@ import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
+import { useAuth } from '@/contexts/AuthContext';
 
 
 interface UserAttendanceStats {
@@ -53,53 +54,68 @@ export default function AttendanceReportsPage() {
 
   const [isLoadingData, setIsLoadingData] = useState(true);
   const { toast } = useToast();
+  const { firestoreUser } = useAuth();
 
-  useEffect(() => {
-    const fetchData = async () => {
-      setIsLoadingData(true);
-      try {
-        const studentQuery = query(collection(db, 'students'));
-        
-        const [
-          studentsSnapshot, 
-          attendanceSnapshot, 
-          groupsSnapshot, 
-          sessionsSnapshot,
-          scheduleConfigSnap
-        ] = await Promise.all([
-          getDocs(studentQuery),
-          getDocs(collection(db, 'attendanceRecords')),
-          getDocs(collection(db, 'groups')),
-          getDocs(collection(db, 'sessions')),
-          getDoc(doc(db, 'appConfiguration', 'currentClassScheduleConfig'))
-        ]);
+  const fetchData = useCallback(async () => {
+    if (!firestoreUser?.institutionId) {
+      setIsLoadingData(false);
+      toast({ title: "Error", description: "No institution context found.", variant: "destructive" });
+      return;
+    }
+    setIsLoadingData(true);
+    try {
+      const institutionId = firestoreUser.institutionId;
 
-        setAllStudents(studentsSnapshot.docs.map(d => ({ id: d.id, ...d.data() } as User)));
-        setAllAttendanceRecords(attendanceSnapshot.docs.map(d => ({ id: d.id, ...d.data() } as AttendanceRecordType)));
-        setAllGroups(groupsSnapshot.docs.map(d => ({ id: d.id, ...d.data() } as Group)));
-        setAllSessions(sessionsSnapshot.docs.map(d => ({ id: d.id, ...d.data() } as Session)));
+      const studentQuery = query(collection(db, 'users'), where('role', '==', 'student'), where('institutionId', '==', institutionId));
+      const attendanceQuery = query(collection(db, 'attendanceRecords'), where('institutionId', '==', institutionId));
+      const groupsQuery = query(collection(db, 'groups'), where('institutionId', '==', institutionId));
+      const sessionsQuery = query(collection(db, 'sessions'), where('institutionId', '==', institutionId));
+      // Assuming schedule config is global or becomes institution-specific later
+      const scheduleConfigPromise = getDoc(doc(db, 'appConfiguration', 'currentClassScheduleConfig')); 
+      
+      const [
+        studentsSnapshot, 
+        attendanceSnapshot, 
+        groupsSnapshot, 
+        sessionsSnapshot,
+        scheduleConfigSnap
+      ] = await Promise.all([
+        getDocs(studentQuery),
+        getDocs(attendanceQuery),
+        getDocs(groupsQuery),
+        getDocs(sessionsQuery),
+        scheduleConfigPromise
+      ]);
 
-        if (scheduleConfigSnap.exists()) {
-          setClassScheduleConfig(scheduleConfigSnap.data() as ClassScheduleConfiguration);
-        } else {
-          setClassScheduleConfig(DEFAULT_CLASS_SCHEDULE_CONFIG);
-        }
+      setAllStudents(studentsSnapshot.docs.map(d => ({ id: d.id, ...d.data() } as User)));
+      setAllAttendanceRecords(attendanceSnapshot.docs.map(d => ({ id: d.id, ...d.data() } as AttendanceRecordType)));
+      setAllGroups(groupsSnapshot.docs.map(d => ({ id: d.id, ...d.data() } as Group)));
+      setAllSessions(sessionsSnapshot.docs.map(d => ({ id: d.id, ...d.data() } as Session)));
 
-      } catch (error) {
-        console.error("Error fetching report data:", error);
-        toast({ title: 'Error fetching data', description: 'Could not load data for reports.', variant: 'destructive' });
+      if (scheduleConfigSnap.exists()) {
+        setClassScheduleConfig(scheduleConfigSnap.data() as ClassScheduleConfiguration);
+      } else {
         setClassScheduleConfig(DEFAULT_CLASS_SCHEDULE_CONFIG);
       }
-      setIsLoadingData(false);
-    };
+
+    } catch (error) {
+      console.error("Error fetching report data:", error);
+      toast({ title: 'Error fetching data', description: 'Could not load data for reports.', variant: 'destructive' });
+      setClassScheduleConfig(DEFAULT_CLASS_SCHEDULE_CONFIG);
+    }
+    setIsLoadingData(false);
+  }, [toast, firestoreUser]);
+
+  useEffect(() => {
     fetchData();
-  }, [toast]);
+  }, [fetchData]);
+
 
   const userAttendanceStats = useMemo((): UserAttendanceStats[] => {
-    if (isLoadingData) return [];
+    if (isLoadingData || !firestoreUser) return [];
 
-    let relevantRecords = allAttendanceRecords;
-    let relevantSessionIds = new Set(allSessions.map(s => s.id));
+    let relevantRecords = allAttendanceRecords; // Already institution-scoped
+    let relevantSessionIds = new Set(allSessions.map(s => s.id)); // Already institution-scoped
 
     if (reportType === 'customRange' && customStartDate && customEndDate) {
       const rangeStart = new Date(customStartDate);
@@ -109,7 +125,6 @@ export default function AttendanceReportsPage() {
 
       const rangeSessionIdsFiltered = new Set<string>();
       allSessions.forEach(session => {
-        // Assuming session.date is "YYYY-MM-DD"
         const sessionDateParts = session.date.split('-').map(Number);
         const sessionDate = new Date(sessionDateParts[0], sessionDateParts[1] - 1, sessionDateParts[2]);
         if (sessionDate >= rangeStart && sessionDate <= rangeEnd) {
@@ -119,9 +134,11 @@ export default function AttendanceReportsPage() {
       relevantSessionIds = rangeSessionIdsFiltered;
       relevantRecords = allAttendanceRecords.filter(r => relevantSessionIds.has(r.sessionId));
     }
-    // If 'overall', relevantRecords is allAttendanceRecords, and relevantSessionIds covers all sessions
+    
+    // Filter students for the current institution, in case allStudents was not pre-filtered (though it should be by fetchData)
+    const institutionStudents = allStudents.filter(s => s.institutionId === firestoreUser.institutionId);
 
-    return allStudents.map(student => {
+    return institutionStudents.map(student => {
       const studentRecords = relevantRecords.filter(r => r.userId === student.id);
       const present = studentRecords.filter(r => r.status === 'present').length;
       const absent = studentRecords.filter(r => r.status === 'absent').length;
@@ -129,10 +146,8 @@ export default function AttendanceReportsPage() {
       
       const totalAttendedOrLate = present + late;
       
-      // Calculate total SESSIONS the student was expected in for the given period, based on *relevantSessionIds*
-      // This requires knowing which groups the student belongs to and then which of *those groups'* sessions fall into *relevantSessionIds*
       let actualExpectedSessionsForStudent = 0;
-      const studentGroup = allGroups.find(g => g.studentIds.includes(student.id)); // Simplified: assumes student in one group
+      const studentGroup = allGroups.find(g => Array.isArray(g.studentIds) && g.studentIds.includes(student.id));
       if (studentGroup) {
         allSessions.forEach(session => {
             if (session.classId === studentGroup.id && relevantSessionIds.has(session.id)) {
@@ -140,8 +155,7 @@ export default function AttendanceReportsPage() {
             }
         });
       }
-      // If actualExpectedSessionsForStudent is 0 (e.g., student not in any group, or group has no relevant sessions), rate is 0 or N/A
-      // Using totalSessionsWithRecord for rate if actualExpected is problematic or 0.
+      
       const uniqueSessionIdsForStudentRecords = new Set(studentRecords.map(r => r.sessionId));
       const totalSessionsWithRecord = uniqueSessionIdsForStudentRecords.size;
 
@@ -150,29 +164,30 @@ export default function AttendanceReportsPage() {
       return {
         userId: student.id,
         userName: student.name,
-        totalSessionsWithRecord: totalSessionsWithRecord, // Sessions they had A record for
-        // totalExpectedSessions: actualExpectedSessionsForStudent, // For potential future display
+        totalSessionsWithRecord: totalSessionsWithRecord, 
         present,
         absent,
         late,
         attendanceRate: baseForRate > 0 ? (totalAttendedOrLate / baseForRate) * 100 : 0,
       };
     });
-  }, [allStudents, allAttendanceRecords, allSessions, allGroups, isLoadingData, reportType, customStartDate, customEndDate]);
+  }, [allStudents, allAttendanceRecords, allSessions, allGroups, isLoadingData, reportType, customStartDate, customEndDate, firestoreUser]);
 
   const studentsForFilterDropdown = useMemo(() => {
+    if (!firestoreUser) return [];
+    const institutionStudents = allStudents.filter(s => s.institutionId === firestoreUser.institutionId);
     if (selectedGroupId === 'all') {
-      return allStudents;
+      return institutionStudents;
     }
-    const group = allGroups.find(g => g.id === selectedGroupId);
+    const group = allGroups.find(g => g.id === selectedGroupId && g.institutionId === firestoreUser.institutionId);
     if (group?.studentIds) {
-      return allStudents.filter(s => group.studentIds.includes(s.id));
+      return institutionStudents.filter(s => group.studentIds.includes(s.id));
     }
     return [];
-  }, [allStudents, allGroups, selectedGroupId]);
+  }, [allStudents, allGroups, selectedGroupId, firestoreUser]);
 
   const displayedStats = useMemo(() => {
-    let statsToDisplay = userAttendanceStats;
+    let statsToDisplay = userAttendanceStats; // Already institution-scoped from calculation
 
     if (selectedGroupId !== 'all') {
       const group = allGroups.find(g => g.id === selectedGroupId);
@@ -194,7 +209,7 @@ export default function AttendanceReportsPage() {
     Absent: stat.absent,
   }));
   
-  if (isLoadingData) {
+  if (isLoadingData || !firestoreUser) {
     return (
       <Card>
         <CardHeader>
@@ -203,7 +218,7 @@ export default function AttendanceReportsPage() {
         </CardHeader>
         <CardContent className="flex items-center justify-center py-10">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
-          <p className="ml-2">Loading report data...</p>
+          <p className="ml-2">{!firestoreUser ? "Verifying user..." : "Loading report data..."}</p>
         </CardContent>
       </Card>
     );
@@ -220,8 +235,8 @@ export default function AttendanceReportsPage() {
         <CardHeader>
           <CardTitle>Attendance Reports</CardTitle>
           <CardDescription>
-            View attendance statistics {reportDateDescription}. Filter by report type, group, and then by student.
-            The "Attendance Rate" is based on sessions where the student has at least one record (present, absent, or late) or expected sessions for the period if calculable.
+            View attendance statistics for your institution {reportDateDescription}. Filter by report type, group, and then by student.
+            The "Attendance Rate" is based on sessions where the student has at least one record or expected sessions.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -255,6 +270,7 @@ export default function AttendanceReportsPage() {
                   setSelectedGroupId(value);
                   setSelectedUserId('all'); 
                 }}
+                disabled={allGroups.length === 0}
               >
                 <SelectTrigger id="group-filter" className="w-full">
                   <SelectValue placeholder="Select a group" />
@@ -279,7 +295,7 @@ export default function AttendanceReportsPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">
-                    {selectedGroupId === 'all' ? 'All Students (Global)' : 
+                    {selectedGroupId === 'all' ? 'All Students in Institution' : 
                      studentsForFilterDropdown.length > 0 ? 'All Students in Group' : 'No students in group'}
                   </SelectItem>
                   {studentsForFilterDropdown.map(student => (
@@ -373,8 +389,8 @@ export default function AttendanceReportsPage() {
                  <TableRow>
                     <TableCell colSpan={6} className="text-center h-24">
                     {selectedGroupId !== 'all' && studentsForFilterDropdown.length === 0 
-                        ? 'No students found in the selected group.'
-                        : 'No attendance data available for the current selection.'
+                        ? 'No students found in the selected group for your institution.'
+                        : 'No attendance data available for the current selection in your institution.'
                     }
                     </TableCell>
                 </TableRow>
@@ -389,7 +405,7 @@ export default function AttendanceReportsPage() {
           <CardHeader>
             <CardTitle>Attendance Overview Chart</CardTitle>
             <CardDescription>
-                Visual representation of student attendance based on current filters {reportDateDescription}.
+                Visual representation of student attendance for your institution based on current filters {reportDateDescription}.
             </CardDescription>
           </CardHeader>
           <CardContent>
