@@ -91,7 +91,7 @@ export default function StaffManagementPage() {
   const [emailCheckMessage, setEmailCheckMessage] = useState<string | null>(null);
 
   const { toast } = useToast();
-  const { reauthenticateCurrentUser, authUser } = useAuth(); // Removed signUpUser as it's not used here directly for admin creation
+  const { reauthenticateCurrentUser, authUser } = useAuth();
 
   const form = useForm<StaffFormValues>({
     resolver: zodResolver(staffFormSchema),
@@ -199,10 +199,8 @@ export default function StaffManagementPage() {
         return;
     }
      if (!editingStaff && emailCheckStatus === 'exists') {
-        // This is a warning now, not a hard block, as password reset can target existing Auth accounts.
         toast({ title: 'Email Exists in Firestore', description: `A user record with email ${data.email} already exists. Proceeding will associate this record with that email for password resets.`, variant: 'default' });
     }
-
 
     const firestoreUserData: Omit<User, 'id' | 'uid' | 'gradesByLevel' | 'requiresPasswordChange'> & { id?: string, uid?: string, requiresPasswordChange?: boolean } = {
       name: data.name,
@@ -214,46 +212,43 @@ export default function StaffManagementPage() {
       attendanceCode: (data.role === 'teacher' || data.role === 'admin' || data.role === 'supervisor') ? (data.attendanceCode || null) : null,
       sedeId: (data.role === 'teacher' || data.role === 'supervisor' || data.role === 'admin') ? (data.sedeId === UNASSIGN_VALUE_KEY ? null : data.sedeId || null) : null,
     };
+    // For new staff, requiresPasswordChange should be undefined/false as they set password via email link
+    if (!editingStaff) {
+        firestoreUserData.requiresPasswordChange = false;
+    }
+
 
     let staffMemberId: string | undefined = editingStaff?.id;
 
     try {
       if (editingStaff) {
         const staffRef = doc(db, 'users', editingStaff.id);
-        // Email and username are critical for Auth, avoid changing them directly here for existing users
-        // to prevent de-sync with Firebase Auth. Password reset is the safer path.
         const { email, username, ...updateData } = firestoreUserData;
         await updateDoc(staffRef, updateData);
         staffMemberId = editingStaff.id;
         toast({ title: 'Staff User Updated', description: `${data.name}'s Firestore record updated successfully.` });
-      } else { // Creating new staff Firestore record
+      } else { 
         if (!data.username || !data.email) {
             toast({ title: 'Error', description: 'Username and Email are required for new staff.', variant: 'destructive'});
             setIsSubmitting(false);
             return;
         }
-        // Create only Firestore document. Auth account setup via password reset.
-        // We need a UID. For simplicity, let Firestore generate it.
-        // If we needed to predict UID for Auth, this would be more complex.
         const newStaffDocRef = await addDoc(collection(db, 'users'), {
           ...firestoreUserData,
-          requiresPasswordChange: false, // Password will be set via reset link
         });
         staffMemberId = newStaffDocRef.id;
-        // Update the document with its own ID as 'uid' if needed, or ensure queries use Firestore ID.
-        // For consistency with how AuthContext handles users, ensure 'uid' field exists.
-        // If 'id' from Firestore is the source of truth, then 'uid' might be redundant here.
-        // However, if linking to Auth later, Auth UID will be the key.
-        // For now, let's assume 'id' (Firestore doc ID) is sufficient for this Firestore-only record.
-        // If linking to an Auth account created via password reset, the Auth UID might differ from this Firestore ID.
-        // This is a simplification for now. Ideally, Admin SDK would create Auth user and return UID.
+        // Associate this Firestore ID with the UID field for consistency if needed, though Auth UID is the key.
+        // Since no Auth user is created here, this UID might be different or absent from what Auth uses.
+        // For now, setting UID to the Firestore doc ID for internal consistency within the 'users' table.
+        await updateDoc(newStaffDocRef, { uid: newStaffDocRef.id });
+
+
         toast({
           title: 'Staff User Record Added',
           description: `${data.name}'s record added to Firestore. Use 'Send Password Reset' to enable their login.`
         });
       }
 
-      // Handle Group Assignment for Teachers
       if (staffMemberId && data.role === 'teacher') {
         const newlySelectedGroupId = data.assignedGroupId === UNASSIGN_VALUE_KEY ? null : data.assignedGroupId || null;
         const previouslyAssignedGroup = allGroups.find(g => g.teacherId === staffMemberId);
@@ -278,18 +273,15 @@ export default function StaffManagementPage() {
             batch.update(newGroupRef, { teacherId: staffMemberId });
           }
           await batch.commit();
-          // toast({ title: 'Group Assignment Updated', description: `${data.name}'s group assignment has been updated.` });
         }
       } else if (staffMemberId && data.role !== 'teacher') {
         const previouslyAssignedGroup = allGroups.find(g => g.teacherId === staffMemberId);
         if (previouslyAssignedGroup) {
           const groupRef = doc(db, 'groups', previouslyAssignedGroup.id);
           await updateDoc(groupRef, { teacherId: null });
-          // toast({ title: 'Group Unassigned', description: `${data.name} unassigned from group ${previouslyAssignedGroup.name} due to role change.` });
         }
       }
 
-      // Handle Sede Assignment
       if (staffMemberId && (data.role === 'teacher' || data.role === 'supervisor' || data.role === 'admin')) {
           const newSedeId = data.sedeId === UNASSIGN_VALUE_KEY ? null : data.sedeId || null;
           const userSedeRef = doc(db, 'users', staffMemberId);
@@ -311,7 +303,6 @@ export default function StaffManagementPage() {
                  await updateDoc(doc(db, 'sedes', oldSedeSupervised.id), {supervisorId: null});
              }
           }
-          // toast({ title: 'Sede Assignment Updated', description: `${data.name}'s Sede assignment updated.`});
       }
 
       form.reset({ name: '', username:'', email: '', phoneNumber: '', role: 'teacher', photoUrl: '', assignedGroupId: undefined, attendanceCode: '', sedeId: '' });
@@ -348,19 +339,15 @@ export default function StaffManagementPage() {
     }
     setIsSendingResetEmail(staffEmail);
     try {
-      // Check if user exists in Auth. If not, this call will effectively send an "invite"
-      // for them to create an account with this email and set a password.
-      // If they exist, it's a standard password reset.
       await sendPasswordResetEmail(auth, staffEmail);
       toast({
         title: 'Password Setup Email Sent',
-        description: `An email has been sent to ${staffEmail} for password setup/reset. Please check spam/junk folders if not received.`,
+        description: `An email has been sent to ${staffEmail} for password setup/reset. Please check spam/junk folders if not received. This email allows the user to set their password and activate their login.`,
       });
     } catch (error: any) {
       console.error("Password reset/setup error:", error);
       let errorMessage = "Failed to send password setup/reset email.";
       if (error.code === 'auth/user-not-found') {
-        // This case is fine, Firebase will send an email that allows account creation with this email.
          toast({
             title: 'Password Setup Email Sent (New User)',
             description: `An email has been sent to ${staffEmail} to create their account and set a password.`,
@@ -501,7 +488,7 @@ export default function StaffManagementPage() {
   const getEmailCheckMessageColor = () => {
     switch (emailCheckStatus) {
       case 'checking': return 'text-muted-foreground';
-      case 'exists': return 'text-orange-600 dark:text-orange-400'; // Changed to orange for warning
+      case 'exists': return 'text-orange-600 dark:text-orange-400';
       case 'not_found': return 'text-green-600 dark:text-green-400';
       case 'error': return 'text-destructive';
       default: return 'text-muted-foreground';
@@ -555,7 +542,7 @@ export default function StaffManagementPage() {
               <DialogHeader>
                 <DialogTitle>{editingStaff ? 'Edit Staff Record' : 'Add New Staff Record'}</DialogTitle>
                 <DialogPrimitiveDescription>
-                  {editingStaff ? 'Update staff details. Email and username cannot be changed here. Use "Send Password Reset" for password issues.' : "Fill in staff details. Username and Email are required. The staff member will set their password via an email link triggered by the 'Send Password Reset' button after creation."}
+                  {editingStaff ? "Update staff details. Email and username cannot be changed here. Use 'Send Password Reset' for password issues." : "Fill in staff details (Username and Email required). After creating the record, use the 'Send Password Reset' button in the table to send an email to the staff member. This email will allow them to set their own password and activate their login. The username entered here will NOT be their temporary password."}
                 </DialogPrimitiveDescription>
               </DialogHeader>
               <Form {...form}>
@@ -714,6 +701,3 @@ export default function StaffManagementPage() {
     </>
   );
 }
-
-
-    
