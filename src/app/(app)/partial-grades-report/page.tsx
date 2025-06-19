@@ -12,9 +12,9 @@ import {
 } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import type { User, PartialScores, ActivityScore, ExamScore, Group, GradingConfiguration, StudentWithDetailedGrades } from '@/types';
-import { DEFAULT_GRADING_CONFIG } from '@/types';
+// DEFAULT_GRADING_CONFIG import removed
 import { db } from '@/lib/firebase';
-import { collection, getDocs, query, doc, getDoc } from 'firebase/firestore';
+import { collection, getDocs, query, doc, getDoc, where } from 'firebase/firestore'; // Added where
 import { Loader2, ClipboardList, NotebookPen, AlertTriangle, Download, FileText } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Badge } from '@/components/ui/badge';
@@ -28,7 +28,7 @@ import {
 } from "@/components/ui/tooltip";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
-import { useAuth } from '@/contexts/AuthContext'; // Import useAuth
+import { useAuth } from '@/contexts/AuthContext'; 
 
 const MAX_ACCUMULATED_ACTIVITIES_DISPLAY = 5;
 
@@ -65,70 +65,44 @@ export default function PartialGradesReportPage() {
   const [selectedGroupId, setSelectedGroupId] = useState<string>('all');
   const [selectedStudentId, setSelectedStudentId] = useState<string>('all');
   
-  const [gradingConfig, setGradingConfig] = useState<GradingConfiguration>(DEFAULT_GRADING_CONFIG);
-  const [isLoadingGradingConfig, setIsLoadingGradingConfig] = useState(true);
+  // gradingConfig state removed
+  // isLoadingGradingConfig state removed
   const [isLoadingStudents, setIsLoadingStudents] = useState(true);
   const [isLoadingGroups, setIsLoadingGroups] = useState(true);
 
   const { toast } = useToast();
   const router = useRouter();
-  const { firestoreUser } = useAuth(); // Get current user
+  const { firestoreUser, gradingConfig, loading: authLoading } = useAuth(); // Get gradingConfig and authLoading from AuthContext
 
-  const isLoading = isLoadingStudents || isLoadingGroups || isLoadingGradingConfig || !firestoreUser;
+  const isLoading = isLoadingStudents || isLoadingGroups || authLoading || !firestoreUser; // Updated loading check
 
-  useEffect(() => {
-    const fetchGradingConfig = async () => {
-      setIsLoadingGradingConfig(true);
-      try {
-        const configDocRef = doc(db, 'appConfiguration', 'currentGradingConfig');
-        const docSnap = await getDoc(configDocRef);
-        if (docSnap.exists()) {
-          const loadedConfig = docSnap.data() as GradingConfiguration;
-           const validatedConfig: GradingConfiguration = {
-            id: loadedConfig.id || "currentGradingConfig",
-            numberOfPartials: [1, 2, 3, 4].includes(loadedConfig.numberOfPartials) ? loadedConfig.numberOfPartials : DEFAULT_GRADING_CONFIG.numberOfPartials,
-            passingGrade: typeof loadedConfig.passingGrade === 'number' ? loadedConfig.passingGrade : DEFAULT_GRADING_CONFIG.passingGrade,
-            maxIndividualActivityScore: typeof loadedConfig.maxIndividualActivityScore === 'number' ? loadedConfig.maxIndividualActivityScore : DEFAULT_GRADING_CONFIG.maxIndividualActivityScore,
-            maxTotalAccumulatedScore: typeof loadedConfig.maxTotalAccumulatedScore === 'number' ? loadedConfig.maxTotalAccumulatedScore : DEFAULT_GRADING_CONFIG.maxTotalAccumulatedScore,
-            maxExamScore: typeof loadedConfig.maxExamScore === 'number' ? loadedConfig.maxExamScore : DEFAULT_GRADING_CONFIG.maxExamScore,
-          };
-          setGradingConfig(validatedConfig);
-        } else {
-          setGradingConfig(DEFAULT_GRADING_CONFIG);
-        }
-      } catch (error) {
-        console.error("Error fetching grading configuration:", error);
-        setGradingConfig(DEFAULT_GRADING_CONFIG);
-        toast({ title: "Error Loading Config", description: "Could not load grading settings. Using defaults.", variant: "destructive" });
-      } finally {
-        setIsLoadingGradingConfig(false);
-      }
-    };
-    fetchGradingConfig();
-  }, [toast]);
+  // useEffect for fetching gradingConfig removed
 
   const fetchStudentAndGroupData = useCallback(async () => {
-    if (isLoadingGradingConfig || !firestoreUser) {
+    if (authLoading || !firestoreUser?.institutionId) { // Wait for auth and institution ID
+        setIsLoadingStudents(false); // Ensure loading states are cleared if check fails early
+        setIsLoadingGroups(false);
         return;
     }
 
     setIsLoadingStudents(true);
     setIsLoadingGroups(true);
     try {
-      const studentQuery = query(collection(db, 'students'));
+      // Query students for the current user's institution
+      const studentQuery = query(collection(db, 'students'), where('institutionId', '==', firestoreUser.institutionId));
       const studentsSnapshot = await getDocs(studentQuery);
       const studentData = studentsSnapshot.docs.map(docSnap => {
         const student = { id: docSnap.id, ...docSnap.data() } as User;
         const studentCalculatedGrades: Partial<StudentWithDetailedGrades> = {};
         const partialTotalsArray: (number | null)[] = [];
 
-        for (let i = 1; i <= gradingConfig.numberOfPartials; i++) {
+        for (let i = 1; i <= gradingConfig.numberOfPartials; i++) { // Use gradingConfig from context
           const partialKey = `partial${i}` as keyof NonNullable<User['grades']>;
           const partialData = student.grades?.[partialKey];
           const accTotalKey = `calculatedAccumulatedTotalP${i}` as keyof StudentWithDetailedGrades;
-          (studentCalculatedGrades as any)[accTotalKey] = calculateAccumulatedTotal(partialData?.accumulatedActivities, gradingConfig);
+          (studentCalculatedGrades as any)[accTotalKey] = calculateAccumulatedTotal(partialData?.accumulatedActivities, gradingConfig); // Use gradingConfig from context
           const partialTotalKey = `calculatedPartial${i}Total` as keyof StudentWithDetailedGrades;
-          const currentPartialTotal = calculatePartialTotal(partialData, gradingConfig);
+          const currentPartialTotal = calculatePartialTotal(partialData, gradingConfig); // Use gradingConfig from context
           (studentCalculatedGrades as any)[partialTotalKey] = currentPartialTotal;
           if (typeof currentPartialTotal === 'number') {
             partialTotalsArray.push(currentPartialTotal);
@@ -137,9 +111,9 @@ export default function PartialGradesReportPage() {
           }
         }
         
-        const relevantPartialTotals = partialTotalsArray.slice(0, gradingConfig.numberOfPartials);
-        if (relevantPartialTotals.length === gradingConfig.numberOfPartials && relevantPartialTotals.every(t => typeof t === 'number')) {
-            studentCalculatedGrades.calculatedFinalGrade = (relevantPartialTotals.reduce((sum, current) => sum + (current as number), 0) / gradingConfig.numberOfPartials);
+        const relevantPartialTotals = partialTotalsArray.slice(0, gradingConfig.numberOfPartials); // Use gradingConfig from context
+        if (relevantPartialTotals.length === gradingConfig.numberOfPartials && relevantPartialTotals.every(t => typeof t === 'number')) { // Use gradingConfig from context
+            studentCalculatedGrades.calculatedFinalGrade = (relevantPartialTotals.reduce((sum, current) => sum + (current as number), 0) / gradingConfig.numberOfPartials); // Use gradingConfig from context
         } else {
             studentCalculatedGrades.calculatedFinalGrade = null;
         }
@@ -148,16 +122,18 @@ export default function PartialGradesReportPage() {
       setAllStudentsData(studentData);
       setIsLoadingStudents(false);
 
-      const groupsSnapshot = await getDocs(collection(db, 'groups'));
+      // Query groups for the current user's institution
+      const groupsQuery = query(collection(db, 'groups'), where('institutionId', '==', firestoreUser.institutionId));
+      const groupsSnapshot = await getDocs(groupsQuery);
       const fetchedGroups = groupsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as Group));
       setAllGroupsData(fetchedGroups);
       
       if (firestoreUser.role === 'teacher') {
         const teacherGroups = fetchedGroups.filter(g => g.teacherId === firestoreUser.id);
         if (teacherGroups.length > 0) {
-          setSelectedGroupId(teacherGroups[0].id); // Pre-select first assigned group
+          setSelectedGroupId(teacherGroups[0].id); 
         } else {
-          setSelectedGroupId('none'); // Special value if teacher has no groups
+          setSelectedGroupId('none'); 
         }
       }
       setIsLoadingGroups(false);
@@ -168,26 +144,26 @@ export default function PartialGradesReportPage() {
       setIsLoadingStudents(false);
       setIsLoadingGroups(false);
     }
-  }, [toast, gradingConfig, isLoadingGradingConfig, firestoreUser]);
+  }, [toast, gradingConfig, authLoading, firestoreUser]); // Added gradingConfig, authLoading
 
   useEffect(() => {
-    if (!isLoadingGradingConfig && firestoreUser) {
+    if (!authLoading && firestoreUser) { // Check authLoading
         fetchStudentAndGroupData();
     }
-  }, [fetchStudentAndGroupData, isLoadingGradingConfig, firestoreUser]);
+  }, [fetchStudentAndGroupData, authLoading, firestoreUser]); // Added authLoading
 
   const availableGroupsForFilter = useMemo(() => {
     if (!firestoreUser) return [];
     if (firestoreUser.role === 'teacher') {
       return allGroupsData.filter(g => g.teacherId === firestoreUser.id);
     }
-    return allGroupsData; // Admins/Caja see all
+    return allGroupsData; 
   }, [allGroupsData, firestoreUser]);
 
   const studentsForStudentFilterDropdown = useMemo(() => {
     if (!firestoreUser) return [];
     
-    if (selectedGroupId === 'all') { // "All My Groups" for teacher, "All Groups" for admin/caja
+    if (selectedGroupId === 'all') { 
         if (firestoreUser.role === 'teacher') {
             const studentIdsInTeacherGroups = availableGroupsForFilter.reduce((acc, group) => {
                 if (Array.isArray(group.studentIds)) {
@@ -248,7 +224,7 @@ export default function PartialGradesReportPage() {
     if (typeof scoreValue !== 'number') {
       badgeClassName += 'bg-gray-100 dark:bg-gray-700/50 text-gray-500 dark:text-gray-400 border-gray-300 dark:border-gray-600';
     } else if (isTotal || isFinalGrade) {
-      badgeClassName += scoreValue >= gradingConfig.passingGrade 
+      badgeClassName += scoreValue >= gradingConfig.passingGrade // Use gradingConfig from context
         ? 'bg-green-100 dark:bg-green-900/70 text-green-700 dark:text-green-300 border-green-500/50' 
         : 'bg-red-100 dark:bg-red-900/70 text-red-700 dark:text-red-300 border-red-500/50';
     } else { 
@@ -411,7 +387,7 @@ export default function PartialGradesReportPage() {
     );
   }
 
-  const currentNumberOfPartials = Math.max(1, gradingConfig.numberOfPartials);
+  const currentNumberOfPartials = Math.max(1, gradingConfig.numberOfPartials); // Use gradingConfig from context
   const partialHeaders = [];
   for (let i = 1; i <= currentNumberOfPartials; i++) {
     partialHeaders.push(
@@ -472,7 +448,7 @@ export default function PartialGradesReportPage() {
                 View partial grades for students.
                 {firestoreUser?.role === 'teacher' ? " Showing students from your assigned groups." : " Filter by group and/or individual student."}
                 <br/>
-                Configuration: {currentNumberOfPartials} partials, passing with {gradingConfig.passingGrade}pts.
+                Institution Configuration: {currentNumberOfPartials} partials, passing with {gradingConfig.passingGrade}pts.
               </CardDescription>
             </div>
             <Button
@@ -486,7 +462,7 @@ export default function PartialGradesReportPage() {
                 Export to HTML
             </Button>
           </div>
-           {gradingConfig.numberOfPartials < 1 && (
+           {gradingConfig.numberOfPartials < 1 && ( // Use gradingConfig from context
             <div className="mt-2 p-3 border border-red-500/50 bg-red-50 dark:bg-red-900/30 rounded-md text-sm text-red-700 dark:text-red-300 flex items-start gap-2">
                 <AlertTriangle className="h-5 w-5 mt-0.5 shrink-0"/>
                 <p>Warning: Number of partials is configured to {gradingConfig.numberOfPartials}. Displaying 1 partial by default. Check "App Settings".</p>
@@ -616,9 +592,4 @@ export default function PartialGradesReportPage() {
     </TooltipProvider>
   );
 }
-    
-
-
-    
-
     

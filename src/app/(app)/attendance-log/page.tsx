@@ -19,7 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
 import type { AttendanceRecord, User, Group, Session, ClassScheduleConfiguration } from '@/types';
-import { DEFAULT_CLASS_SCHEDULE_CONFIG } from '@/types';
+// DEFAULT_CLASS_SCHEDULE_CONFIG removed, will use from AuthContext
 import React, { useState, useEffect, useCallback } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, Timestamp, query, where, doc, writeBatch } from 'firebase/firestore';
@@ -50,11 +50,11 @@ type AttendanceLogFormValues = z.infer<typeof attendanceLogFormSchema>;
 
 export default function AttendanceLogPage() {
   const { toast } = useToast();
-  const { firestoreUser } = useAuth();
+  const { firestoreUser, classScheduleConfig, loading: authLoading } = useAuth(); // Get classScheduleConfig from AuthContext
 
   const [groups, setGroups] = useState<Group[]>([]);
   const [allStudents, setAllStudents] = useState<User[]>([]);
-  const [classScheduleConfig, setClassScheduleConfig] = useState<ClassScheduleConfiguration>(DEFAULT_CLASS_SCHEDULE_CONFIG);
+  // classScheduleConfig state removed, using from AuthContext
   
   const [isLoadingData, setIsLoadingData] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -65,10 +65,18 @@ export default function AttendanceLogPage() {
     defaultValues: {
       groupId: '',
       sessionDate: new Date(),
-      sessionTime: DEFAULT_CLASS_SCHEDULE_CONFIG.startTime, // Initial default
+      sessionTime: classScheduleConfig.startTime, // Use initial from context
       attendances: [],
     },
   });
+
+  // Update default sessionTime when classScheduleConfig from context changes
+  useEffect(() => {
+    if (classScheduleConfig.startTime) {
+        form.setValue('sessionTime', classScheduleConfig.startTime);
+    }
+  }, [classScheduleConfig, form]);
+
 
   const { fields, append, remove } = useFieldArray({
     control: form.control,
@@ -101,50 +109,42 @@ export default function AttendanceLogPage() {
 
   useEffect(() => {
     const fetchData = async () => {
-      if (!firestoreUser?.institutionId) {
+      if (!firestoreUser?.institutionId || authLoading) { // Wait for auth and institution ID
         setIsLoadingData(false);
-        toast({ title: "Error", description: "Cannot load data without institution context.", variant: "destructive" });
+        if(firestoreUser && !firestoreUser.institutionId) toast({ title: "Error", description: "Cannot load data without institution context.", variant: "destructive" });
         return;
       }
       setIsLoadingData(true);
       try {
         const groupsQuery = query(collection(db, 'groups'), where('institutionId', '==', firestoreUser.institutionId));
         const studentsQuery = query(collection(db, 'users'), where('role', '==', 'student'), where('institutionId', '==', firestoreUser.institutionId));
-        // Assuming schedule config might become institution-specific or remain global
-        const scheduleConfigPromise = getDoc(doc(db, 'appConfiguration', 'currentClassScheduleConfig'));
+        // Schedule config now comes from AuthContext, no need to fetch here explicitly
+        // const scheduleConfigPromise = getDoc(doc(db, 'appConfiguration', 'currentClassScheduleConfig')); Removed
 
-        const [groupsSnapshot, studentsSnapshot, scheduleConfigSnap] = await Promise.all([
+        const [groupsSnapshot, studentsSnapshot] = await Promise.all([ // scheduleConfigPromise removed
             getDocs(groupsQuery),
             getDocs(studentsQuery),
-            scheduleConfigPromise
         ]);
         
         setGroups(groupsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as Group)));
         setAllStudents(studentsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as User)));
 
-        let loadedScheduleConfig = DEFAULT_CLASS_SCHEDULE_CONFIG;
-        if (scheduleConfigSnap.exists()) {
-            loadedScheduleConfig = scheduleConfigSnap.data() as ClassScheduleConfiguration;
-            setClassScheduleConfig(loadedScheduleConfig);
-        } else {
-            setClassScheduleConfig(DEFAULT_CLASS_SCHEDULE_CONFIG);
-        }
-
+        // classScheduleConfig is now from AuthContext
         form.reset({
             groupId: '', 
             sessionDate: new Date(),
-            sessionTime: loadedScheduleConfig.startTime || '09:00',
+            sessionTime: classScheduleConfig.startTime || '09:00', // Use context's config
             attendances: [],
         });
         remove(); 
 
       } catch (error) {
         console.error("Error fetching data: ", error);
-        toast({ title: 'Error fetching data', description: 'Could not load groups, students, or schedule config.', variant: 'destructive' });
+        toast({ title: 'Error fetching data', description: 'Could not load groups or students.', variant: 'destructive' }); // Removed schedule config from msg
         form.reset({
             groupId: '',
             sessionDate: new Date(),
-            sessionTime: DEFAULT_CLASS_SCHEDULE_CONFIG.startTime,
+            sessionTime: classScheduleConfig.startTime || '09:00', // Use context's config
             attendances: [],
         });
         remove();
@@ -152,7 +152,7 @@ export default function AttendanceLogPage() {
       setIsLoadingData(false);
     };
     fetchData();
-  }, [toast, form, remove, firestoreUser]); 
+  }, [toast, form, remove, firestoreUser, authLoading, classScheduleConfig]); // Added classScheduleConfig from context as dependency
 
   const findOrCreateSession = async (groupId: string, date: Date, time: string): Promise<string> => {
     if (!firestoreUser?.institutionId) {
@@ -203,7 +203,7 @@ export default function AttendanceLogPage() {
           sessionId: finalSessionId!,
           status: att.status,
           timestamp: Timestamp.now().toDate().toISOString(),
-          institutionId: firestoreUser.institutionId,
+          institutionId: firestoreUser.institutionId, // Ensure institutionId is set
         };
         if (att.status === 'absent' && att.observation) {
           record.observation = att.observation;
@@ -231,7 +231,7 @@ export default function AttendanceLogPage() {
     setIsSubmitting(false);
   }
   
-  if (isLoadingData || !firestoreUser) {
+  if (authLoading || isLoadingData || !firestoreUser) { // Check authLoading as well
     return (
       <Card>
         <CardHeader>
@@ -428,4 +428,3 @@ export default function AttendanceLogPage() {
     </Card>
   );
 }
-

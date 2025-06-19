@@ -20,7 +20,8 @@ import { useToast } from '@/hooks/use-toast';
 import { db } from '@/lib/firebase';
 import { collection, doc, getDocs, getDoc, updateDoc, query, where } from 'firebase/firestore';
 import type { User, Group, GradingConfiguration, StudentGradeStructure, PartialScores, ActivityScore } from '@/types';
-import { DEFAULT_GRADING_CONFIG } from '@/types';
+// DEFAULT_GRADING_CONFIG import removed
+import { useAuth } from '@/contexts/AuthContext';
 
 interface StudentLevelRecord {
   studentId: string;
@@ -77,15 +78,17 @@ const calculateLevelFinalGrade = (levelGrades: StudentGradeStructure | undefined
 
 export default function CertificateManagementPage() {
   const { toast } = useToast();
+  const { firestoreUser, gradingConfig, loading: authLoading } = useAuth(); // Get gradingConfig and authLoading from AuthContext
+
   const [allStudents, setAllStudents] = useState<User[]>([]);
   const [allGroups, setAllGroups] = useState<Group[]>([]);
   const [allTeachers, setAllTeachers] = useState<User[]>([]);
-  const [gradingConfig, setGradingConfig] = useState<GradingConfiguration>(DEFAULT_GRADING_CONFIG);
+  // gradingConfig state removed
 
   const [selectedGroupId, setSelectedGroupId] = useState<string>('all');
   const [studentLevelRecords, setStudentLevelRecords] = useState<StudentLevelRecord[]>([]);
 
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingData, setIsLoadingData] = useState(true); // Renamed from isLoading for clarity
   const [isSavingCode, setIsSavingCode] = useState<{ [key: string]: boolean }>({});
 
   const [certificateTemplate, setCertificateTemplate] = useState(
@@ -96,13 +99,23 @@ export default function CertificateManagementPage() {
 
 
   const fetchInitialData = useCallback(async () => {
-    setIsLoading(true);
+    if (authLoading || !firestoreUser?.institutionId) { // Wait for auth and institution ID
+        setIsLoadingData(false);
+        return;
+    }
+    setIsLoadingData(true);
     try {
-      const [studentsSnap, groupsSnap, teachersSnap, configSnap] = await Promise.all([
-        getDocs(collection(db, 'students')),
-        getDocs(collection(db, 'groups')),
-        getDocs(query(collection(db, 'users'), where('role', '==', 'teacher'))),
-        getDoc(doc(db, 'appConfiguration', 'currentGradingConfig')),
+      // Filter all queries by institutionId
+      const studentsQuery = query(collection(db, 'students'), where('institutionId', '==', firestoreUser.institutionId));
+      const groupsQuery = query(collection(db, 'groups'), where('institutionId', '==', firestoreUser.institutionId));
+      const teachersQuery = query(collection(db, 'users'), where('role', '==', 'teacher'), where('institutionId', '==', firestoreUser.institutionId));
+      // Grading config is now from AuthContext, no need to fetch here
+      // const configSnapPromise = getDoc(doc(db, 'appConfiguration', 'currentGradingConfig')); removed
+
+      const [studentsSnap, groupsSnap, teachersSnap] = await Promise.all([ // configSnapPromise removed
+        getDocs(studentsQuery),
+        getDocs(groupsSnap),
+        getDocs(teachersSnap),
       ]);
 
       const students = studentsSnap.docs.map(d => ({ id: d.id, ...d.data() } as User));
@@ -110,48 +123,44 @@ export default function CertificateManagementPage() {
       setAllGroups(groupsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Group)));
       setAllTeachers(teachersSnap.docs.map(d => ({ id: d.id, ...d.data() } as User)));
 
-      if (configSnap.exists()) {
-        setGradingConfig(configSnap.data() as GradingConfiguration);
-      } else {
-        setGradingConfig(DEFAULT_GRADING_CONFIG);
-        toast({ title: "Advertencia", description: "Configuración de calificación por defecto cargada.", variant: "default" });
-      }
+      // gradingConfig is from AuthContext
 
     } catch (error) {
       console.error("Error fetching initial data:", error);
       toast({ title: 'Error', description: 'No se pudieron cargar los datos iniciales.', variant: 'destructive' });
     }
-    setIsLoading(false);
-  }, [toast]);
+    setIsLoadingData(false);
+  }, [toast, firestoreUser, authLoading]); // Added authLoading dependency
 
   useEffect(() => {
     fetchInitialData();
   }, [fetchInitialData]);
 
   useEffect(() => {
-    if (isLoading) return;
+    if (isLoadingData || authLoading) return; // Check authLoading
 
     const records: StudentLevelRecord[] = [];
     const studentsToProcess = selectedGroupId === 'all'
       ? allStudents
       : allStudents.filter(s => {
           const group = allGroups.find(g => g.id === selectedGroupId);
-          return group?.studentIds.includes(s.id);
+          // Ensure group belongs to current institution (already filtered, but good for safety)
+          return group?.studentIds.includes(s.id) && group.institutionId === firestoreUser?.institutionId;
         });
 
     studentsToProcess.forEach(student => {
       if (student.gradesByLevel) {
         Object.entries(student.gradesByLevel).forEach(([levelName, levelData]) => {
-          const finalGrade = calculateLevelFinalGrade(levelData, gradingConfig);
+          const finalGrade = calculateLevelFinalGrade(levelData, gradingConfig); // Use gradingConfig from context
 
           let teacherName: string | null = null;
           let groupType: StudentLevelRecord['groupType'] = null;
 
-          const currentGroupForStudent = allGroups.find(g => Array.isArray(g.studentIds) && g.studentIds.includes(student.id));
+          const currentGroupForStudent = allGroups.find(g => Array.isArray(g.studentIds) && g.studentIds.includes(student.id) && g.institutionId === firestoreUser?.institutionId);
           if (currentGroupForStudent) {
             groupType = currentGroupForStudent.type;
             if (currentGroupForStudent.teacherId) {
-              const teacher = allTeachers.find(t => t.id === currentGroupForStudent.teacherId);
+              const teacher = allTeachers.find(t => t.id === currentGroupForStudent.teacherId && t.institutionId === firestoreUser?.institutionId);
               teacherName = teacher?.name || 'Desconocido';
             }
           }
@@ -169,7 +178,7 @@ export default function CertificateManagementPage() {
       }
     });
     setStudentLevelRecords(records.sort((a,b) => a.studentName.localeCompare(b.studentName) || a.levelName.localeCompare(b.levelName)));
-  }, [allStudents, allGroups, allTeachers, selectedGroupId, gradingConfig, isLoading]);
+  }, [allStudents, allGroups, allTeachers, selectedGroupId, gradingConfig, isLoadingData, authLoading, firestoreUser?.institutionId]); // Added authLoading and firestoreUser
 
   const handleCodeChange = (studentId: string, levelName: string, newCode: string) => {
     setStudentLevelRecords(prevRecords =>
@@ -183,15 +192,21 @@ export default function CertificateManagementPage() {
 
   const handleSaveCode = async (studentId: string, levelName: string) => {
     const recordToSave = studentLevelRecords.find(r => r.studentId === studentId && r.levelName === levelName);
-    if (!recordToSave) return;
+    if (!recordToSave || !firestoreUser?.institutionId) return;
+
+    const studentToUpdate = allStudents.find(s => s.id === studentId && s.institutionId === firestoreUser.institutionId);
+    if (!studentToUpdate) {
+        toast({ title: 'Error', description: 'Estudiante no encontrado en esta institución.', variant: 'destructive' });
+        return;
+    }
 
     const key = `${studentId}-${levelName}`;
     setIsSavingCode(prev => ({ ...prev, [key]: true }));
 
     try {
-      const studentRef = doc(db, 'students', studentId);
+      const studentRef = doc(db, 'students', studentId); // 'students' collection may need to be 'users' if students are stored there
       const studentDoc = await getDoc(studentRef);
-      if (studentDoc.exists()) {
+      if (studentDoc.exists() && studentDoc.data()?.institutionId === firestoreUser.institutionId) {
         const studentData = studentDoc.data() as User;
         const updatedGradesByLevel = { ...studentData.gradesByLevel };
 
@@ -200,11 +215,13 @@ export default function CertificateManagementPage() {
             ...updatedGradesByLevel[levelName],
             certificateCode: recordToSave.certificateCode,
           };
-        } else {
+        } else { // Should not happen if levelData exists, but as a fallback
           updatedGradesByLevel[levelName] = { certificateCode: recordToSave.certificateCode };
         }
         await updateDoc(studentRef, { gradesByLevel: updatedGradesByLevel });
         toast({ title: 'Código Guardado', description: `Código para ${recordToSave.studentName} - ${levelName} guardado.` });
+      } else {
+        toast({ title: 'Error al Guardar', description: 'No se pudo encontrar el registro del estudiante o no pertenece a esta institución.', variant: 'destructive' });
       }
     } catch (error) {
       console.error("Error saving certificate code:", error);
@@ -229,7 +246,7 @@ export default function CertificateManagementPage() {
     return text;
   };
 
-  if (isLoading) {
+  if (authLoading || isLoadingData) { // Check authLoading
     return (
       <Card>
         <CardHeader>
@@ -257,7 +274,7 @@ export default function CertificateManagementPage() {
         <CardContent>
           <div className="mb-4">
             <Label htmlFor="group-filter-certs">Filter by Current Group</Label>
-            <Select value={selectedGroupId} onValueChange={setSelectedGroupId}>
+            <Select value={selectedGroupId} onValueChange={setSelectedGroupId} disabled={allGroups.length === 0}>
               <SelectTrigger id="group-filter-certs" className="w-full md:w-[300px]">
                 <SelectValue placeholder="Select a group" />
               </SelectTrigger>
@@ -268,9 +285,10 @@ export default function CertificateManagementPage() {
                 ))}
               </SelectContent>
             </Select>
+            {allGroups.length === 0 && <p className="text-xs text-muted-foreground mt-1">No groups available in this institution.</p>}
           </div>
 
-          {studentLevelRecords.length === 0 && !isLoading && (
+          {studentLevelRecords.length === 0 && !isLoadingData && (
             <p className="text-muted-foreground text-center py-6">
               No student records found for the selected criteria, or students have no grade data.
             </p>

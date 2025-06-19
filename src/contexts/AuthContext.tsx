@@ -14,14 +14,15 @@ import {
   updatePassword as firebaseUpdatePassword,
 } from 'firebase/auth';
 import { doc, getDoc, collection, query, where, getDocs, setDoc, limit, updateDoc, addDoc, serverTimestamp } from 'firebase/firestore';
-import type { User as FirestoreUserType, GradingConfiguration, Sede, Institution, Group } from '@/types';
-import { DEFAULT_GRADING_CONFIG, getDefaultStudentGradeStructure } from '@/types';
+import type { User as FirestoreUserType, GradingConfiguration, ClassScheduleConfiguration, Sede, Institution, Group } from '@/types';
+import { DEFAULT_GRADING_CONFIG, DEFAULT_CLASS_SCHEDULE_CONFIG, getDefaultStudentGradeStructure } from '@/types';
 import { useRouter, usePathname } from 'next/navigation';
 
 interface AuthContextType {
   authUser: FirebaseUser | null;
   firestoreUser: FirestoreUserType | null;
-  gradingConfig: GradingConfiguration; // Added to context
+  gradingConfig: GradingConfiguration;
+  classScheduleConfig: ClassScheduleConfiguration; // Added
   loading: boolean;
   signIn: (identifier: string, pass: string) => Promise<void>;
   signUp: (
@@ -39,6 +40,7 @@ interface AuthContextType {
   updateUserPassword: (currentPasswordFromUser: string, newPasswordFromUser: string) => Promise<void>;
   clearRequiresPasswordChangeFlag: () => Promise<void>;
   fetchGradingConfigForInstitution: (institutionId: string) => Promise<GradingConfiguration>;
+  fetchScheduleConfigForInstitution: (institutionId: string) => Promise<ClassScheduleConfiguration>; // Added
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -48,6 +50,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [firestoreUser, setFirestoreUser] = useState<FirestoreUserType | null>(null);
   const [loading, setLoading] = useState(true);
   const [gradingConfig, setGradingConfig] = useState<GradingConfiguration>(DEFAULT_GRADING_CONFIG);
+  const [classScheduleConfig, setClassScheduleConfig] = useState<ClassScheduleConfiguration>(DEFAULT_CLASS_SCHEDULE_CONFIG); // Added
   const router = useRouter();
   const pathname = usePathname();
 
@@ -72,6 +75,27 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   }, []);
 
+  const fetchScheduleConfigForInstitution = useCallback(async (institutionId: string): Promise<ClassScheduleConfiguration> => {
+    if (!institutionId) {
+      console.warn("[AuthContext] fetchScheduleConfig: No institutionId provided, using default.");
+      return DEFAULT_CLASS_SCHEDULE_CONFIG;
+    }
+    try {
+      const configDocRef = doc(db, 'institutionScheduleConfigs', institutionId);
+      const docSnap = await getDoc(configDocRef);
+      if (docSnap.exists()) {
+        console.log(`[AuthContext] Fetched schedule config for institution: ${institutionId}`);
+        return docSnap.data() as ClassScheduleConfiguration;
+      } else {
+        console.log(`[AuthContext] No specific schedule config for institution ${institutionId}, using default.`);
+        return DEFAULT_CLASS_SCHEDULE_CONFIG;
+      }
+    } catch (error) {
+      console.error(`[AuthContext] Error fetching schedule configuration for institution ${institutionId}:`, error);
+      return DEFAULT_CLASS_SCHEDULE_CONFIG;
+    }
+  }, []);
+
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -89,12 +113,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           setFirestoreUser(userData);
           console.log(`[AuthContext] User data loaded from 'users' for UID: ${user.uid}, Institution ID: ${userData.institutionId}`);
           
-          // Fetch institution-specific grading config
           if (userData.institutionId) {
-            const specificConfig = await fetchGradingConfigForInstitution(userData.institutionId);
-            setGradingConfig(specificConfig);
+            const specificGradingConfig = await fetchGradingConfigForInstitution(userData.institutionId);
+            setGradingConfig(specificGradingConfig);
+            const specificScheduleConfig = await fetchScheduleConfigForInstitution(userData.institutionId); // Added
+            setClassScheduleConfig(specificScheduleConfig); // Added
           } else {
-            setGradingConfig(DEFAULT_GRADING_CONFIG); // Fallback if user has no institutionId (should not happen for active users)
+            setGradingConfig(DEFAULT_GRADING_CONFIG);
+            setClassScheduleConfig(DEFAULT_CLASS_SCHEDULE_CONFIG); // Added
           }
 
         } else {
@@ -102,18 +128,20 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           await firebaseSignOut(auth); 
           setAuthUser(null);
           setFirestoreUser(null);
-          setGradingConfig(DEFAULT_GRADING_CONFIG); // Reset to default
+          setGradingConfig(DEFAULT_GRADING_CONFIG);
+          setClassScheduleConfig(DEFAULT_CLASS_SCHEDULE_CONFIG); // Added
         }
       } else {
         setAuthUser(null);
         setFirestoreUser(null);
-        setGradingConfig(DEFAULT_GRADING_CONFIG); // Reset to default
+        setGradingConfig(DEFAULT_GRADING_CONFIG);
+        setClassScheduleConfig(DEFAULT_CLASS_SCHEDULE_CONFIG); // Added
       }
       setLoading(false);
     });
 
     return () => unsubscribe();
-  }, [fetchGradingConfigForInstitution]);
+  }, [fetchGradingConfigForInstitution, fetchScheduleConfigForInstitution]); // Added fetchScheduleConfigForInstitution
 
   const signIn = async (identifier: string, pass: string) => {
     setLoading(true);
@@ -146,7 +174,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
       await signInWithEmailAndPassword(auth, emailToAuth, pass);
       console.log(`[AuthContext] Firebase Auth successful for email: ${emailToAuth}`);
-      // Firestore user and grading config will be fetched by onAuthStateChanged effect
     } catch (error: any) {
       console.error(`[AuthContext] signIn error:`, error.code, error.message, error);
       setLoading(false);
@@ -162,13 +189,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     role: FirestoreUserType['role'],
     studentSpecifics?: { level: FirestoreUserType['level']; sedeId?: string | null },
     creatorContext?: { institutionId: string; creatorSedeId?: string | null; attendanceCode?: string },
-    institutionName?: string // Only for initial admin signup
+    institutionName?: string
   ) => {
     setLoading(true);
     try {
       const targetCollection = 'users';
       let effectiveInstitutionId = creatorContext?.institutionId;
-      let currentGradingConfig = DEFAULT_GRADING_CONFIG; // Default, will be updated if institution exists
+      let currentGradingConfigForNewUser = DEFAULT_GRADING_CONFIG;
 
       console.log(`[AuthContext] signUp: Role: ${role}, Institution Name: ${institutionName}, Creator Context Inst ID: ${creatorContext?.institutionId}`);
 
@@ -186,15 +213,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         });
         effectiveInstitutionId = institutionRef.id;
         console.log(`[AuthContext] New institution document created with ID: ${effectiveInstitutionId}`);
-        // For a new institution, the grading config will be the default until an admin saves one.
-        // We can pre-emptively save a default config for this new institution.
         await setDoc(doc(db, 'institutionGradingConfigs', effectiveInstitutionId), DEFAULT_GRADING_CONFIG);
-        await setDoc(doc(db, 'institutionScheduleConfigs', effectiveInstitutionId), DEFAULT_CLASS_SCHEDULE_CONFIG);
-        currentGradingConfig = DEFAULT_GRADING_CONFIG;
+        await setDoc(doc(db, 'institutionScheduleConfigs', effectiveInstitutionId), DEFAULT_CLASS_SCHEDULE_CONFIG); // Added
+        currentGradingConfigForNewUser = DEFAULT_GRADING_CONFIG;
 
       } else if (effectiveInstitutionId) {
-        // Fetch grading config for existing institution
-        currentGradingConfig = await fetchGradingConfigForInstitution(effectiveInstitutionId);
+        currentGradingConfigForNewUser = await fetchGradingConfigForInstitution(effectiveInstitutionId);
       }
 
 
@@ -253,21 +277,18 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         sedeId: null,
         ...(role === 'student' && studentSpecifics && {
           level: studentSpecifics.level,
-          gradesByLevel: studentSpecifics.level ? { [studentSpecifics.level]: getDefaultStudentGradeStructure(currentGradingConfig) } : {},
+          gradesByLevel: studentSpecifics.level ? { [studentSpecifics.level]: getDefaultStudentGradeStructure(currentGradingConfigForNewUser) } : {},
           sedeId: studentSpecifics.sedeId || null,
           notes: undefined, age: undefined, gender: undefined, preferredShift: undefined,
         }),
         ...( (role === 'teacher' || role === 'supervisor' || role === 'admin' || role === 'caja') && creatorContext && {
-            sedeId: creatorContext.creatorSedeId || null, // Sede ID for staff
+            sedeId: creatorContext.creatorSedeId || null,
             attendanceCode: creatorContext.attendanceCode || null,
         })
       };
       
       await setDoc(doc(db, targetCollection, firebaseUser.uid), newUserDocData);
       console.log(`[AuthContext] User document created in '${targetCollection}' for UID: ${firebaseUser.uid} with Institution ID: ${newUserDocData.institutionId}`);
-
-      // No need to setAuthUser/setFirestoreUser here as onAuthStateChanged will handle it
-      // and also fetch the correct grading config.
 
     } catch (error) {
       setLoading(false);
@@ -281,7 +302,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       await firebaseSignOut(auth);
       setAuthUser(null);
       setFirestoreUser(null);
-      setGradingConfig(DEFAULT_GRADING_CONFIG); // Reset to default
+      setGradingConfig(DEFAULT_GRADING_CONFIG);
+      setClassScheduleConfig(DEFAULT_CLASS_SCHEDULE_CONFIG); // Added
       router.push('/login');
     } catch (error) {
       console.error('Sign out error', error);
@@ -340,6 +362,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       authUser,
       firestoreUser,
       gradingConfig,
+      classScheduleConfig, // Added
       loading,
       signIn,
       signUp,
@@ -348,6 +371,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       updateUserPassword,
       clearRequiresPasswordChangeFlag,
       fetchGradingConfigForInstitution,
+      fetchScheduleConfigForInstitution, // Added
     }}>
       {children}
     </AuthContext.Provider>
@@ -361,3 +385,4 @@ export const useAuth = (): AuthContextType => {
   }
   return context;
 };
+

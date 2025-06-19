@@ -13,7 +13,7 @@ import { useToast } from '@/hooks/use-toast';
 import { db } from '@/lib/firebase';
 import { collection, doc, getDocs, getDoc, updateDoc, query } from 'firebase/firestore';
 import type { User, PartialScores as PartialScoresType, ActivityScore as ActivityScoreType, ExamScore as ExamScoreType, Group as GroupType, GradingConfiguration } from '@/types';
-import { DEFAULT_GRADING_CONFIG } from '@/types';
+// Removed DEFAULT_GRADING_CONFIG import as it will come from AuthContext
 import { useForm, useFieldArray, Controller, UseFieldArrayReturn } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -26,7 +26,7 @@ import {
   FormMessage,
 } from '@/components/ui/form';
 import { Label } from '@/components/ui/label';
-import { useAuth } from '@/contexts/AuthContext'; // Import useAuth
+import { useAuth } from '@/contexts/AuthContext';
 
 const MAX_ACCUMULATED_ACTIVITIES = 5; 
 const DEBOUNCE_DELAY = 2500;
@@ -117,14 +117,13 @@ export default function GradesManagementPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { toast } = useToast();
-  const { firestoreUser } = useAuth(); // Get current user
+  const { firestoreUser, gradingConfig, loading: authLoading } = useAuth(); // Get gradingConfig and authLoading from AuthContext
 
   const [allStudents, setAllStudents] = useState<User[]>([]);
   const [allGroups, setAllGroups] = useState<GroupType[]>([]);
   const [selectedStudent, setSelectedStudent] = useState<User | null>(null);
 
-  const [gradingConfig, setGradingConfig] = useState<GradingConfiguration>(DEFAULT_GRADING_CONFIG);
-  const [isLoadingGradingConfig, setIsLoadingGradingConfig] = useState(true);
+  // isLoadingGradingConfig removed, use authLoading or check if gradingConfig is default
   const [isLoadingData, setIsLoadingData] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -155,59 +154,31 @@ export default function GradesManagementPage() {
 
   const partialFieldArrays = [p1FieldArray, p2FieldArray, p3FieldArray, p4FieldArray];
 
-  useEffect(() => {
-    const fetchGradingConfig = async () => {
-      setIsLoadingGradingConfig(true);
-      try {
-        const configDocRef = doc(db, 'appConfiguration', 'currentGradingConfig');
-        const docSnap = await getDoc(configDocRef);
-        if (docSnap.exists()) {
-          const loadedConfig = docSnap.data() as GradingConfiguration;
-          const validatedConfig: GradingConfiguration = {
-            id: loadedConfig.id || "currentGradingConfig",
-            numberOfPartials: [1, 2, 3, 4].includes(loadedConfig.numberOfPartials) ? loadedConfig.numberOfPartials : DEFAULT_GRADING_CONFIG.numberOfPartials,
-            passingGrade: typeof loadedConfig.passingGrade === 'number' ? loadedConfig.passingGrade : DEFAULT_GRADING_CONFIG.passingGrade,
-            maxIndividualActivityScore: typeof loadedConfig.maxIndividualActivityScore === 'number' ? loadedConfig.maxIndividualActivityScore : DEFAULT_GRADING_CONFIG.maxIndividualActivityScore,
-            maxTotalAccumulatedScore: typeof loadedConfig.maxTotalAccumulatedScore === 'number' ? loadedConfig.maxTotalAccumulatedScore : DEFAULT_GRADING_CONFIG.maxTotalAccumulatedScore,
-            maxExamScore: typeof loadedConfig.maxExamScore === 'number' ? loadedConfig.maxExamScore : DEFAULT_GRADING_CONFIG.maxExamScore,
-          };
-          setGradingConfig(validatedConfig);
-        } else {
-          setGradingConfig(DEFAULT_GRADING_CONFIG);
-          toast({ title: "Default Config", description: "Using default grading configuration. Please set in App Settings if needed.", variant: "default" });
-        }
-      } catch (error) {
-        console.error("Error fetching grading configuration:", error);
-        setGradingConfig(DEFAULT_GRADING_CONFIG);
-        toast({ title: "Error Loading Config", description: "Could not load grading settings. Using defaults.", variant: "destructive" });
-      } finally {
-        setIsLoadingGradingConfig(false);
-      }
-    };
-    fetchGradingConfig();
-  }, [toast]);
-
+  // useEffect for fetching gradingConfig locally is removed. gradingConfig now comes from AuthContext.
 
   const fetchInitialData = useCallback(async () => {
-    if (isLoadingGradingConfig) return;
+    if (authLoading || !firestoreUser?.institutionId) { // Wait for auth and institution ID
+        setIsLoadingData(false);
+        return;
+    }
     setIsLoadingData(true);
     try {
-      const studentQuery = query(collection(db, 'students'));
+      const studentQuery = query(collection(db, 'students'), where('institutionId', '==', firestoreUser.institutionId)); // Filter by institution
       const studentsSnapshot = await getDocs(studentQuery);
       const studentList = studentsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as User));
       setAllStudents(studentList);
 
-      const groupsSnapshot = await getDocs(collection(db, 'groups'));
+      const groupsQuery = query(collection(db, 'groups'), where('institutionId', '==', firestoreUser.institutionId)); // Filter by institution
+      const groupsSnapshot = await getDocs(groupsQuery);
       const fetchedGroups = groupsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as GroupType));
       setAllGroups(fetchedGroups);
       
-      // If user is teacher, pre-select their first assigned group if available
       if (firestoreUser?.role === 'teacher') {
         const teacherGroups = fetchedGroups.filter(g => g.teacherId === firestoreUser.id);
         if (teacherGroups.length > 0) {
           setSelectedGroupIdForFilter(teacherGroups[0].id);
         } else {
-          setSelectedGroupIdForFilter('none'); // Special value if teacher has no groups
+          setSelectedGroupIdForFilter('none'); 
         }
       }
 
@@ -216,7 +187,6 @@ export default function GradesManagementPage() {
       if (studentIdFromParams) {
         const preselectedStudent = studentList.find(s => s.id === studentIdFromParams);
         if (preselectedStudent) {
-           // Ensure teacher can only select students from their groups
           if (firestoreUser?.role === 'teacher') {
             const teacherGroups = fetchedGroups.filter(g => g.teacherId === firestoreUser.id);
             const isStudentInTeacherGroup = teacherGroups.some(g => Array.isArray(g.studentIds) && g.studentIds.includes(preselectedStudent.id));
@@ -226,7 +196,7 @@ export default function GradesManagementPage() {
               toast({ title: 'Access Denied', description: 'You can only manage grades for students in your assigned groups.', variant: 'destructive' });
               router.replace('/grades-management', { scroll: false });
             }
-          } else { // Admins can select any student
+          } else { 
             setSelectedStudent(preselectedStudent);
           }
         } else {
@@ -239,7 +209,7 @@ export default function GradesManagementPage() {
       toast({ title: 'Error', description: 'No se pudieron cargar estudiantes o grupos.', variant: 'destructive' });
     }
     setIsLoadingData(false);
-  }, [searchParams, toast, router, isLoadingGradingConfig, firestoreUser]);
+  }, [searchParams, toast, router, authLoading, firestoreUser]);
 
   useEffect(() => {
     fetchInitialData();
@@ -271,12 +241,12 @@ export default function GradesManagementPage() {
 
   const debouncedSave = useCallback(
     debounce(async (currentData: GradeEntryFormValues, studentId: string) => {
-      if (isSubmitting || isLoadingGradingConfig) return;
+      if (isSubmitting || authLoading) return; // Use authLoading
       setAutoSaveStatus('saving');
       try {
         const studentRef = doc(db, "students", studentId);
         const gradesToSave: { [key: string]: PartialScoresType } = {};
-        for (let i = 1; i <= gradingConfig.numberOfPartials; i++) {
+        for (let i = 1; i <= gradingConfig.numberOfPartials; i++) { // gradingConfig from context
             const partialKey = `partial${i}` as keyof GradeEntryFormValues;
             gradesToSave[partialKey] = mapPartialToSave(currentData[partialKey]);
         }
@@ -290,14 +260,14 @@ export default function GradesManagementPage() {
         setTimeout(() => setAutoSaveStatus('idle'), 5000);
       }
     }, DEBOUNCE_DELAY),
-    [isSubmitting, toast, gradingConfig, isLoadingGradingConfig, mapPartialToSave]
+    [isSubmitting, toast, gradingConfig, authLoading, mapPartialToSave] // Use gradingConfig from context, authLoading
   );
 
   useEffect(() => {
     if (debouncedSave && typeof debouncedSave.cancel === 'function') {
         debouncedSave.cancel();
     }
-    if (selectedStudent && gradingConfig) {
+    if (selectedStudent && gradingConfig) { // gradingConfig from context
       const studentGrades = selectedStudent.grades || {};
       const defaultValuesForForm: GradeEntryFormValues = {
         partial1: { ...getDefaultPartialData(), ...studentGrades.partial1, accumulatedActivities: mapActivities(studentGrades.partial1?.accumulatedActivities) },
@@ -314,23 +284,21 @@ export default function GradesManagementPage() {
         partial4: getDefaultPartialData(),
       });
     }
-  }, [selectedStudent, reset, gradingConfig, debouncedSave, mapActivities]);
+  }, [selectedStudent, reset, gradingConfig, debouncedSave, mapActivities]); // Use gradingConfig from context
 
   const availableGroupsForFilter = useMemo(() => {
     if (firestoreUser?.role === 'teacher') {
       return allGroups.filter(g => g.teacherId === firestoreUser.id);
     }
-    return allGroups; // Admins/Caja see all groups
+    return allGroups; 
   }, [allGroups, firestoreUser]);
 
   const filteredStudentsList = useMemo(() => {
     let studentsToDisplay = allStudents;
     
-    // If teacher, initial filter is by their groups
     if (firestoreUser?.role === 'teacher') {
         const teacherGroupIds = availableGroupsForFilter.map(g => g.id);
         if (selectedGroupIdForFilter !== 'all' && !teacherGroupIds.includes(selectedGroupIdForFilter)) {
-             // If selected group is not one of teacher's groups (e.g. due to URL param), don't show students.
             return [];
         }
         const studentIdsInTeacherGroups = availableGroupsForFilter.reduce((acc, group) => {
@@ -342,16 +310,14 @@ export default function GradesManagementPage() {
         studentsToDisplay = studentsToDisplay.filter(student => studentIdsInTeacherGroups.has(student.id));
     }
     
-    // Then, apply group filter selection (if not 'all' or 'none')
     if (selectedGroupIdForFilter !== 'all' && selectedGroupIdForFilter !== 'none') {
       const group = allGroups.find(g => g.id === selectedGroupIdForFilter);
       if (group && Array.isArray(group.studentIds)) {
         studentsToDisplay = studentsToDisplay.filter(student => group.studentIds.includes(student.id));
       } else if (group) {
-        studentsToDisplay = []; // Group selected but has no studentIds array (should not happen)
+        studentsToDisplay = []; 
       }
     } else if (selectedGroupIdForFilter === 'none' && firestoreUser?.role === 'teacher') {
-         // Teacher has no groups assigned, show no students.
         return [];
     }
 
@@ -365,7 +331,6 @@ export default function GradesManagementPage() {
   }, [allStudents, allGroups, selectedGroupIdForFilter, searchTerm, firestoreUser, availableGroupsForFilter]);
 
   const handleSelectStudentForGrading = useCallback((student: User) => {
-    // Additional check for teachers
     if (firestoreUser?.role === 'teacher') {
       const teacherGroups = allGroups.filter(g => g.teacherId === firestoreUser.id);
       const isStudentInTheirGroup = teacherGroups.some(g => Array.isArray(g.studentIds) && g.studentIds.includes(student.id));
@@ -382,7 +347,7 @@ export default function GradesManagementPage() {
   const watchedFormValues = watch();
 
   useEffect(() => {
-    if (formState.isDirty && selectedStudent && !isSubmitting && !isLoadingGradingConfig && debouncedSave) {
+    if (formState.isDirty && selectedStudent && !isSubmitting && !authLoading && debouncedSave) { // Use authLoading
       const currentValues = getValues();
       debouncedSave(currentValues, selectedStudent.id);
     }
@@ -391,12 +356,12 @@ export default function GradesManagementPage() {
         debouncedSave.cancel();
       }
     };
-  }, [watchedFormValues, selectedStudent, formState.isDirty, isSubmitting, debouncedSave, getValues, isLoadingGradingConfig]);
+  }, [watchedFormValues, selectedStudent, formState.isDirty, isSubmitting, debouncedSave, getValues, authLoading]); // Use authLoading
 
 
   const onSubmitGrades = async (data: GradeEntryFormValues) => {
-    if (!selectedStudent || isLoadingGradingConfig) {
-      toast({ title: "Error", description: isLoadingGradingConfig ? "Configuración de calificación aún cargando." : "Ningún estudiante seleccionado.", variant: "destructive" });
+    if (!selectedStudent || authLoading) { // Use authLoading
+      toast({ title: "Error", description: authLoading ? "Configuración de calificación aún cargando." : "Ningún estudiante seleccionado.", variant: "destructive" });
       return;
     }
     if (firestoreUser?.role === 'teacher') {
@@ -416,7 +381,7 @@ export default function GradesManagementPage() {
     try {
       const studentRef = doc(db, "students", selectedStudent.id);
       const gradesToSave: { [key: string]: PartialScoresType } = {};
-      for (let i = 1; i <= gradingConfig.numberOfPartials; i++) {
+      for (let i = 1; i <= gradingConfig.numberOfPartials; i++) { // gradingConfig from context
           const partialKey = `partial${i}` as keyof GradeEntryFormValues;
           gradesToSave[partialKey] = mapPartialToSave(data[partialKey]);
       }
@@ -432,7 +397,7 @@ export default function GradesManagementPage() {
         const updatedStudentData = { id: updatedStudentDoc.id, ...updatedStudentDoc.data() } as User;
         setSelectedStudent(updatedStudentData);
         setAllStudents(prev => prev.map(s => s.id === updatedStudentData.id ? updatedStudentData : s));
-        reset(data); // Resets form state, making it not dirty
+        reset(data); 
       }
 
     } catch (error: any) {
@@ -456,8 +421,8 @@ export default function GradesManagementPage() {
     const currentExamScore = typeof examScoreValue === 'number' ? examScoreValue : 0;
     const currentPartialTotal = currentTotalAccumulated + currentExamScore;
 
-    const pointsRemainingForAccumulated = gradingConfig.maxTotalAccumulatedScore - currentTotalAccumulated;
-    const fieldsDisabled = isSubmitting || !selectedStudent || isLoadingGradingConfig;
+    const pointsRemainingForAccumulated = gradingConfig.maxTotalAccumulatedScore - currentTotalAccumulated; // gradingConfig from context
+    const fieldsDisabled = isSubmitting || !selectedStudent || authLoading; // Use authLoading
 
     return (
       <div className="space-y-6 p-1">
@@ -554,7 +519,7 @@ export default function GradesManagementPage() {
   };
 
   const renderAutoSaveStatus = () => {
-    if (isSubmitting && autoSaveStatus !== 'saving') return null; // If manually submitting, don't show autosave status unless it's already saving
+    if (isSubmitting && autoSaveStatus !== 'saving') return null; 
     switch (autoSaveStatus) {
       case 'saving':
         return <span className="text-xs text-muted-foreground ml-2 flex items-center"><Loader2 className="h-3 w-3 animate-spin mr-1" />Guardando automáticamente...</span>;
@@ -563,14 +528,14 @@ export default function GradesManagementPage() {
       case 'error_saving':
         return <span className="text-xs text-red-600 ml-2">Error al autoguardar. Intentar guardado manual.</span>;
       default:
-        if (selectedStudent && formState.isDirty) { // Only show "unsaved changes" if a student is selected and form is dirty
+        if (selectedStudent && formState.isDirty) { 
              return <span className="text-xs text-muted-foreground ml-2">Cambios sin guardar...</span>;
         }
         return null;
     }
   };
 
-  if (isLoadingGradingConfig || (isLoadingData && !allStudents.length && !allGroups.length)) {
+  if (authLoading || (isLoadingData && !allStudents.length && !allGroups.length)) { // Use authLoading
     return (
         <Card>
             <CardHeader>
@@ -602,7 +567,7 @@ export default function GradesManagementPage() {
               ? "Selecciona uno de tus grupos, luego un estudiante para editar sus calificaciones."
               : "Filtra estudiantes por grupo o busca por nombre. Selecciona un estudiante para editar sus calificaciones."}
             <br />
-            Configuración actual: {gradingConfig.numberOfPartials} parciales, aprobación con {gradingConfig.passingGrade}pts.
+            Configuración Institucional: {gradingConfig.numberOfPartials} parciales, aprobación con {gradingConfig.passingGrade}pts.
             Máx. {MAX_ACCUMULATED_ACTIVITIES} actividades de acumulación (total {gradingConfig.maxTotalAccumulatedScore}pts) y 1 examen ({gradingConfig.maxExamScore}pts) por parcial.
             Nota parcial total {gradingConfig.maxTotalAccumulatedScore + gradingConfig.maxExamScore}pts.
           </CardDescription>
@@ -721,9 +686,9 @@ export default function GradesManagementPage() {
               {selectedStudent ? `Editando Calificaciones para: ${selectedStudent.name}` : 'Selecciona un Estudiante para Editar Calificaciones'}
             </CardTitle>
              <CardDescription>
-              {selectedStudent && !isLoadingGradingConfig
-                ? `Configuración: ${gradingConfig.numberOfPartials} parciales. Acum. máx ${gradingConfig.maxTotalAccumulatedScore}pts, Examen máx ${gradingConfig.maxExamScore}pts. Aprobación ${gradingConfig.passingGrade}pts.`
-                : isLoadingGradingConfig ? 'Cargando configuración de calificación...' : 'Una vez que selecciones un estudiante, podrás editar sus calificaciones aquí.'
+              {selectedStudent && !authLoading // Use authLoading
+                ? `Configuración Institucional: ${gradingConfig.numberOfPartials} parciales. Acum. máx ${gradingConfig.maxTotalAccumulatedScore}pts, Examen máx ${gradingConfig.maxExamScore}pts. Aprobación ${gradingConfig.passingGrade}pts.`
+                : authLoading ? 'Cargando configuración de calificación...' : 'Una vez que selecciones un estudiante, podrás editar sus calificaciones aquí.'
               }
             </CardDescription>
           </CardHeader>
@@ -732,7 +697,7 @@ export default function GradesManagementPage() {
               <Tabs defaultValue="partial1" className="w-full">
                 <TabsList className={`grid w-full grid-cols-${Math.max(1, gradingConfig.numberOfPartials)}`}>
                   {Array.from({ length: Math.max(1, gradingConfig.numberOfPartials) }, (_, i) => i + 1).map((pNum) => (
-                    <TabsTrigger key={`tab-trigger-p${pNum}`} value={`partial${pNum}`} disabled={!selectedStudent || isSubmitting || isLoadingGradingConfig}>
+                    <TabsTrigger key={`tab-trigger-p${pNum}`} value={`partial${pNum}`} disabled={!selectedStudent || isSubmitting || authLoading}>
                       {pNum}{pNum === 1 ? 'st' : pNum === 2 ? 'nd' : pNum === 3 ? 'rd' : 'th'} Partial
                     </TabsTrigger>
                   ))}
@@ -749,15 +714,15 @@ export default function GradesManagementPage() {
                 })}
               </Tabs>
               <div className="flex items-center">
-                <Button type="submit" disabled={isSubmitting || !selectedStudent || !formState.isDirty || isLoadingGradingConfig} className="sm:w-auto">
-                    {(isSubmitting || isLoadingGradingConfig) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                <Button type="submit" disabled={isSubmitting || !selectedStudent || !formState.isDirty || authLoading} className="sm:w-auto">
+                    {(isSubmitting || authLoading) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                     <Save className="mr-2 h-4 w-4" />
                     {selectedStudent ? `Guardar Calificaciones para ${selectedStudent.name}` : 'Guardar Calificaciones'}
                 </Button>
                 {renderAutoSaveStatus()}
               </div>
 
-              {!selectedStudent && !isLoadingData && !isLoadingGradingConfig && (
+              {!selectedStudent && !isLoadingData && !authLoading && (
                 <p className="text-muted-foreground text-center py-6">
                   {firestoreUser?.role === 'teacher' && availableGroupsForFilter.length === 0 
                     ? "No tienes grupos asignados para gestionar calificaciones."
@@ -771,8 +736,3 @@ export default function GradesManagementPage() {
     </div>
   );
 }
-
-
-    
-
-    
