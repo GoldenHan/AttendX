@@ -29,15 +29,14 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Loader2, PlusCircle, CalendarIcon, AlertTriangle, Info, Edit, Trash2 } from 'lucide-react';
+import { Loader2, PlusCircle, CalendarIcon, AlertTriangle, Info, Edit, Trash2, Users } from 'lucide-react'; // Added Users icon
 import { useToast } from '@/hooks/use-toast';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, query, where, addDoc, orderBy, serverTimestamp, Timestamp, doc, updateDoc, deleteDoc } from 'firebase/firestore';
-import type { Group, ClassroomItem as ClassroomItemType } from '@/types';
+import type { Group, ClassroomItem as ClassroomItemType, ClassroomItemSubmission } from '@/types';
 import { useAuth } from '@/contexts/AuthContext';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -64,6 +63,10 @@ const classroomItemFormSchema = z.object({
 
 type ClassroomItemFormValues = z.infer<typeof classroomItemFormSchema>;
 
+interface DisplayableClassroomItem extends ClassroomItemType {
+  submissionCount?: number;
+}
+
 export default function ClassroomAssignmentsPage() {
   const { toast } = useToast();
   const { firestoreUser, loading: authLoading } = useAuth();
@@ -71,7 +74,7 @@ export default function ClassroomAssignmentsPage() {
 
   const [manageableGroups, setManageableGroups] = useState<Group[]>([]);
   const [selectedGroupId, setSelectedGroupId] = useState<string>('');
-  const [classroomItems, setClassroomItems] = useState<ClassroomItemType[]>([]);
+  const [classroomItems, setClassroomItems] = useState<DisplayableClassroomItem[]>([]);
 
   const [isLoadingGroups, setIsLoadingGroups] = useState(true);
   const [isLoadingItems, setIsLoadingItems] = useState(false);
@@ -102,12 +105,12 @@ export default function ClassroomAssignmentsPage() {
     }
     setIsLoadingGroups(true);
     try {
-      let groupsQuery;
+      let groupsQuerySnapshot;
       if (firestoreUser.role === 'admin') {
-        groupsQuery = query(
+        groupsQuerySnapshot = await getDocs(query(
           collection(db, 'groups'),
           where('institutionId', '==', firestoreUser.institutionId)
-        );
+        ));
       } else if (firestoreUser.role === 'supervisor') {
         if (!firestoreUser.sedeId) {
           toast({ title: "Sede Requerida", description: "Como supervisor, debes estar asignado a una Sede para gestionar tareas de classroom.", variant: "destructive"});
@@ -115,26 +118,26 @@ export default function ClassroomAssignmentsPage() {
           setIsLoadingGroups(false);
           return;
         }
-        groupsQuery = query(
+        groupsQuerySnapshot = await getDocs(query(
           collection(db, 'groups'),
           where('institutionId', '==', firestoreUser.institutionId),
           where('sedeId', '==', firestoreUser.sedeId)
-        );
+        ));
       } else if (firestoreUser.role === 'teacher') {
-        groupsQuery = query(
+        groupsQuerySnapshot = await getDocs(query(
           collection(db, 'groups'),
           where('institutionId', '==', firestoreUser.institutionId),
           where('teacherId', '==', firestoreUser.id)
-        );
+        ));
       } else {
         setManageableGroups([]);
         setIsLoadingGroups(false);
         return;
       }
 
-      const snapshot = await getDocs(groupsQuery);
-      const groups = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Group));
+      const groups = groupsQuerySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Group));
       setManageableGroups(groups);
+
       if (groups.length > 0 && !selectedGroupId) {
         const initialGroupId = groups[0].id;
         setSelectedGroupId(initialGroupId);
@@ -171,8 +174,8 @@ export default function ClassroomAssignmentsPage() {
         where('institutionId', '==', firestoreUser.institutionId),
         orderBy('createdAt', 'desc')
       );
-      const snapshot = await getDocs(itemsQuery);
-      const items = snapshot.docs.map(doc => {
+      const itemsSnapshot = await getDocs(itemsQuery);
+      let fetchedItems: DisplayableClassroomItem[] = itemsSnapshot.docs.map(doc => {
         const data = doc.data();
         return {
           id: doc.id,
@@ -180,9 +183,33 @@ export default function ClassroomAssignmentsPage() {
           createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate().toISOString() : data.createdAt,
           updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate().toISOString() : data.updatedAt,
           dueDate: data.dueDate instanceof Timestamp ? data.dueDate.toDate().toISOString() : (typeof data.dueDate === 'string' ? data.dueDate : null),
-        } as ClassroomItemType;
+          submissionCount: 0, // Initialize, will be fetched next
+        } as DisplayableClassroomItem;
       });
-      setClassroomItems(items);
+
+      // Fetch submission counts for assignment items
+      if (fetchedItems.length > 0) {
+        const assignmentItemIds = fetchedItems.filter(item => item.itemType === 'assignment').map(item => item.id);
+        if (assignmentItemIds.length > 0) {
+          // Firestore 'in' query limit is 30. For more items, batching or different strategy needed.
+          const submissionsQuery = query(
+            collection(db, 'classroomItemSubmissions'),
+            where('itemId', 'in', assignmentItemIds),
+            where('institutionId', '==', firestoreUser.institutionId)
+          );
+          const submissionsSnapshot = await getDocs(submissionsQuery);
+          const counts = new Map<string, number>();
+          submissionsSnapshot.forEach(subDoc => {
+            const itemId = subDoc.data().itemId;
+            counts.set(itemId, (counts.get(itemId) || 0) + 1);
+          });
+          fetchedItems = fetchedItems.map(item => ({
+            ...item,
+            submissionCount: item.itemType === 'assignment' ? (counts.get(item.id) || 0) : undefined,
+          }));
+        }
+      }
+      setClassroomItems(fetchedItems);
     } catch (error) {
       console.error('Error fetching classroom items:', error);
       toast({ title: 'Error', description: 'Could not load items for the selected group.', variant: 'destructive' });
@@ -238,14 +265,20 @@ export default function ClassroomAssignmentsPage() {
     }
     setIsSubmitting(true);
 
+    // Ensure dueDate is either a valid ISO string or null
+    let dueDateISO: string | null = null;
+    if (data.dueDate && isValid(data.dueDate)) {
+        dueDateISO = data.dueDate.toISOString();
+    }
+
     const itemDataPayload = {
         groupId: data.groupId,
         institutionId: firestoreUser.institutionId,
-        teacherId: firestoreUser.id,
+        teacherId: firestoreUser.id, // ID of the user creating/editing (admin/supervisor/teacher)
         title: data.title,
         description: data.description || '',
         itemType: data.itemType,
-        dueDate: data.dueDate ? data.dueDate.toISOString() : null,
+        dueDate: dueDateISO,
         status: data.status,
         updatedAt: serverTimestamp(),
     };
@@ -253,7 +286,8 @@ export default function ClassroomAssignmentsPage() {
     try {
       if (editingItem) {
         const itemRef = doc(db, 'classroomItems', editingItem.id);
-        await updateDoc(itemRef, itemDataPayload);
+        // Explicitly cast to include serverTimestamp for updatedAt
+        await updateDoc(itemRef, itemDataPayload as any);
         toast({ title: 'Success', description: `${data.itemType === 'assignment' ? 'Assignment' : 'Reminder'} "${data.title}" updated.` });
       } else {
         await addDoc(collection(db, 'classroomItems'), {
@@ -262,7 +296,7 @@ export default function ClassroomAssignmentsPage() {
         });
         toast({ title: 'Success', description: `${data.itemType === 'assignment' ? 'Assignment' : 'Reminder'} "${data.title}" created.` });
       }
-      fetchClassroomItemsForGroup(data.groupId);
+      fetchClassroomItemsForGroup(data.groupId); // Refresh items for the current group
       form.reset({
         title: '', description: '', itemType: 'assignment', dueDate: null,
         groupId: data.groupId, status: 'published',
@@ -287,15 +321,19 @@ export default function ClassroomAssignmentsPage() {
       setIsConfirmDeleteDialogOpen(false);
       return;
     }
-    // Optional: Add permission check here (e.g., only creator or admin can delete)
-    // For now, assuming if user can see it and is on this page, they can delete.
-
-    setIsSubmitting(true); // Use general submitting state or a specific one for deletion
+    setIsSubmitting(true);
     try {
       const itemRef = doc(db, 'classroomItems', itemToDelete.id);
       await deleteDoc(itemRef);
+      // Consider deleting related submissions if any:
+      // const submissionsQuery = query(collection(db, 'classroomItemSubmissions'), where('itemId', '==', itemToDelete.id));
+      // const submissionsSnapshot = await getDocs(submissionsQuery);
+      // const batch = writeBatch(db);
+      // submissionsSnapshot.forEach(subDoc => batch.delete(subDoc.ref));
+      // await batch.commit();
+      
       toast({ title: 'Item Deleted', description: `"${itemToDelete.title}" has been removed.` });
-      fetchClassroomItemsForGroup(itemToDelete.groupId); // Refresh list for current group
+      fetchClassroomItemsForGroup(itemToDelete.groupId);
     } catch (error) {
       console.error('Error deleting classroom item:', error);
       toast({ title: 'Deletion Failed', description: 'Could not delete the item.', variant: 'destructive' });
@@ -322,7 +360,7 @@ export default function ClassroomAssignmentsPage() {
             </div>
             <Dialog open={isFormOpen} onOpenChange={(open) => {
               setIsFormOpen(open);
-              if (!open) setEditingItem(null); // Clear editingItem when dialog closes
+              if (!open) setEditingItem(null);
             }}>
               <DialogTrigger asChild>
                 <Button size="sm" className="gap-1.5 text-sm" onClick={openCreateFormDialog} disabled={manageableGroups.length === 0 || isLoadingGroups}>
@@ -342,10 +380,10 @@ export default function ClassroomAssignmentsPage() {
                         <Select 
                             onValueChange={(value) => {
                                 field.onChange(value);
-                                setSelectedGroupId(value);
+                                setSelectedGroupId(value); // Also update page's selected group if form's group changes
                             }} 
                             value={field.value} 
-                            disabled={manageableGroups.length === 0 || isLoadingGroups || !!editingItem} // Disable if editing
+                            disabled={manageableGroups.length === 0 || isLoadingGroups || !!editingItem}
                         >
                           <FormControl>
                             <SelectTrigger><SelectValue placeholder="Select a group" /></SelectTrigger>
@@ -419,7 +457,7 @@ export default function ClassroomAssignmentsPage() {
                 value={selectedGroupId} 
                 onValueChange={(value) => {
                     setSelectedGroupId(value);
-                    if (value) form.setValue('groupId', value);
+                    if (value) form.setValue('groupId', value); // Update form's default group when page selection changes
                 }} 
                 disabled={isLoadingGroups || manageableGroups.length === 0}
             >
@@ -503,6 +541,12 @@ export default function ClassroomAssignmentsPage() {
                       <CardDescription>
                         Status: <span className={item.status === 'published' ? 'text-green-600 dark:text-green-400' : 'text-orange-600 dark:text-orange-400'}>{item.status.charAt(0).toUpperCase() + item.status.slice(1)}</span>
                         {item.dueDate && ` | Due: ${isValid(parseISO(item.dueDate)) ? format(parseISO(item.dueDate), 'PPP p') : 'Invalid Date'}`}
+                        {item.itemType === 'assignment' && typeof item.submissionCount === 'number' && (
+                            <span className="ml-2 inline-flex items-center">
+                                <Users className="h-3.5 w-3.5 mr-1 text-muted-foreground"/>
+                                {item.submissionCount} {item.submissionCount === 1 ? 'Submission' : 'Submissions'}
+                            </span>
+                        )}
                       </CardDescription>
                     </CardHeader>
                     <CardContent>
@@ -535,7 +579,7 @@ export default function ClassroomAssignmentsPage() {
             <AlertDialogTitle>Are you sure?</AlertDialogTitle>
             <AlertDialogDescription>
               This action cannot be undone. This will permanently delete the item
-              "{itemToDelete?.title}".
+              "{itemToDelete?.title}". Related student submissions (if any) will NOT be deleted by this action yet.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

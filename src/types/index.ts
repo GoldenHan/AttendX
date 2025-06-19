@@ -172,13 +172,26 @@ export interface ClassroomItem {
   id: string;
   groupId: string;
   institutionId: string;
-  teacherId: string; // User ID of the teacher who created it
+  teacherId: string; // User ID of the teacher/admin/supervisor who created it
   title: string;
   description: string;
-  itemType: 'assignment' | 'reminder'; // Differentiates between a task and a simple reminder
+  itemType: 'assignment' | 'reminder';
   dueDate?: string | null; // ISO string for due date, optional for reminders
   createdAt: string; // ISO string
   updatedAt: string; // ISO string
-  status: 'published' | 'draft'; // Allows teachers to save drafts
-  // Future: attachments?: Array<{ name: string; url: string; type: string; }>;
+  status: 'published' | 'draft';
+}
+
+// New type for Student Submissions to Classroom Items
+export interface ClassroomItemSubmission {
+  id: string; // Auto-generated Firestore ID
+  itemId: string; // ID of the ClassroomItem
+  studentId: string; // ID of the student submitting
+  institutionId: string;
+  groupId: string; // groupId of the original item, for easier querying
+  submittedAt: string; // ISO string timestamp of when it was submitted
+  status: 'submitted' | 'late'; // Status of the submission
+  // grade?: number | null; // Optional: for teacher's grade
+  // teacherFeedback?: string | null; // Optional: for teacher's feedback
+  // studentComment?: string | null; // Optional: for student's comment upon submission
 }
