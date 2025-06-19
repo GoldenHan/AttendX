@@ -16,17 +16,6 @@ export default function AppLayout({
   const pathname = usePathname(); 
 
   useEffect(() => {
-    // Re-apply theme from localStorage when AppLayout mounts
-    // This ensures the theme is consistent when navigating from pages like /login
-    const storedTheme = localStorage.getItem('theme');
-    if (storedTheme === 'dark') {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
-  }, []); // Runs once on mount
-
-  useEffect(() => {
     if (!loading) {
       const isForcePasswordChangePage = pathname === '/force-password-change';
       

@@ -1,7 +1,7 @@
 
 'use client';
 
-import React, { useState, useEffect } from 'react'; // Added useEffect
+import React, { useState, useEffect } from 'react'; 
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -80,11 +80,6 @@ export default function AuthPage() {
     defaultValues: { email: '' },
   });
 
-  useEffect(() => {
-    // Ensure login page is not in dark mode, overriding RootLayout's initial theme setting
-    document.documentElement.classList.remove('dark');
-  }, []);
-
   const currentLoadingState = authLoading || isSubmitting;
 
   const handleLoginSubmit = async (data: LoginFormValues) => {
@@ -118,12 +113,12 @@ export default function AuthPage() {
         data.adminName, 
         data.adminUsername, 
         data.adminEmail, 
-        data.adminPassword, // For new admin signup, they set their own password directly
+        data.adminPassword, 
         'admin' 
       );
-      toast({ title: 'Registro de Administrador Exitoso', description: `Bienvenido/a, ${data.adminName}. Tu institución ha sido registrada.` });
-      setIsSignUpActive(false); // Switch back to login view
-      loginForm.setValue('identifier', data.adminEmail); // Pre-fill login form
+      toast({ title: 'Registro de Administrador Exitoso', description: `Bienvenido/a, ${data.adminName}. Tu institución "${data.institutionName}" ha sido registrada.` });
+      setIsSignUpActive(false); 
+      loginForm.setValue('identifier', data.adminEmail); 
     } catch (error: any) {
       let errorMessage = 'Fallo al registrar la nueva institución. Por favor, inténtalo de nuevo.';
       if (error.code === 'auth/email-already-in-use') errorMessage = 'Este correo electrónico ya está en uso.';
@@ -151,7 +146,7 @@ export default function AuthPage() {
       let errorMessage = "No se pudo enviar el correo de restablecimiento.";
       if (error.code === 'auth/user-not-found') {
          toast({
-            title: 'Email de Restablecimiento Enviado', // Generic message
+            title: 'Email de Restablecimiento Enviado', 
             description: `Si existe una cuenta con ${data.email}, se ha enviado un enlace para restablecer la contraseña.`,
           });
           setIsForgotPasswordDialogOpen(false);

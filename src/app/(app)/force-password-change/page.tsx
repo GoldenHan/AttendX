@@ -48,10 +48,6 @@ export default function ForcePasswordChangePage() {
     },
   });
 
-  useEffect(() => {
-    // Ensure this page is not in dark mode
-    document.documentElement.classList.remove('dark');
-  }, []);
 
   // Redirect if password change is not required or user not loaded
   useEffect(() => {
