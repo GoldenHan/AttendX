@@ -42,12 +42,12 @@ export interface Sede {
   id: string;
   name: string;
   supervisorId?: string | null; // UID of the user with role 'supervisor' assigned to this Sede
-  institutionId: string; // ID of the institution this Sede belongs to (Mandatory)
+  institutionId: string;
 }
 
 export interface User {
-  id: string; // Firestore document ID (for users collection, this will be the Firebase Auth UID)
-  uid?: string; // Firebase Auth UID (explicitly ensure it's here, often same as id for 'users' collection)
+  id: string; 
+  uid?: string; 
   name: string;
   username?: string | null;
   role: 'student' | 'teacher' | 'admin' | 'caja' | 'supervisor';
@@ -56,8 +56,8 @@ export interface User {
   photoUrl?: string | null;
   attendanceCode?: string | null;
   requiresPasswordChange?: boolean;
-  sedeId?: string | null; // For teachers and supervisors to link them to a Sede, and for students
-  institutionId: string; // ID of the institution this user belongs to (Mandatory for all users)
+  sedeId?: string | null; 
+  institutionId: string;
 
   // Student-specific fields
   level?: 'Beginner' | 'Intermediate' | 'Advanced' | 'Other';
@@ -108,15 +108,12 @@ export interface Group {
   institutionId: string;
 }
 
-// Config stored with document ID = institutionId in 'institutionGradingConfigs' collection
 export interface GradingConfiguration {
-  // id?: string; // Removed, doc ID is institutionId
   numberOfPartials: 1 | 2 | 3 | 4;
   passingGrade: number;
   maxIndividualActivityScore: number;
   maxTotalAccumulatedScore: number;
   maxExamScore: number;
-  // institutionId?: string | null; // Removed, doc ID is institutionId
 }
 
 export const DEFAULT_GRADING_CONFIG: GradingConfiguration = {
@@ -127,13 +124,10 @@ export const DEFAULT_GRADING_CONFIG: GradingConfiguration = {
   maxExamScore: 50,
 };
 
-// Config stored with document ID = institutionId in 'institutionScheduleConfigs' collection
 export interface ClassScheduleConfiguration {
-  // id?: string; // Removed, doc ID is institutionId
   scheduleType: 'Saturday' | 'Sunday' | 'Daily' | 'NotSet' | 'SaturdayAndSunday';
   startTime: string;
   endTime: string;
-  // institutionId?: string | null; // Removed, doc ID is institutionId
 }
 
 export const DEFAULT_CLASS_SCHEDULE_CONFIG: ClassScheduleConfiguration = {
@@ -172,3 +166,19 @@ export const getDefaultStudentGradeStructure = (config: GradingConfiguration): S
   }
   return structure;
 };
+
+// New type for Classroom items
+export interface ClassroomItem {
+  id: string;
+  groupId: string;
+  institutionId: string;
+  teacherId: string; // User ID of the teacher who created it
+  title: string;
+  description: string;
+  itemType: 'assignment' | 'reminder'; // Differentiates between a task and a simple reminder
+  dueDate?: string | null; // ISO string for due date, optional for reminders
+  createdAt: string; // ISO string
+  updatedAt: string; // ISO string
+  status: 'published' | 'draft'; // Allows teachers to save drafts
+  // Future: attachments?: Array<{ name: string; url: string; type: string; }>;
+}

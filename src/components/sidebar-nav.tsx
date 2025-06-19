@@ -25,6 +25,7 @@ import {
   ClipboardList,
   Award,
   Building,
+  ClipboardSignature, // Added for Classroom Admin
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import type { User } from '@/types';
@@ -34,7 +35,7 @@ interface NavItem {
   label: string;
   icon: React.ElementType;
   roles?: User['role'][];
-  excludeRoles?: User['role'][]; // New property to explicitly exclude roles
+  excludeRoles?: User['role'][]; 
 }
 
 const navItems: NavItem[] = [
@@ -43,11 +44,17 @@ const navItems: NavItem[] = [
   { href: '/attendance-log', label: 'Log Group Attendance', icon: ClipboardEdit, roles: ['admin', 'teacher', 'caja', 'supervisor'] },
   { href: '/attendance-records', label: 'Attendance Records', icon: BookUser, roles: ['admin', 'teacher', 'caja', 'supervisor'] },
   { href: '/reports', label: 'Attendance Reports', icon: BarChart3, roles: ['admin', 'teacher', 'caja', 'supervisor'] },
+  
+  // Classroom Section
+  { href: '/classroom/assignments', label: 'Classroom Admin', icon: ClipboardSignature, roles: ['teacher', 'admin', 'supervisor'] },
+  { href: '/classroom/my-tasks', label: 'My Classroom Tasks', icon: ClipboardList, roles: ['student'] },
+
+  // Student specific views
   { href: '/student-grades', label: 'My Grades', icon: ClipboardCheck, roles: ['student'] },
+  
+  // Management (for Admin, Supervisor, Teacher)
   { href: '/student-grades', label: 'Student Grades View', icon: ClipboardCheck, roles: ['admin', 'teacher', 'supervisor'], excludeRoles: ['student'] },
   { href: '/ai-analysis', label: 'AI Analysis', icon: Brain, roles: ['admin', 'teacher', 'supervisor'] },
-
-  // Management (for Admin, Supervisor, Teacher)
   { href: '/student-management', label: 'Student Management', icon: GraduationCap, roles: ['admin', 'teacher', 'supervisor'] },
   { href: '/group-management', label: 'Group Management', icon: FolderKanban, roles: ['admin', 'teacher', 'supervisor'] },
   { href: '/grades-management', label: 'Grades Management', icon: ClipboardCheck, roles: ['admin', 'teacher', 'supervisor'] },
@@ -58,7 +65,6 @@ const navItems: NavItem[] = [
   { href: '/user-management', label: 'Staff Management', icon: Briefcase, roles: ['admin', 'supervisor'] },
   { href: '/sede-management', label: 'Sede Management', icon: Building, roles: ['admin'] },
   { href: '/app-settings', label: 'Settings', icon: Settings, roles: ['admin'] },
-  // QR Session Setup link removed
 ];
 
 
@@ -86,7 +92,7 @@ export function SidebarNav() {
 
   const visibleNavItems = filterNavItemsForRole(navItems);
 
-  const generalItems = visibleNavItems.filter(item => ['/dashboard', '/attendance-log', '/attendance-records', '/reports', '/student-grades', '/ai-analysis'].includes(item.href));
+  const generalItems = visibleNavItems.filter(item => ['/dashboard', '/attendance-log', '/attendance-records', '/reports', '/student-grades', '/ai-analysis', '/classroom/assignments', '/classroom/my-tasks'].includes(item.href));
   const managementItems = visibleNavItems.filter(item => ['/student-management', '/group-management', '/grades-management', '/partial-grades-report', '/certificate-management'].includes(item.href));
   const adminItems = visibleNavItems.filter(item => ['/user-management', '/sede-management', '/app-settings'].includes(item.href));
 
