@@ -393,7 +393,7 @@ export default function AuthPage() {
             {/* Overlay Left Panel (Prompts to Sign In, visible when SignUp form is active) */}
             <div
               className={cn(
-                "overlay-panel overlay-left absolute top-0 flex h-full w-1/2 flex-col items-center justify-center px-10 text-center transform",
+                "overlay-panel overlay-left absolute top-0 flex h-full w-1/2 flex-col items-center justify-center px-10 text-center",
                 "bg-primary" 
               )}
             >
@@ -417,8 +417,8 @@ export default function AuthPage() {
             {/* Overlay Right Panel (Prompts to Sign Up, visible when SignIn form is active) */}
             <div
               className={cn(
-                "overlay-panel overlay-right absolute top-0 right-0 flex h-full w-1/2 flex-col items-center justify-center px-10 text-center transform relative",
-                "bg-signup-panel text-signup-panel-foreground" 
+                "overlay-panel overlay-right absolute top-0 right-0 flex h-full w-1/2 flex-col items-center justify-center px-10 text-center",
+                "bg-signup-panel text-signup-panel-foreground"
               )}
             >
               <h1 className="text-3xl font-bold">¿Nueva Institución?</h1>
