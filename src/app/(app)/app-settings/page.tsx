@@ -16,12 +16,15 @@ import { doc, getDoc, setDoc, collection, getDocs, query, where } from 'firebase
 import type { GradingConfiguration, User, ClassScheduleConfiguration } from '@/types';
 import { DEFAULT_GRADING_CONFIG, DEFAULT_CLASS_SCHEDULE_CONFIG } from '@/types';
 import Image from 'next/image';
+import { useAuth } from '@/contexts/AuthContext'; // Import useAuth
 
-const MAX_LOGO_SIZE_MB = 1; // Max logo size in MB for Data URL storage
-const DEFAULT_APP_NAME = ""; // Changed from "AttendX" to ""
+const MAX_LOGO_SIZE_MB = 1; 
+const DEFAULT_APP_NAME = ""; 
 
 export default function AppSettingsPage() {
   const { toast } = useToast();
+  const { firestoreUser, fetchGradingConfigForInstitution } = useAuth(); // Get firestoreUser and fetchGradingConfig
+
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [appName, setAppName] = useState(DEFAULT_APP_NAME);
   const [isExporting, setIsExporting] = useState(false);
@@ -59,24 +62,33 @@ export default function AppSettingsPage() {
     }
   }, []);
 
-
-  const fetchGradingConfiguration = useCallback(async () => {
+  const loadGradingConfiguration = useCallback(async () => {
+    if (!firestoreUser?.institutionId) {
+      setIsLoadingGradingConfig(false);
+      setGradingConfig(DEFAULT_GRADING_CONFIG);
+      toast({ title: "Error", description: "Cannot load grading config without institution ID.", variant: "destructive" });
+      return;
+    }
     setIsLoadingGradingConfig(true);
     try {
-      const configDocRef = doc(db, 'appConfiguration', 'currentGradingConfig');
-      const docSnap = await getDoc(configDocRef);
-      if (docSnap.exists()) {
-        setGradingConfig(docSnap.data() as GradingConfiguration);
-      } else {
-        setGradingConfig(DEFAULT_GRADING_CONFIG);
-        toast({
-          title: "Default Grading Config",
-          description: "No grading configuration found. Loaded default values.",
-          variant: "default",
-        });
+      const config = await fetchGradingConfigForInstitution(firestoreUser.institutionId);
+      setGradingConfig(config); // fetchGradingConfigForInstitution returns default if not found
+      if (JSON.stringify(config) === JSON.stringify(DEFAULT_GRADING_CONFIG)) {
+         // This check might be tricky if default values are modified or if a saved config happens to be identical to default
+         // A better check would be if the document existed in Firestore. fetchGradingConfigForInstitution doesn't expose this directly.
+         // For now, this implies it's using default.
+        const configDocRef = doc(db, 'institutionGradingConfigs', firestoreUser.institutionId);
+        const docSnap = await getDoc(configDocRef);
+        if (!docSnap.exists()) {
+          toast({
+            title: "Default Grading Config",
+            description: "No specific grading configuration found for your institution. Loaded default values. Save to create one.",
+            variant: "default",
+          });
+        }
       }
     } catch (error) {
-      console.error("Error fetching grading configuration:", error);
+      console.error("Error fetching institution grading configuration:", error);
       setGradingConfig(DEFAULT_GRADING_CONFIG);
       toast({
         title: "Error Loading Grading Config",
@@ -86,12 +98,18 @@ export default function AppSettingsPage() {
     } finally {
       setIsLoadingGradingConfig(false);
     }
-  }, [toast]);
+  }, [firestoreUser, toast, fetchGradingConfigForInstitution]);
 
-  const fetchClassScheduleConfiguration = useCallback(async () => {
+  const loadClassScheduleConfiguration = useCallback(async () => {
+    if (!firestoreUser?.institutionId) {
+      setIsLoadingScheduleConfig(false);
+      setClassScheduleConfig(DEFAULT_CLASS_SCHEDULE_CONFIG);
+      toast({ title: "Error", description: "Cannot load schedule config without institution ID.", variant: "destructive" });
+      return;
+    }
     setIsLoadingScheduleConfig(true);
     try {
-      const configDocRef = doc(db, 'appConfiguration', 'currentClassScheduleConfig');
+      const configDocRef = doc(db, 'institutionScheduleConfigs', firestoreUser.institutionId);
       const docSnap = await getDoc(configDocRef);
       if (docSnap.exists()) {
         setClassScheduleConfig(docSnap.data() as ClassScheduleConfiguration);
@@ -99,7 +117,7 @@ export default function AppSettingsPage() {
         setClassScheduleConfig(DEFAULT_CLASS_SCHEDULE_CONFIG);
         toast({
           title: "Default Schedule Config",
-          description: "No schedule configuration found. Loaded default values.",
+          description: "No schedule configuration found for your institution. Loaded default values. Save to create one.",
           variant: "default",
         });
       }
@@ -114,12 +132,19 @@ export default function AppSettingsPage() {
     } finally {
       setIsLoadingScheduleConfig(false);
     }
-  }, [toast]);
+  }, [firestoreUser, toast]);
 
   useEffect(() => {
-    fetchGradingConfiguration();
-    fetchClassScheduleConfiguration();
-  }, [fetchGradingConfiguration, fetchClassScheduleConfiguration]);
+    if (firestoreUser?.institutionId) {
+        loadGradingConfiguration();
+        loadClassScheduleConfiguration();
+    } else {
+        setIsLoadingGradingConfig(false);
+        setIsLoadingScheduleConfig(false);
+        setGradingConfig(DEFAULT_GRADING_CONFIG);
+        setClassScheduleConfig(DEFAULT_CLASS_SCHEDULE_CONFIG);
+    }
+  }, [firestoreUser, loadGradingConfiguration, loadClassScheduleConfiguration]);
 
 
   const handleThemeToggle = (checked: boolean) => {
@@ -181,14 +206,22 @@ export default function AppSettingsPage() {
 
 
   const handleExportStudentData = async () => {
+    if (!firestoreUser?.institutionId) {
+      toast({ title: 'Error', description: 'No institution context for export.', variant: 'destructive'});
+      return;
+    }
     setIsExporting(true);
     toast({ title: 'Initiating Export', description: 'Preparing student data...' });
     try {
-      const studentsSnapshot = await getDocs(query(collection(db, 'users'), where('role', '==', 'student')));
+      const studentsSnapshot = await getDocs(query(collection(db, 'users'), 
+        where('role', '==', 'student'),
+        where('institutionId', '==', firestoreUser.institutionId)
+      ));
       const studentsData = studentsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as User));
 
       if (studentsData.length === 0) {
-        toast({ title: 'No Data', description: 'No students to export.', variant: 'default' });
+        toast({ title: 'No Data', description: 'No students to export from your institution.', variant: 'default' });
+        setIsExporting(false);
         return;
       }
 
@@ -197,7 +230,7 @@ export default function AppSettingsPage() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${(appName || 'app').toLowerCase().replace(/\s+/g, '_')}_students_export.json`;
+      a.download = `${(appName || 'app').toLowerCase().replace(/\s+/g, '_')}_students_export_${firestoreUser.institutionId.substring(0,5)}.json`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -234,11 +267,21 @@ export default function AppSettingsPage() {
   };
 
   const handleSaveGradingConfiguration = async () => {
+    if (!firestoreUser?.institutionId) {
+      toast({ title: "Error", description: "Cannot save grading config without institution ID.", variant: "destructive" });
+      return;
+    }
     setIsSavingGradingConfig(true);
     try {
-      const configDocRef = doc(db, 'appConfiguration', 'currentGradingConfig');
-      await setDoc(configDocRef, gradingConfig, { merge: true });
-      toast({ title: 'Configuration Saved', description: 'Grading configuration has been saved.' });
+      const configDocRef = doc(db, 'institutionGradingConfigs', firestoreUser.institutionId);
+      // The GradingConfiguration type no longer has 'id' or 'institutionId' as fields.
+      const { ...configToSave } = gradingConfig; 
+      await setDoc(configDocRef, configToSave, { merge: true });
+      toast({ title: 'Configuration Saved', description: 'Grading configuration for your institution has been saved.' });
+       // Trigger AuthContext to refetch this specific config (optional, or rely on next login/page load)
+       if (typeof fetchGradingConfigForInstitution === 'function') {
+        await fetchGradingConfigForInstitution(firestoreUser.institutionId);
+      }
     } catch (error) {
       console.error("Error saving grading configuration:", error);
       toast({ title: 'Save Error', description: 'Could not save grading configuration.', variant: 'destructive' });
@@ -252,11 +295,17 @@ export default function AppSettingsPage() {
   };
 
   const handleSaveClassScheduleConfiguration = async () => {
+    if (!firestoreUser?.institutionId) {
+      toast({ title: "Error", description: "Cannot save schedule config without institution ID.", variant: "destructive" });
+      return;
+    }
     setIsSavingScheduleConfig(true);
     try {
-      const configDocRef = doc(db, 'appConfiguration', 'currentClassScheduleConfig');
-      await setDoc(configDocRef, classScheduleConfig, { merge: true });
-      toast({ title: 'Configuration Saved', description: 'Class schedule configuration has been saved.' });
+      const configDocRef = doc(db, 'institutionScheduleConfigs', firestoreUser.institutionId);
+       // The ClassScheduleConfiguration type no longer has 'id' or 'institutionId' as fields.
+      const { ...configToSave } = classScheduleConfig;
+      await setDoc(configDocRef, configToSave, { merge: true });
+      toast({ title: 'Configuration Saved', description: 'Class schedule configuration for your institution has been saved.' });
     } catch (error) {
       console.error("Error saving class schedule configuration:", error);
       toast({ title: 'Save Error', description: 'Could not save schedule configuration.', variant: 'destructive' });
@@ -265,6 +314,19 @@ export default function AppSettingsPage() {
     }
   };
 
+   if (!firestoreUser?.institutionId) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2"><Settings className="h-6 w-6 text-primary" /> Application Settings</CardTitle>
+          <CardDescription>Loading institution details...</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Verifying institution...
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <div className="space-y-8">
@@ -274,7 +336,7 @@ export default function AppSettingsPage() {
             <Settings className="h-6 w-6 text-primary" />
             Application Settings
           </CardTitle>
-          <CardDescription>Configure general application settings, appearance, and data management.</CardDescription>
+          <CardDescription>Configure general application settings, appearance, and data management for your institution.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-8">
 
@@ -283,15 +345,15 @@ export default function AppSettingsPage() {
             <Separator />
             <div className="space-y-4 pt-2">
               <div className="flex flex-col space-y-1.5">
-                <Label htmlFor="appName">Application Name</Label>
+                <Label htmlFor="appName">Application Name (Local Setting)</Label>
                 <Input id="appName" value={appName} onChange={handleAppNameChange} placeholder="Enter application name" />
-                <p className="text-xs text-muted-foreground">This name will be displayed and used in exports.</p>
+                <p className="text-xs text-muted-foreground">This name is stored locally in your browser and used in exports.</p>
               </div>
               <div className="flex items-center justify-between rounded-lg border p-3 shadow-sm">
                 <div className="space-y-0.5">
-                  <Label htmlFor="darkModeToggle" className="text-base">Dark Mode</Label>
+                  <Label htmlFor="darkModeToggle" className="text-base">Dark Mode (Local Setting)</Label>
                   <p className="text-xs text-muted-foreground">
-                    Toggle between light and dark themes for the application.
+                    Toggle between light and dark themes. This preference is stored locally in your browser.
                   </p>
                 </div>
                 <Switch
@@ -303,7 +365,7 @@ export default function AppSettingsPage() {
                 {isDarkMode ? <Moon className="ml-2 h-5 w-5" /> : <Sun className="ml-2 h-5 w-5" />}
               </div>
                <div className="space-y-2">
-                <Label htmlFor="logoFile">Application Logo</Label>
+                <Label htmlFor="logoFile">Application Logo (Local Setting)</Label>
                 <Input 
                     id="logoFile" 
                     type="file" 
@@ -322,9 +384,7 @@ export default function AppSettingsPage() {
                     {isProcessingLogo && <Loader2 className="h-5 w-5 animate-spin text-primary" />}
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Upload a logo file (PNG, JPG, GIF, SVG, max {MAX_LOGO_SIZE_MB}MB). It will be displayed in the header and sidebar.
-                  <br />
-                  Note: The logo is stored in your browser's local storage. For production with multiple users or devices, consider using a fixed URL or Firebase Storage.
+                  Upload a logo (PNG, JPG, GIF, SVG, max {MAX_LOGO_SIZE_MB}MB). Stored locally in your browser.
                 </p>
                 {logoPreviewUrl && (
                   <div className="mt-2 p-2 border rounded-md inline-block bg-muted">
@@ -341,7 +401,7 @@ export default function AppSettingsPage() {
           <div className="space-y-3">
             <h3 className="text-lg font-medium text-foreground flex items-center gap-2">
               <Clock className="h-5 w-5 text-primary" />
-              Class Schedule Configuration
+              Class Schedule Configuration (Institution: {firestoreUser?.institutionId?.substring(0,6)}...)
             </h3>
             <Separator />
             {isLoadingScheduleConfig ? (
@@ -390,7 +450,7 @@ export default function AppSettingsPage() {
                     <AlertTriangle className="h-5 w-5 mt-0.5 shrink-0 text-blue-500"/>
                     <div>
                         <p className="font-medium">Informational Note:</p>
-                        <p>This configuration sets default schedule types and times. Specific groups may override these if group-level scheduling is implemented.</p>
+                        <p>This configuration sets default schedule types and times for your institution. Specific groups may override these if group-level scheduling is implemented.</p>
                     </div>
                 </div>
                 <Button onClick={handleSaveClassScheduleConfiguration} disabled={isSavingScheduleConfig || isLoadingScheduleConfig}>
@@ -403,7 +463,7 @@ export default function AppSettingsPage() {
 
 
           <div className="space-y-3">
-            <h3 className="text-lg font-medium text-foreground">Grading System Configuration</h3>
+            <h3 className="text-lg font-medium text-foreground">Grading System Configuration (Institution: {firestoreUser?.institutionId?.substring(0,6)}...)</h3>
             <Separator />
             {isLoadingGradingConfig ? (
               <div className="flex items-center justify-center py-6">
@@ -447,7 +507,7 @@ export default function AppSettingsPage() {
                     <AlertTriangle className="h-5 w-5 mt-0.5 shrink-0"/>
                     <div>
                         <p className="font-medium">Important Note:</p>
-                        <p>Changing these settings will affect how new grades are entered and how existing grades are displayed and validated across the application. Ensure these values are correct for your institution's policies.</p>
+                        <p>Changing these settings will affect how new grades are entered and how existing grades are displayed and validated across your institution. Ensure these values are correct for your institution's policies.</p>
                         <p className="mt-1">The total score for a partial will be the sum of "Max Total Accumulated Score" and "Max Exam Score".</p>
                     </div>
                 </div>
@@ -460,14 +520,14 @@ export default function AppSettingsPage() {
           </div>
 
           <div className="space-y-3">
-            <h3 className="text-lg font-medium text-foreground">Data Management</h3>
+            <h3 className="text-lg font-medium text-foreground">Data Management (Institution: {firestoreUser?.institutionId?.substring(0,6)}...)</h3>
             <Separator />
             <div className="space-y-4 pt-2">
                <div className="flex items-center justify-between rounded-lg border p-3 shadow-sm">
                  <div>
                     <Label className="text-base">Export Student Data</Label>
                     <p className="text-xs text-muted-foreground">
-                        Export all student records (from 'users' collection, role 'student') to a JSON file.
+                        Export all student records from your institution to a JSON file.
                     </p>
                  </div>
                 <Button variant="outline" onClick={handleExportStudentData} disabled={isExporting}>
@@ -492,9 +552,8 @@ export default function AppSettingsPage() {
         </CardContent>
       </Card>
       <p className="text-sm text-muted-foreground text-center">
-        Note: Changes to grading or schedule configuration are global. Ensure data consistency if modified after grades or schedules have been entered.
+        Note: Changes to grading or schedule configuration are specific to your institution.
       </p>
     </div>
   );
 }
-

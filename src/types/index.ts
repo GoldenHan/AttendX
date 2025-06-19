@@ -108,14 +108,15 @@ export interface Group {
   institutionId: string;
 }
 
+// Config stored with document ID = institutionId in 'institutionGradingConfigs' collection
 export interface GradingConfiguration {
-  id?: string;
+  // id?: string; // Removed, doc ID is institutionId
   numberOfPartials: 1 | 2 | 3 | 4;
   passingGrade: number;
   maxIndividualActivityScore: number;
   maxTotalAccumulatedScore: number;
   maxExamScore: number;
-  institutionId?: string | null; // Remains optional for now, for global or per-institution config
+  // institutionId?: string | null; // Removed, doc ID is institutionId
 }
 
 export const DEFAULT_GRADING_CONFIG: GradingConfiguration = {
@@ -126,12 +127,13 @@ export const DEFAULT_GRADING_CONFIG: GradingConfiguration = {
   maxExamScore: 50,
 };
 
+// Config stored with document ID = institutionId in 'institutionScheduleConfigs' collection
 export interface ClassScheduleConfiguration {
-  id?: string;
+  // id?: string; // Removed, doc ID is institutionId
   scheduleType: 'Saturday' | 'Sunday' | 'Daily' | 'NotSet' | 'SaturdayAndSunday';
   startTime: string;
   endTime: string;
-  institutionId?: string | null; // Remains optional for now
+  // institutionId?: string | null; // Removed, doc ID is institutionId
 }
 
 export const DEFAULT_CLASS_SCHEDULE_CONFIG: ClassScheduleConfiguration = {

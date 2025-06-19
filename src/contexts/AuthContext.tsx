@@ -1,7 +1,7 @@
 
 'use client';
 
-import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useEffect, useState, ReactNode, useCallback } from 'react';
 import { auth, db } from '@/lib/firebase';
 import type { User as FirebaseUser } from 'firebase/auth';
 import {
@@ -21,6 +21,7 @@ import { useRouter, usePathname } from 'next/navigation';
 interface AuthContextType {
   authUser: FirebaseUser | null;
   firestoreUser: FirestoreUserType | null;
+  gradingConfig: GradingConfiguration; // Added to context
   loading: boolean;
   signIn: (identifier: string, pass: string) => Promise<void>;
   signUp: (
@@ -37,6 +38,7 @@ interface AuthContextType {
   reauthenticateCurrentUser: (password: string) => Promise<void>;
   updateUserPassword: (currentPasswordFromUser: string, newPasswordFromUser: string) => Promise<void>;
   clearRequiresPasswordChangeFlag: () => Promise<void>;
+  fetchGradingConfigForInstitution: (institutionId: string) => Promise<GradingConfiguration>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -49,25 +51,27 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const router = useRouter();
   const pathname = usePathname();
 
-  useEffect(() => {
-    const fetchGradingConfig = async () => {
-      // TODO: In a multi-institution setup, grading config might need to be institution-specific.
-      // For now, it remains global or fetched based on a single known config document.
-      try {
-        const configDocRef = doc(db, 'appConfiguration', 'currentGradingConfig'); // This might need to change
-        const docSnap = await getDoc(configDocRef);
-        if (docSnap.exists()) {
-          setGradingConfig(docSnap.data() as GradingConfiguration);
-        } else {
-          setGradingConfig(DEFAULT_GRADING_CONFIG);
-        }
-      } catch (error) {
-        console.error("Error fetching grading configuration for AuthContext:", error);
-        setGradingConfig(DEFAULT_GRADING_CONFIG);
+  const fetchGradingConfigForInstitution = useCallback(async (institutionId: string): Promise<GradingConfiguration> => {
+    if (!institutionId) {
+      console.warn("[AuthContext] fetchGradingConfig: No institutionId provided, using default.");
+      return DEFAULT_GRADING_CONFIG;
+    }
+    try {
+      const configDocRef = doc(db, 'institutionGradingConfigs', institutionId);
+      const docSnap = await getDoc(configDocRef);
+      if (docSnap.exists()) {
+        console.log(`[AuthContext] Fetched grading config for institution: ${institutionId}`);
+        return docSnap.data() as GradingConfiguration;
+      } else {
+        console.log(`[AuthContext] No specific grading config for institution ${institutionId}, using default.`);
+        return DEFAULT_GRADING_CONFIG;
       }
-    };
-    fetchGradingConfig();
+    } catch (error) {
+      console.error(`[AuthContext] Error fetching grading configuration for institution ${institutionId}:`, error);
+      return DEFAULT_GRADING_CONFIG;
+    }
   }, []);
+
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -84,21 +88,32 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           } as FirestoreUserType;
           setFirestoreUser(userData);
           console.log(`[AuthContext] User data loaded from 'users' for UID: ${user.uid}, Institution ID: ${userData.institutionId}`);
+          
+          // Fetch institution-specific grading config
+          if (userData.institutionId) {
+            const specificConfig = await fetchGradingConfigForInstitution(userData.institutionId);
+            setGradingConfig(specificConfig);
+          } else {
+            setGradingConfig(DEFAULT_GRADING_CONFIG); // Fallback if user has no institutionId (should not happen for active users)
+          }
+
         } else {
           console.warn(`[AuthContext] Firestore document not found in 'users' for authenticated user UID: ${user.uid}. Signing out.`);
-          await firebaseSignOut(auth); // Sign out if user doc doesn't exist to prevent broken state
+          await firebaseSignOut(auth); 
           setAuthUser(null);
           setFirestoreUser(null);
+          setGradingConfig(DEFAULT_GRADING_CONFIG); // Reset to default
         }
       } else {
         setAuthUser(null);
         setFirestoreUser(null);
+        setGradingConfig(DEFAULT_GRADING_CONFIG); // Reset to default
       }
       setLoading(false);
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [fetchGradingConfigForInstitution]);
 
   const signIn = async (identifier: string, pass: string) => {
     setLoading(true);
@@ -108,9 +123,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     try {
       if (!identifier.includes('@')) {
         console.log(`[AuthContext] Identifier "${identifier}" is not an email. Searching for username in 'users' collection.`);
-        // For multi-tenancy, username uniqueness might be per institution.
-        // This query might need adjustment if usernames are NOT globally unique for login.
-        // For now, assuming username is sufficient to find the email.
         const usernameQuery = query(collection(db, 'users'), where('username', '==', identifier.trim()), limit(1));
         const usernameSnapshot = await getDocs(usernameQuery);
 
@@ -134,6 +146,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
       await signInWithEmailAndPassword(auth, emailToAuth, pass);
       console.log(`[AuthContext] Firebase Auth successful for email: ${emailToAuth}`);
+      // Firestore user and grading config will be fetched by onAuthStateChanged effect
     } catch (error: any) {
       console.error(`[AuthContext] signIn error:`, error.code, error.message, error);
       setLoading(false);
@@ -149,19 +162,18 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     role: FirestoreUserType['role'],
     studentSpecifics?: { level: FirestoreUserType['level']; sedeId?: string | null },
     creatorContext?: { institutionId: string; creatorSedeId?: string | null; attendanceCode?: string },
-    institutionName?: string
+    institutionName?: string // Only for initial admin signup
   ) => {
     setLoading(true);
     try {
       const targetCollection = 'users';
       let effectiveInstitutionId = creatorContext?.institutionId;
+      let currentGradingConfig = DEFAULT_GRADING_CONFIG; // Default, will be updated if institution exists
 
       console.log(`[AuthContext] signUp: Role: ${role}, Institution Name: ${institutionName}, Creator Context Inst ID: ${creatorContext?.institutionId}`);
 
       if (role === 'admin' && institutionName && !effectiveInstitutionId) {
-        // This is the first admin creating their institution
         console.log(`[AuthContext] Creating new institution: ${institutionName}`);
-        // Check if institution with this name already exists (simple check, might need refinement)
         const instNameQuery = query(collection(db, 'institutions'), where('name', '==', institutionName.trim()), limit(1));
         const instNameSnapshot = await getDocs(instNameQuery);
         if (!instNameSnapshot.empty) {
@@ -169,18 +181,27 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         }
         const institutionRef = await addDoc(collection(db, 'institutions'), {
           name: institutionName,
-          adminUids: [], // Will be updated after admin user is created
+          adminUids: [], 
           createdAt: new Date().toISOString(),
         });
         effectiveInstitutionId = institutionRef.id;
         console.log(`[AuthContext] New institution document created with ID: ${effectiveInstitutionId}`);
+        // For a new institution, the grading config will be the default until an admin saves one.
+        // We can pre-emptively save a default config for this new institution.
+        await setDoc(doc(db, 'institutionGradingConfigs', effectiveInstitutionId), DEFAULT_GRADING_CONFIG);
+        await setDoc(doc(db, 'institutionScheduleConfigs', effectiveInstitutionId), DEFAULT_CLASS_SCHEDULE_CONFIG);
+        currentGradingConfig = DEFAULT_GRADING_CONFIG;
+
+      } else if (effectiveInstitutionId) {
+        // Fetch grading config for existing institution
+        currentGradingConfig = await fetchGradingConfigForInstitution(effectiveInstitutionId);
       }
+
 
       if (!effectiveInstitutionId) {
         throw new Error("Institution ID is required to create a user.");
       }
 
-      // Check for username uniqueness within the institution
       const usernameQuery = query(collection(db, targetCollection),
         where('username', '==', username.trim()),
         where('institutionId', '==', effectiveInstitutionId),
@@ -193,9 +214,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         throw error;
       }
 
-      // Check for email uniqueness (globally for Firebase Auth, then institutionally for Firestore if desired)
-      // Firebase Auth handles global email uniqueness. If it passes, we're good for Auth.
-      // Additional check for email in our 'users' collection within the institution (optional, as Auth is global source of truth for email uniqueness)
       const emailQueryFirestore = query(collection(db, targetCollection),
           where('email', '==', email.trim()),
           where('institutionId', '==', effectiveInstitutionId),
@@ -203,20 +221,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       );
       const emailSnapshotFirestore = await getDocs(emailQueryFirestore);
       if (!emailSnapshotFirestore.empty) {
-          // This case implies email exists in Firestore for this institution but somehow not in Auth, or duplicate entry attempt.
           const error = new Error(`Email "${email.trim()}" is already registered to a user in this institution's records.`);
-          (error as any).code = "auth/email-already-linked-to-institution"; // Custom code
+          (error as any).code = "auth/email-already-linked-to-institution"; 
           throw error;
       }
-
 
       const userCredential = await createUserWithEmailAndPassword(auth, email, initialPasswordAsUsername);
       const firebaseUser = userCredential.user;
 
-      // If an institution was just created by this admin, update its adminUids
-      if (role === 'admin' && institutionName && effectiveInstitutionId === firebaseUser.uid) { // This check is flawed, institutionId is not user.uid
-          // Correct logic: if institution was just created (identified by effectiveInstitutionId)
-          const institutionJustCreatedId = effectiveInstitutionId; // The ID from addDoc
+      if (role === 'admin' && institutionName && effectiveInstitutionId) {
+          const institutionJustCreatedId = effectiveInstitutionId;
           if (institutionName && institutionJustCreatedId) {
             await updateDoc(doc(db, 'institutions', institutionJustCreatedId), {
                 adminUids: [firebaseUser.uid]
@@ -224,7 +238,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             console.log(`[AuthContext] Updated institution ${institutionJustCreatedId} with admin UID ${firebaseUser.uid}`);
           }
       }
-
 
       const newUserDocData: Omit<FirestoreUserType, 'id'> = {
         uid: firebaseUser.uid,
@@ -240,14 +253,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         sedeId: null,
         ...(role === 'student' && studentSpecifics && {
           level: studentSpecifics.level,
-          gradesByLevel: studentSpecifics.level ? { [studentSpecifics.level]: getDefaultStudentGradeStructure(gradingConfig) } : {},
+          gradesByLevel: studentSpecifics.level ? { [studentSpecifics.level]: getDefaultStudentGradeStructure(currentGradingConfig) } : {},
           sedeId: studentSpecifics.sedeId || null,
           notes: undefined, age: undefined, gender: undefined, preferredShift: undefined,
         }),
         ...( (role === 'teacher' || role === 'supervisor' || role === 'admin' || role === 'caja') && creatorContext && {
-            // For staff, Sede ID comes from creatorContext if provided (e.g. supervisor creating a teacher in their Sede)
-            // Or it could be set directly if an admin is creating staff and assigning a Sede.
-            sedeId: creatorContext.creatorSedeId || null,
+            sedeId: creatorContext.creatorSedeId || null, // Sede ID for staff
             attendanceCode: creatorContext.attendanceCode || null,
         })
       };
@@ -255,8 +266,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       await setDoc(doc(db, targetCollection, firebaseUser.uid), newUserDocData);
       console.log(`[AuthContext] User document created in '${targetCollection}' for UID: ${firebaseUser.uid} with Institution ID: ${newUserDocData.institutionId}`);
 
-      setAuthUser(firebaseUser);
-      setFirestoreUser({ id: firebaseUser.uid, ...newUserDocData } as FirestoreUserType);
+      // No need to setAuthUser/setFirestoreUser here as onAuthStateChanged will handle it
+      // and also fetch the correct grading config.
 
     } catch (error) {
       setLoading(false);
@@ -270,6 +281,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       await firebaseSignOut(auth);
       setAuthUser(null);
       setFirestoreUser(null);
+      setGradingConfig(DEFAULT_GRADING_CONFIG); // Reset to default
       router.push('/login');
     } catch (error) {
       console.error('Sign out error', error);
@@ -327,13 +339,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     <AuthContext.Provider value={{
       authUser,
       firestoreUser,
+      gradingConfig,
       loading,
       signIn,
       signUp,
       signOut,
       reauthenticateCurrentUser,
       updateUserPassword,
-      clearRequiresPasswordChangeFlag
+      clearRequiresPasswordChangeFlag,
+      fetchGradingConfigForInstitution,
     }}>
       {children}
     </AuthContext.Provider>
