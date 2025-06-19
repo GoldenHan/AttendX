@@ -14,18 +14,18 @@ export default function AppLayout({
   const { authUser, firestoreUser, loading } = useAuth();
   const router = useRouter();
   const pathname = usePathname(); 
-  const [appLogoUrl, setAppLogoUrl] = useState<string | null>(null);
+  const [appLogoUrl, setAppLogoUrl] = useState<string | null>(null); // Can be Data URL or external URL
 
   useEffect(() => {
     // Load initial logo URL from localStorage
-    const storedLogoUrl = localStorage.getItem('appLogoUrl');
-    if (storedLogoUrl) {
-      setAppLogoUrl(storedLogoUrl);
+    const storedLogoDataUrl = localStorage.getItem('appLogoDataUrl'); // Changed key
+    if (storedLogoDataUrl) {
+      setAppLogoUrl(storedLogoDataUrl);
     }
 
     // Listen for logo changes from AppSettings
     const handleLogoChange = (event: Event) => {
-      const customEvent = event as CustomEvent<string>;
+      const customEvent = event as CustomEvent<string | null>; // Can be null if logo removed
       setAppLogoUrl(customEvent.detail);
     };
     window.addEventListener('logoUrlChanged', handleLogoChange);

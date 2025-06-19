@@ -14,7 +14,7 @@ import {
 import { Header } from '@/components/header';
 import { SidebarNav } from '@/components/sidebar-nav';
 import { Button } from '@/components/ui/button';
-import { LogOut, Loader2 } from 'lucide-react';
+import { LogOut, Loader2, SheetIcon } from 'lucide-react'; // Added SheetIcon
 import Link from 'next/link';
 import Image from 'next/image';
 import { useAuth } from '@/contexts/AuthContext';
@@ -38,13 +38,16 @@ export function MainAppShell({
         <SidebarHeader className="p-4 flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2 text-lg font-semibold font-headline text-primary">
             {appLogoUrl ? (
-              <Image src={appLogoUrl} alt="App Logo" width={120} height={30} className="object-contain h-[30px] group-data-[collapsible=icon]:hidden" />
+              <>
+                <Image src={appLogoUrl} alt="App Logo" width={120} height={30} className="object-contain h-auto max-h-[30px] w-auto max-w-[120px] group-data-[collapsible=icon]:hidden" />
+                <Image src={appLogoUrl} alt="App Logo Icon" width={24} height={24} className="object-contain h-6 w-6 hidden group-data-[collapsible=icon]:block" />
+              </>
             ) : (
-              <span className="group-data-[collapsible=icon]:hidden">SERVEX</span>
-            )}
-             {/* Show small icon version when collapsed if logo exists */}
-            {appLogoUrl && (
-               <Image src={appLogoUrl} alt="App Logo Icon" width={24} height={24} className="object-contain h-6 w-6 hidden group-data-[collapsible=icon]:block" />
+              <>
+                <SheetIcon className="h-6 w-6 group-data-[collapsible=icon]:block hidden" /> 
+                <SheetIcon className="h-6 w-6 group-data-[collapsible=icon]:hidden" /> 
+                <span className="group-data-[collapsible=icon]:hidden">AttendX</span>
+              </>
             )}
           </Link>
           <SidebarTrigger className="text-sidebar-foreground hidden md:flex" />

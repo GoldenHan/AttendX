@@ -8,14 +8,16 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
-import { Settings, Download, RefreshCw, Moon, Sun, Save, Loader2, AlertTriangle, Clock, Image as ImageIcon } from 'lucide-react';
+import { Settings, Download, RefreshCw, Moon, Sun, Save, Loader2, AlertTriangle, Clock, Image as ImageIcon, UploadCloud, Trash2 as RemoveIcon } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, ChangeEvent } from 'react';
 import { db } from '@/lib/firebase';
 import { doc, getDoc, setDoc, collection, getDocs, query, where } from 'firebase/firestore';
 import type { GradingConfiguration, User, ClassScheduleConfiguration } from '@/types';
 import { DEFAULT_GRADING_CONFIG, DEFAULT_CLASS_SCHEDULE_CONFIG } from '@/types';
 import Image from 'next/image';
+
+const MAX_LOGO_SIZE_MB = 1; // Max logo size in MB for Data URL storage
 
 export default function AppSettingsPage() {
   const { toast } = useToast();
@@ -31,8 +33,9 @@ export default function AppSettingsPage() {
   const [classScheduleConfig, setClassScheduleConfig] = useState<ClassScheduleConfiguration>(DEFAULT_CLASS_SCHEDULE_CONFIG);
   const [isLoadingScheduleConfig, setIsLoadingScheduleConfig] = useState(true);
 
-  const [logoUrlInput, setLogoUrlInput] = useState('');
-  const [isSavingLogo, setIsSavingLogo] = useState(false);
+  const [logoPreviewUrl, setLogoPreviewUrl] = useState<string | null>(null); // Can be Data URL or external URL
+  const [isProcessingLogo, setIsProcessingLogo] = useState(false);
+
 
   useEffect(() => {
     const storedTheme = localStorage.getItem('theme');
@@ -47,9 +50,10 @@ export default function AppSettingsPage() {
     if (storedAppName) {
       setAppName(storedAppName);
     }
-    const storedLogoUrl = localStorage.getItem('appLogoUrl');
-    if (storedLogoUrl) {
-      setLogoUrlInput(storedLogoUrl);
+    // Changed from 'appLogoUrl' to 'appLogoDataUrl' to reflect it can be a data URI
+    const storedLogoDataUrl = localStorage.getItem('appLogoDataUrl');
+    if (storedLogoDataUrl) {
+      setLogoPreviewUrl(storedLogoDataUrl);
     }
   }, []);
 
@@ -134,17 +138,44 @@ export default function AppSettingsPage() {
     localStorage.setItem('appName', newName);
   };
 
-  const handleLogoUrlInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setLogoUrlInput(e.target.value);
+  const handleLogoFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      if (file.size > MAX_LOGO_SIZE_MB * 1024 * 1024) {
+        toast({
+          title: 'File Too Large',
+          description: `Logo image must be smaller than ${MAX_LOGO_SIZE_MB}MB. Please choose a smaller file.`,
+          variant: 'destructive',
+        });
+        event.target.value = ''; // Clear the file input
+        return;
+      }
+      setIsProcessingLogo(true);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const dataUrl = reader.result as string;
+        localStorage.setItem('appLogoDataUrl', dataUrl);
+        setLogoPreviewUrl(dataUrl);
+        window.dispatchEvent(new CustomEvent('logoUrlChanged', { detail: dataUrl }));
+        toast({ title: 'Logo Updated', description: 'New logo has been set from the uploaded file.' });
+        setIsProcessingLogo(false);
+      };
+      reader.onerror = () => {
+        toast({ title: 'File Read Error', description: 'Could not read the selected logo file.', variant: 'destructive' });
+        setIsProcessingLogo(false);
+      };
+      reader.readAsDataURL(file);
+      event.target.value = ''; // Clear the file input to allow re-uploading the same file
+    }
   };
 
-  const handleSaveLogoUrl = () => {
-    setIsSavingLogo(true);
-    localStorage.setItem('appLogoUrl', logoUrlInput);
-    window.dispatchEvent(new CustomEvent('logoUrlChanged', { detail: logoUrlInput }));
-    toast({ title: 'Logo URL Saved', description: 'The new logo URL has been saved locally.' });
-    setIsSavingLogo(false);
+  const handleRemoveLogo = () => {
+    localStorage.removeItem('appLogoDataUrl');
+    setLogoPreviewUrl(null);
+    window.dispatchEvent(new CustomEvent('logoUrlChanged', { detail: null }));
+    toast({ title: 'Logo Removed', description: 'The application logo has been cleared.' });
   };
+
 
   const handleExportStudentData = async () => {
     setIsExporting(true);
@@ -268,30 +299,35 @@ export default function AppSettingsPage() {
                 />
                 {isDarkMode ? <Moon className="ml-2 h-5 w-5" /> : <Sun className="ml-2 h-5 w-5" />}
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="logoUrl">Application Logo URL</Label>
-                <div className="flex items-start gap-2">
-                    <Input 
-                        id="logoUrl" 
-                        type="url" 
-                        value={logoUrlInput} 
-                        onChange={handleLogoUrlInputChange} 
-                        placeholder="https://example.com/logo.png" 
-                        className="flex-grow"
-                    />
-                    <Button onClick={handleSaveLogoUrl} disabled={isSavingLogo}>
-                        {isSavingLogo ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-                        Save Logo
-                    </Button>
+               <div className="space-y-2">
+                <Label htmlFor="logoFile">Application Logo</Label>
+                <Input 
+                    id="logoFile" 
+                    type="file" 
+                    accept="image/png, image/jpeg, image/gif, image/svg+xml"
+                    onChange={handleLogoFileChange}
+                    className="file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20"
+                    disabled={isProcessingLogo}
+                />
+                <div className="flex items-center gap-2">
+                    {logoPreviewUrl && (
+                        <Button onClick={handleRemoveLogo} variant="outline" size="sm" className="text-destructive hover:text-destructive-foreground hover:bg-destructive/90" disabled={isProcessingLogo}>
+                            <RemoveIcon className="mr-2 h-4 w-4" />
+                            Remove Logo
+                        </Button>
+                    )}
+                    {isProcessingLogo && <Loader2 className="h-5 w-5 animate-spin text-primary" />}
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Paste the URL of your desired logo. It will be displayed in the header and sidebar.
-                  For production, consider using Firebase Storage and providing the public URL here.
+                  Upload a logo file (PNG, JPG, GIF, SVG, max {MAX_LOGO_SIZE_MB}MB). It will be displayed in the header and sidebar.
+                  <br />
+                  Note: The logo is stored in your browser's local storage. For production with multiple users or devices, consider using a fixed URL or Firebase Storage.
                 </p>
-                {logoUrlInput && (
+                {logoPreviewUrl && (
                   <div className="mt-2 p-2 border rounded-md inline-block bg-muted">
-                    <Image src={logoUrlInput} alt="Logo Preview" width={100} height={40} className="object-contain" onError={() => {
-                       toast({ title: 'Logo Error', description: 'Could not load image from URL.', variant: 'destructive'});
+                    <Image src={logoPreviewUrl} alt="Logo Preview" width={100} height={40} className="object-contain h-auto max-h-[40px] w-auto max-w-[150px]" onError={() => {
+                       toast({ title: 'Logo Error', description: 'Could not load image from the provided data.', variant: 'destructive'});
+                       setLogoPreviewUrl(null); // Clear invalid preview
                     }} />
                   </div>
                 )}

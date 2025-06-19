@@ -14,7 +14,7 @@ import {
 import { SidebarTrigger } from '@/components/ui/sidebar';
 import { useAuth } from '@/contexts/AuthContext';
 import React, { useState, useEffect } from 'react';
-import Image from 'next/image'; // Import next/image
+import Image from 'next/image'; 
 
 export function Header({ appLogoUrl }: { appLogoUrl?: string | null }) {
   const { authUser, firestoreUser, signOut, loading } = useAuth();
@@ -51,13 +51,13 @@ export function Header({ appLogoUrl }: { appLogoUrl?: string | null }) {
       <div className="flex items-center gap-2">
         {appLogoUrl ? (
           <Link href="/" className="flex items-center">
-            <Image src={appLogoUrl} alt="App Logo" width={120} height={30} className="object-contain h-[30px] max-w-[120px]" />
+            <Image src={appLogoUrl} alt="App Logo" width={120} height={30} className="object-contain h-auto max-h-[30px] w-auto max-w-[120px]" />
           </Link>
         ) : (
           <>
             <SheetIcon className="h-6 w-6 text-primary-foreground" />
             <Link href="/" className="text-xl font-semibold font-headline text-primary-foreground">
-              SERVEX
+              AttendX
             </Link>
           </>
         )}
@@ -82,7 +82,11 @@ export function Header({ appLogoUrl }: { appLogoUrl?: string | null }) {
                 size="icon"
                 className="overflow-hidden rounded-full text-primary-foreground hover:bg-white/20 focus-visible:ring-primary-foreground"
               >
-                <UserCircle className="h-5 w-5" />
+                {firestoreUser?.photoUrl ? (
+                  <Image src={firestoreUser.photoUrl} alt="User avatar" width={32} height={32} className="rounded-full" />
+                ) : (
+                  <UserCircle className="h-5 w-5" />
+                )}
                 <span className="sr-only">Toggle user menu</span>
               </Button>
             </DropdownMenuTrigger>
