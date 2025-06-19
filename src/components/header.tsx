@@ -1,7 +1,7 @@
 
 'use client';
 import Link from 'next/link';
-import { Sheet as SheetIcon, UserCircle, LogOut, Settings, Languages } from 'lucide-react'; // Added Languages icon
+import { Sheet as SheetIcon, UserCircle, LogOut, Settings, Languages } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -13,21 +13,40 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { SidebarTrigger } from '@/components/ui/sidebar';
 import { useAuth } from '@/contexts/AuthContext';
-import React, { useState } from 'react'; // Added useState
+import React, { useState, useEffect } from 'react';
 
 export function Header() {
   const { authUser, firestoreUser, signOut, loading } = useAuth();
-  const [currentLanguage, setCurrentLanguage] = useState<'EN' | 'ES'>('ES'); // Default to Spanish
+  
+  // Initialize language from localStorage or default to 'ES'
+  const [currentLanguage, setCurrentLanguage] = useState<'EN' | 'ES'>(() => {
+    if (typeof window !== 'undefined') {
+      const storedLang = localStorage.getItem('appLanguage') as 'EN' | 'ES';
+      return ['EN', 'ES'].includes(storedLang) ? storedLang : 'ES';
+    }
+    return 'ES'; // Default for SSR or if window is not available
+  });
+
+  // Persist language choice to localStorage whenever it changes
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('appLanguage', currentLanguage);
+    }
+  }, [currentLanguage]);
 
   const handleLogout = async () => {
     await signOut();
   };
 
   const toggleLanguage = () => {
-    setCurrentLanguage((prevLang) => (prevLang === 'ES' ? 'EN' : 'ES'));
-    // In a real app, you would call your i18n library's changeLanguage function here
-    // and likely store the preference in localStorage or a cookie.
-    console.log(`Language switched to: ${currentLanguage === 'ES' ? 'EN' : 'ES'}`);
+    setCurrentLanguage((prevLang) => {
+      const newLang = prevLang === 'ES' ? 'EN' : 'ES';
+      // This console log confirms the state change for the placeholder.
+      // A real i18n library would be integrated here.
+      console.log(`Language preference set to: ${newLang}`);
+      // TODO: Integrate actual i18n library to change application language based on 'newLang'.
+      return newLang;
+    });
   };
 
   return (
