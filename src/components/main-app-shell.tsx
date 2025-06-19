@@ -44,12 +44,24 @@ export function MainAppShell({
           <Link href="/" className="flex items-center gap-2 text-lg font-semibold font-headline text-primary">
             {appLogoUrl ? (
               <>
-                <Image src={appLogoUrl} alt="App Logo" width={120} height={30} className="object-contain h-auto max-h-[30px] w-auto max-w-[120px] group-data-[collapsible=icon]:hidden" />
-                <Image src={appLogoUrl} alt="App Logo Icon" width={24} height={24} className="object-contain h-6 w-6 hidden group-data-[collapsible=icon]:block" />
+                <Image 
+                  src={appLogoUrl} 
+                  alt="App Logo" 
+                  width={144} 
+                  height={36} 
+                  className="object-contain h-auto max-h-[36px] w-auto max-w-[144px] group-data-[collapsible=icon]:hidden" 
+                />
+                <Image 
+                  src={appLogoUrl} 
+                  alt="App Logo Icon" 
+                  width={28} 
+                  height={28} 
+                  className="object-contain h-7 w-7 hidden group-data-[collapsible=icon]:block" 
+                />
               </>
             ) : (
               <>
-                <SheetIcon className="h-6 w-6 group-data-[collapsible=icon]:block hidden" /> 
+                <SheetIcon className="h-7 w-7 group-data-[collapsible=icon]:block hidden" /> 
                 <SheetIcon className="h-6 w-6 group-data-[collapsible=icon]:hidden" /> 
                 <span className="group-data-[collapsible=icon]:hidden">{effectiveAppName}</span>
               </>
