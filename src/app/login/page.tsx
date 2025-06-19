@@ -82,6 +82,11 @@ export default function AuthPage() {
 
   const currentLoadingState = authLoading || isSubmitting;
 
+   useEffect(() => {
+    // Remove dark class on mount if present from other pages
+    document.documentElement.classList.remove('dark');
+  }, []);
+
   const handleLoginSubmit = async (data: LoginFormValues) => {
     setIsSubmitting(true);
     try {
@@ -114,9 +119,9 @@ export default function AuthPage() {
         data.adminUsername, 
         data.adminEmail, 
         data.adminPassword, 
-        'admin' 
+        'admin' // Explicitly role 'admin' for this signup form
       );
-      toast({ title: 'Registro de Administrador Exitoso', description: `Bienvenido/a, ${data.adminName}. Tu institución "${data.institutionName}" ha sido registrada.` });
+      toast({ title: 'Registro de Institución Exitoso', description: `Bienvenido/a, ${data.adminName}. Tu institución "${data.institutionName}" ha sido registrada. Serás redirigido/a para iniciar sesión.` });
       setIsSignUpActive(false); 
       loginForm.setValue('identifier', data.adminEmail); 
     } catch (error: any) {
@@ -421,8 +426,7 @@ export default function AuthPage() {
                 Registra tu institución educativa y configura la cuenta de administrador principal para comenzar.
               </p>
               <Button
-                variant="secondary" 
-                className="mt-8 rounded-full px-8 py-3 text-sm font-semibold uppercase tracking-wider bg-signup-panel-foreground text-signup-panel-bg hover:bg-signup-panel-foreground/90"
+                className="mt-8 rounded-full px-8 py-3 text-sm font-bold uppercase tracking-wider bg-signup-panel-foreground text-signup-panel hover:bg-signup-panel-foreground/90"
                 onClick={() => { newAdminSignupForm.reset(); setIsSignUpActive(true); }}
                 disabled={currentLoadingState}
               >
@@ -450,3 +454,4 @@ export default function AuthPage() {
     </div>
   );
 }
+
