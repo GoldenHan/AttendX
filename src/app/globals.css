@@ -158,9 +158,8 @@
   }
 }
 
+/*
 @layer utilities {
-  /* 10 teeth, depth 5%. Tooth height 6%, Valley height 4%. Total cycle 10%. */
-  /*
   .clip-edge-left-gearish {
     clip-path: polygon(
       100% 0%, 5% 0%, 
@@ -211,5 +210,5 @@
       95% 100%, 0% 100% 
     );
   }
-  */
 }
+*/
