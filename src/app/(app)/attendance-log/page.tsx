@@ -21,14 +21,15 @@ import { useToast } from '@/hooks/use-toast';
 import type { AttendanceRecord, User, Group, Session } from '@/types';
 import React, { useState, useEffect, useCallback } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, addDoc, getDocs, Timestamp, query, where, doc, writeBatch } from 'firebase/firestore';
+import { collection, addDoc, getDocs, Timestamp, query, where, doc, writeBatch, getDoc } from 'firebase/firestore';
 import { Loader2, CalendarIcon } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
-import { format, isValid } from 'date-fns';
+import { format, isValid, parse } from 'date-fns';
 import { cn } from '@/lib/utils';
+import { useSearchParams } from 'next/navigation';
 
 const studentAttendanceSchema = z.object({
   userId: z.string(),
@@ -48,10 +49,15 @@ type AttendanceLogFormValues = z.infer<typeof attendanceLogFormSchema>;
 
 export default function AttendanceLogPage() {
   const { toast } = useToast();
+  const searchParams = useSearchParams();
+
   const [groups, setGroups] = useState<Group[]>([]);
   const [allStudents, setAllStudents] = useState<User[]>([]);
   const [isLoadingData, setIsLoadingData] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  
+  const [qrSessionId, setQrSessionId] = useState<string | null>(null);
+  const [isPreloadingFromQr, setIsPreloadingFromQr] = useState(false);
 
   const form = useForm<AttendanceLogFormValues>({
     resolver: zodResolver(attendanceLogFormSchema),
@@ -70,6 +76,14 @@ export default function AttendanceLogPage() {
   });
 
   const watchedGroupId = form.watch('groupId');
+
+  useEffect(() => {
+    const sessionIdFromParams = searchParams.get('session_id');
+    if (sessionIdFromParams) {
+      setQrSessionId(sessionIdFromParams);
+      setIsPreloadingFromQr(true); 
+    }
+  }, [searchParams]);
 
   const populateStudentsForGroup = useCallback((groupId: string) => {
     remove(); 
@@ -99,7 +113,6 @@ export default function AttendanceLogPage() {
         const groupsSnapshot = await getDocs(collection(db, 'groups'));
         setGroups(groupsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Group)));
 
-        // Fetch students from the 'students' collection directly
         const studentsSnapshot = await getDocs(collection(db, 'students'));
         setAllStudents(studentsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as User)));
 
@@ -111,6 +124,52 @@ export default function AttendanceLogPage() {
     };
     fetchData();
   }, [toast]);
+
+  useEffect(() => {
+    if (qrSessionId && !isLoadingData && groups.length > 0) {
+        const prefillFormWithQrSession = async () => {
+            setIsPreloadingFromQr(true);
+            try {
+                const sessionDocRef = doc(db, 'sessions', qrSessionId);
+                const sessionSnap = await getDoc(sessionDocRef);
+
+                if (sessionSnap.exists()) {
+                    const sessionData = { id: sessionSnap.id, ...sessionSnap.data() } as Session;
+                    const groupData = groups.find(g => g.id === sessionData.classId);
+
+                    if (groupData) {
+                        form.setValue('groupId', sessionData.classId, { shouldValidate: true });
+                        // Parse "YYYY-MM-DD" to Date object
+                        const parsedDate = parse(sessionData.date, 'yyyy-MM-dd', new Date());
+                        form.setValue('sessionDate', parsedDate, { shouldValidate: true });
+                        form.setValue('sessionTime', sessionData.time, { shouldValidate: true });
+                        
+                        toast({ title: 'Sesión Precargada', description: `Asistencia para ${groupData.name} el ${sessionData.date} a las ${sessionData.time}.` });
+                    } else {
+                        toast({ title: 'Error de Precarga', description: 'Grupo asociado a la sesión QR no encontrado.', variant: 'destructive' });
+                        setQrSessionId(null); 
+                    }
+                } else {
+                    toast({ title: 'Error de Precarga', description: 'Sesión QR no encontrada.', variant: 'destructive' });
+                    setQrSessionId(null); 
+                }
+            } catch (error) {
+                console.error("Error pre-filling from QR session:", error);
+                toast({ title: 'Error de Precarga', description: 'No se pudo cargar la sesión desde el QR.', variant: 'destructive' });
+                setQrSessionId(null);
+            } finally {
+                setIsPreloadingFromQr(false);
+            }
+        };
+        prefillFormWithQrSession();
+    } else if (qrSessionId && isLoadingData) {
+        // If QR session ID is present but data is still loading, keep preloading true
+        setIsPreloadingFromQr(true);
+    } else if (!qrSessionId) {
+        setIsPreloadingFromQr(false); // No QR session, so not preloading
+    }
+  }, [qrSessionId, isLoadingData, groups, form, toast]);
+
 
   const findOrCreateSession = async (groupId: string, date: Date, time: string): Promise<string> => {
     const sessionDateStr = format(date, 'yyyy-MM-dd');
@@ -138,16 +197,19 @@ export default function AttendanceLogPage() {
   async function onSubmit(data: AttendanceLogFormValues) {
     setIsSubmitting(true);
     try {
-      const sessionId = await findOrCreateSession(data.groupId, data.sessionDate, data.sessionTime);
+      let finalSessionId = qrSessionId;
+      if (!finalSessionId) {
+        finalSessionId = await findOrCreateSession(data.groupId, data.sessionDate, data.sessionTime);
+      }
       
       const batch = writeBatch(db);
       const attendanceRecordsCollectionRef = collection(db, 'attendanceRecords');
 
       data.attendances.forEach(att => {
-        const newRecordRef = doc(attendanceRecordsCollectionRef); // Auto-generate ID
+        const newRecordRef = doc(attendanceRecordsCollectionRef); 
         const record: Omit<AttendanceRecord, 'id'> = {
           userId: att.userId,
-          sessionId: sessionId,
+          sessionId: finalSessionId!,
           status: att.status,
           timestamp: Timestamp.now().toDate().toISOString(),
         };
@@ -161,15 +223,21 @@ export default function AttendanceLogPage() {
 
       toast({
         title: 'Attendance Logged',
-        description: `Attendance for group recorded successfully for session ID: ${sessionId}.`,
+        description: `Attendance for group recorded successfully for session ID: ${finalSessionId}.`,
       });
-      form.reset({
-        groupId: '',
-        sessionDate: new Date(),
-        sessionTime: '09:00',
-        attendances: [],
-      });
-      remove(); 
+      if (!qrSessionId) { // Only reset fully if not a QR session, otherwise group/date/time might clear
+        form.reset({
+          groupId: '',
+          sessionDate: new Date(),
+          sessionTime: '09:00',
+          attendances: [],
+        });
+        remove(); 
+      } else {
+        // For QR, just clear attendances, keep group/date/time as they were prefilled
+        form.setValue('attendances', []);
+        remove();
+      }
     } catch (error) {
       console.error("Error logging attendance: ", error);
       toast({ title: 'Logging Failed', description: 'Could not save attendance records.', variant: 'destructive' });
@@ -177,7 +245,9 @@ export default function AttendanceLogPage() {
     setIsSubmitting(false);
   }
   
-  if (isLoadingData) {
+  const effectiveIsLoading = isLoadingData || isPreloadingFromQr;
+
+  if (effectiveIsLoading) {
     return (
       <Card>
         <CardHeader>
@@ -186,7 +256,7 @@ export default function AttendanceLogPage() {
         </CardHeader>
         <CardContent className="flex items-center justify-center py-10">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
-          <p className="ml-2">Loading data...</p>
+          <p className="ml-2">{isPreloadingFromQr ? 'Loading session from QR...' : 'Loading data...'}</p>
         </CardContent>
       </Card>
     );
@@ -196,7 +266,9 @@ export default function AttendanceLogPage() {
     <Card>
       <CardHeader>
         <CardTitle>Log Group Attendance</CardTitle>
-        <CardDescription>Select a group, date, and time, then mark attendance for each student.</CardDescription>
+        <CardDescription>Select a group, date, and time, then mark attendance for each student.
+        {qrSessionId && <span className="block mt-1 font-semibold text-primary">Session details pre-filled from QR.</span>}
+        </CardDescription>
       </CardHeader>
       <CardContent>
         <Form {...form}>
@@ -213,6 +285,7 @@ export default function AttendanceLogPage() {
                         field.onChange(value);
                       }}
                       value={field.value}
+                      disabled={!!qrSessionId || isLoadingData}
                     >
                       <FormControl>
                         <SelectTrigger>
@@ -246,6 +319,7 @@ export default function AttendanceLogPage() {
                               "w-full pl-3 text-left font-normal",
                               !field.value && "text-muted-foreground"
                             )}
+                            disabled={!!qrSessionId || isLoadingData}
                           >
                             {field.value ? (
                               format(field.value, "PPP")
@@ -262,7 +336,7 @@ export default function AttendanceLogPage() {
                           selected={field.value}
                           onSelect={field.onChange}
                           disabled={(date) =>
-                            date > new Date() || date < new Date("1900-01-01")
+                            date > new Date() || date < new Date("1900-01-01") || !!qrSessionId
                           }
                           initialFocus
                         />
@@ -279,7 +353,7 @@ export default function AttendanceLogPage() {
                   <FormItem>
                     <FormLabel>Session Time (HH:MM)</FormLabel>
                     <FormControl>
-                      <Input type="time" {...field} />
+                      <Input type="time" {...field} disabled={!!qrSessionId || isLoadingData} />
                     </FormControl>
                      <FormDescription>Enter time in 24-hour format (e.g., 14:30).</FormDescription>
                     <FormMessage />
@@ -361,8 +435,8 @@ export default function AttendanceLogPage() {
             )}
 
 
-            <Button type="submit" disabled={isSubmitting || isLoadingData || fields.length === 0}>
-              {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            <Button type="submit" disabled={isSubmitting || isLoadingData || isPreloadingFromQr || fields.length === 0}>
+              {(isSubmitting || isPreloadingFromQr) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Log All Attendance
             </Button>
           </form>

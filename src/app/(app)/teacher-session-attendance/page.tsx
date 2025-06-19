@@ -1,19 +1,35 @@
-// This page was created based on a misunderstanding.
-// It will be replaced or removed based on the new "Teacher Attendance Log" feature.
+
+// This page has been removed as its functionality was unclear or redundant
+// with the "Staff Arrival Log" on the dashboard.
+// This file can be safely deleted from the project.
+// If you need a page for teachers to log their attendance for specific sessions
+// (different from general arrival), this would need to be re-designed and implemented.
+
 'use client';
-
 import React from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { useRouter } from 'next/navigation';
+import { Button } from '@/components/ui/button'; // Added import
 
-export default function TeacherSessionAttendancePlaceholderPage() {
+export default function RemovedTeacherSessionAttendancePage() {
+  const router = useRouter();
+
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Teacher Attendance Log (Placeholder)</CardTitle>
+        <CardTitle>Page No Longer Active</CardTitle>
+        <CardDescription>
+          This page for teacher session attendance has been removed.
+          Staff arrival can be logged via the dashboard.
+        </CardDescription>
       </CardHeader>
       <CardContent>
-        <p>This page will be developed for teachers to log their own attendance using a personal code.</p>
-        <p>The previous functionality for teachers taking student attendance via group selection has been removed based on new requirements.</p>
+        <p className="text-muted-foreground mb-4">
+          If you were looking for a way for teachers to log attendance for specific class sessions they are about to teach, this functionality is not currently implemented.
+        </p>
+        <Button onClick={() => router.push('/dashboard')}>
+          Go to Dashboard
+        </Button>
       </CardContent>
     </Card>
   );
