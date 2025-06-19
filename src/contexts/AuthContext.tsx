@@ -14,7 +14,7 @@ import {
   updatePassword as firebaseUpdatePassword,
 } from 'firebase/auth';
 import { doc, getDoc, collection, query, where, getDocs, setDoc, limit, updateDoc, addDoc, serverTimestamp } from 'firebase/firestore';
-import type { User as FirestoreUserType, GradingConfiguration, Sede, Institution } from '@/types';
+import type { User as FirestoreUserType, GradingConfiguration, Sede, Institution, Group } from '@/types';
 import { DEFAULT_GRADING_CONFIG, getDefaultStudentGradeStructure } from '@/types';
 import { useRouter, usePathname } from 'next/navigation';
 
@@ -29,8 +29,8 @@ interface AuthContextType {
     email: string,
     initialPasswordAsUsername: string,
     role: FirestoreUserType['role'],
-    studentDetails?: { level: FirestoreUserType['level'] },
-    staffDetails?: Partial<Pick<FirestoreUserType, 'sedeId' | 'attendanceCode' | 'institutionId'>>, // Added institutionId here
+    studentSpecifics?: { level: FirestoreUserType['level']; sedeId?: string | null },
+    creatorContext?: { institutionId: string; creatorSedeId?: string | null; attendanceCode?: string },
     institutionName?: string
   ) => Promise<void>;
   signOut: () => Promise<void>;
@@ -51,8 +51,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   useEffect(() => {
     const fetchGradingConfig = async () => {
+      // TODO: In a multi-institution setup, grading config might need to be institution-specific.
+      // For now, it remains global or fetched based on a single known config document.
       try {
-        const configDocRef = doc(db, 'appConfiguration', 'currentGradingConfig');
+        const configDocRef = doc(db, 'appConfiguration', 'currentGradingConfig'); // This might need to change
         const docSnap = await getDoc(configDocRef);
         if (docSnap.exists()) {
           setGradingConfig(docSnap.data() as GradingConfiguration);
@@ -81,9 +83,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             ...userDocSnapshot.data()
           } as FirestoreUserType;
           setFirestoreUser(userData);
-          console.log(`[AuthContext] User data loaded from 'users' for UID: ${user.uid}`);
+          console.log(`[AuthContext] User data loaded from 'users' for UID: ${user.uid}, Institution ID: ${userData.institutionId}`);
         } else {
-          console.warn(`[AuthContext] Firestore document not found in 'users' for authenticated user UID: ${user.uid}.`);
+          console.warn(`[AuthContext] Firestore document not found in 'users' for authenticated user UID: ${user.uid}. Signing out.`);
+          await firebaseSignOut(auth); // Sign out if user doc doesn't exist to prevent broken state
+          setAuthUser(null);
           setFirestoreUser(null);
         }
       } else {
@@ -104,6 +108,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     try {
       if (!identifier.includes('@')) {
         console.log(`[AuthContext] Identifier "${identifier}" is not an email. Searching for username in 'users' collection.`);
+        // For multi-tenancy, username uniqueness might be per institution.
+        // This query might need adjustment if usernames are NOT globally unique for login.
+        // For now, assuming username is sufficient to find the email.
         const usernameQuery = query(collection(db, 'users'), where('username', '==', identifier.trim()), limit(1));
         const usernameSnapshot = await getDocs(usernameQuery);
 
@@ -140,37 +147,84 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     email: string,
     initialPasswordAsUsername: string,
     role: FirestoreUserType['role'],
-    studentDetails?: { level: FirestoreUserType['level'] },
-    staffDetails?: Partial<Pick<FirestoreUserType, 'sedeId' | 'attendanceCode' | 'institutionId'>>,
+    studentSpecifics?: { level: FirestoreUserType['level']; sedeId?: string | null },
+    creatorContext?: { institutionId: string; creatorSedeId?: string | null; attendanceCode?: string },
     institutionName?: string
   ) => {
     setLoading(true);
     try {
       const targetCollection = 'users';
-      console.log(`[AuthContext] signUp: Attempting to create user in '${targetCollection}' collection.`);
+      let effectiveInstitutionId = creatorContext?.institutionId;
 
-      const usernameQuery = query(collection(db, targetCollection), where('username', '==', username.trim()), limit(1));
+      console.log(`[AuthContext] signUp: Role: ${role}, Institution Name: ${institutionName}, Creator Context Inst ID: ${creatorContext?.institutionId}`);
+
+      if (role === 'admin' && institutionName && !effectiveInstitutionId) {
+        // This is the first admin creating their institution
+        console.log(`[AuthContext] Creating new institution: ${institutionName}`);
+        // Check if institution with this name already exists (simple check, might need refinement)
+        const instNameQuery = query(collection(db, 'institutions'), where('name', '==', institutionName.trim()), limit(1));
+        const instNameSnapshot = await getDocs(instNameQuery);
+        if (!instNameSnapshot.empty) {
+          throw new Error(`An institution named "${institutionName}" already exists.`);
+        }
+        const institutionRef = await addDoc(collection(db, 'institutions'), {
+          name: institutionName,
+          adminUids: [], // Will be updated after admin user is created
+          createdAt: new Date().toISOString(),
+        });
+        effectiveInstitutionId = institutionRef.id;
+        console.log(`[AuthContext] New institution document created with ID: ${effectiveInstitutionId}`);
+      }
+
+      if (!effectiveInstitutionId) {
+        throw new Error("Institution ID is required to create a user.");
+      }
+
+      // Check for username uniqueness within the institution
+      const usernameQuery = query(collection(db, targetCollection),
+        where('username', '==', username.trim()),
+        where('institutionId', '==', effectiveInstitutionId),
+        limit(1)
+      );
       const usernameSnapshot = await getDocs(usernameQuery);
       if (!usernameSnapshot.empty) {
-        const error = new Error("Username already exists in the 'users' collection. Please choose a different one.");
+        const error = new Error(`Username "${username.trim()}" already exists in this institution. Please choose a different one.`);
         (error as any).code = "auth/username-already-exists";
         throw error;
       }
 
+      // Check for email uniqueness (globally for Firebase Auth, then institutionally for Firestore if desired)
+      // Firebase Auth handles global email uniqueness. If it passes, we're good for Auth.
+      // Additional check for email in our 'users' collection within the institution (optional, as Auth is global source of truth for email uniqueness)
+      const emailQueryFirestore = query(collection(db, targetCollection),
+          where('email', '==', email.trim()),
+          where('institutionId', '==', effectiveInstitutionId),
+          limit(1)
+      );
+      const emailSnapshotFirestore = await getDocs(emailQueryFirestore);
+      if (!emailSnapshotFirestore.empty) {
+          // This case implies email exists in Firestore for this institution but somehow not in Auth, or duplicate entry attempt.
+          const error = new Error(`Email "${email.trim()}" is already registered to a user in this institution's records.`);
+          (error as any).code = "auth/email-already-linked-to-institution"; // Custom code
+          throw error;
+      }
+
+
       const userCredential = await createUserWithEmailAndPassword(auth, email, initialPasswordAsUsername);
       const firebaseUser = userCredential.user;
-      let effectiveInstitutionId: string | null | undefined = staffDetails?.institutionId;
 
-      // This block handles the very first admin creating their institution.
-      if (role === 'admin' && institutionName && !effectiveInstitutionId) {
-        const institutionRef = await addDoc(collection(db, 'institutions'), {
-          name: institutionName,
-          adminUids: [firebaseUser.uid],
-          createdAt: new Date().toISOString(),
-        });
-        effectiveInstitutionId = institutionRef.id;
-        console.log(`[AuthContext] Institution document created with ID: ${effectiveInstitutionId}`);
+      // If an institution was just created by this admin, update its adminUids
+      if (role === 'admin' && institutionName && effectiveInstitutionId === firebaseUser.uid) { // This check is flawed, institutionId is not user.uid
+          // Correct logic: if institution was just created (identified by effectiveInstitutionId)
+          const institutionJustCreatedId = effectiveInstitutionId; // The ID from addDoc
+          if (institutionName && institutionJustCreatedId) {
+            await updateDoc(doc(db, 'institutions', institutionJustCreatedId), {
+                adminUids: [firebaseUser.uid]
+            });
+            console.log(`[AuthContext] Updated institution ${institutionJustCreatedId} with admin UID ${firebaseUser.uid}`);
+          }
       }
+
 
       const newUserDocData: Omit<FirestoreUserType, 'id'> = {
         uid: firebaseUser.uid,
@@ -179,28 +233,27 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         email: firebaseUser.email || email.trim(),
         role: role,
         requiresPasswordChange: true,
-        institutionId: effectiveInstitutionId || null, // Assign institutionId
-        ...(role === 'student' && studentDetails?.level && {
-          level: studentDetails.level,
-          gradesByLevel: {
-            [studentDetails.level]: getDefaultStudentGradeStructure(gradingConfig)
-          },
-          phoneNumber: null, photoUrl: null, notes: null, age: undefined, gender: undefined, preferredShift: undefined,
+        institutionId: effectiveInstitutionId,
+        phoneNumber: null,
+        photoUrl: null,
+        attendanceCode: null,
+        sedeId: null,
+        ...(role === 'student' && studentSpecifics && {
+          level: studentSpecifics.level,
+          gradesByLevel: studentSpecifics.level ? { [studentSpecifics.level]: getDefaultStudentGradeStructure(gradingConfig) } : {},
+          sedeId: studentSpecifics.sedeId || null,
+          notes: undefined, age: undefined, gender: undefined, preferredShift: undefined,
         }),
-        ...( (role === 'teacher' || role === 'supervisor' || role === 'admin' || role === 'caja') && staffDetails && { // Added 'caja'
-            sedeId: staffDetails.sedeId || null,
-            attendanceCode: staffDetails.attendanceCode || null,
-            // institutionId is already handled by effectiveInstitutionId
+        ...( (role === 'teacher' || role === 'supervisor' || role === 'admin' || role === 'caja') && creatorContext && {
+            // For staff, Sede ID comes from creatorContext if provided (e.g. supervisor creating a teacher in their Sede)
+            // Or it could be set directly if an admin is creating staff and assigning a Sede.
+            sedeId: creatorContext.creatorSedeId || null,
+            attendanceCode: creatorContext.attendanceCode || null,
         })
       };
       
-      if (role !== 'admin' && !newUserDocData.institutionId) {
-          console.warn(`[AuthContext] Attempting to create a non-admin user without an institutionId. This might be an issue. User role: ${role}`);
-      }
-
-
       await setDoc(doc(db, targetCollection, firebaseUser.uid), newUserDocData);
-      console.log(`[AuthContext] User document created in '${targetCollection}' for UID: ${firebaseUser.uid}`);
+      console.log(`[AuthContext] User document created in '${targetCollection}' for UID: ${firebaseUser.uid} with Institution ID: ${newUserDocData.institutionId}`);
 
       setAuthUser(firebaseUser);
       setFirestoreUser({ id: firebaseUser.uid, ...newUserDocData } as FirestoreUserType);

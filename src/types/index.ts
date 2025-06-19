@@ -56,8 +56,8 @@ export interface User {
   photoUrl?: string | null;
   attendanceCode?: string | null;
   requiresPasswordChange?: boolean;
-  sedeId?: string | null; // For teachers and supervisors to link them to a Sede
-  institutionId: string | null; // ID of the institution this user belongs to (Mandatory for staff, nullable for student if not yet assigned)
+  sedeId?: string | null; // For teachers and supervisors to link them to a Sede, and for students
+  institutionId: string; // ID of the institution this user belongs to (Mandatory for all users)
 
   // Student-specific fields
   level?: 'Beginner' | 'Intermediate' | 'Advanced' | 'Other';
@@ -74,6 +74,7 @@ export interface TeacherAttendanceRecord {
   teacherName: string;
   timestamp: string;
   attendanceCodeUsed: string;
+  institutionId?: string | null;
 }
 
 export interface Session {
@@ -81,8 +82,8 @@ export interface Session {
   classId: string; // This is the Group ID
   date: string; // YYYY-MM-DD
   time: string; // HH:MM
-  institutionId?: string | null; // For scoping sessions to an institution
-  sedeId?: string | null; // For scoping sessions to a Sede
+  institutionId?: string | null;
+  sedeId?: string | null;
 }
 
 export interface AttendanceRecord {
@@ -92,7 +93,7 @@ export interface AttendanceRecord {
   status: 'present' | 'absent' | 'late';
   timestamp: string;
   observation?: string;
-  institutionId?: string | null; // For scoping records
+  institutionId?: string | null;
 }
 
 export interface Group {
@@ -103,8 +104,8 @@ export interface Group {
   endDate?: string | null;
   studentIds: string[];
   teacherId?: string | null;
-  sedeId?: string | null;
-  institutionId?: string | null; // Added for direct linking
+  sedeId: string | null; // Made nullable, but will be set if group is in a Sede
+  institutionId: string; // Mandatory: a group must belong to an institution
 }
 
 export interface GradingConfiguration {
@@ -114,7 +115,7 @@ export interface GradingConfiguration {
   maxIndividualActivityScore: number;
   maxTotalAccumulatedScore: number;
   maxExamScore: number;
-  institutionId?: string | null; // To scope grading configs per institution eventually
+  institutionId?: string | null;
 }
 
 export const DEFAULT_GRADING_CONFIG: GradingConfiguration = {
@@ -130,7 +131,7 @@ export interface ClassScheduleConfiguration {
   scheduleType: 'Saturday' | 'Sunday' | 'Daily' | 'NotSet' | 'SaturdayAndSunday';
   startTime: string;
   endTime: string;
-  institutionId?: string | null; // To scope schedule configs per institution eventually
+  institutionId?: string | null;
 }
 
 export const DEFAULT_CLASS_SCHEDULE_CONFIG: ClassScheduleConfiguration = {
