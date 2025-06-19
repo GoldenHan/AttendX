@@ -51,7 +51,7 @@ export function Header({ appLogoUrl }: { appLogoUrl?: string | null }) {
       <div className="flex items-center gap-2">
         {appLogoUrl ? (
           <Link href="/" className="flex items-center">
-            <Image src={appLogoUrl} alt="App Logo" width={120} height={30} className="object-contain h-[30px] max-w-[120px]" priority />
+            <Image src={appLogoUrl} alt="App Logo" width={120} height={30} className="object-contain h-[30px] max-w-[120px]" />
           </Link>
         ) : (
           <>
