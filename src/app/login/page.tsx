@@ -142,7 +142,7 @@ export default function AuthPage() {
       await sendPasswordResetEmail(auth, data.email);
       toast({
         title: 'Email de Restablecimiento Enviado',
-        description: `Si existe una cuenta con ${data.email}, se ha enviado un enlace para restablecer la contraseña.`,
+        description: `Si existe una cuenta con ${data.email}, se ha enviado un enlace para restablecer tu contraseña.`,
       });
       setIsForgotPasswordDialogOpen(false);
       forgotPasswordForm.reset();
@@ -417,7 +417,7 @@ export default function AuthPage() {
             {/* Overlay Right Panel (Prompts to Sign Up, visible when SignIn form is active) */}
             <div
               className={cn(
-                "overlay-panel overlay-right absolute top-0 right-0 flex h-full w-1/2 flex-col items-center justify-center px-10 text-center transform clip-edge-left-gearish",
+                "overlay-panel overlay-right absolute top-0 right-0 flex h-full w-1/2 flex-col items-center justify-center px-10 text-center transform clip-edge-left-gearish relative", // Added relative
                 "bg-signup-panel text-signup-panel-foreground" 
               )}
             >
@@ -432,6 +432,9 @@ export default function AuthPage() {
               >
                 Registrar mi Institución
               </Button>
+              <div className="absolute bottom-4 right-4 text-xs text-signup-panel-foreground/80">
+                <p>¿Necesitas ayuda? <a href="mailto:tu-email-de-soporte@example.com" className="underline hover:text-signup-panel-foreground">Contacta a Soporte</a></p>
+              </div>
             </div>
           </div>
         </div>
