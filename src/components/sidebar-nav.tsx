@@ -58,7 +58,6 @@ const navItems: NavItem[] = [
   { href: '/lesson-planner', label: 'AI Lesson Planner', icon: NotebookPen, roles: ['admin', 'teacher', 'supervisor'] },
 
   // Management (for Admin, Supervisor, Teacher)
-  { href: '/student-grades', label: 'Student Grades View', icon: ClipboardCheck, roles: ['admin', 'teacher', 'supervisor'], excludeRoles: ['student'] },
   { href: '/student-management', label: 'Student Management', icon: GraduationCap, roles: ['admin', 'teacher', 'supervisor'] },
   { href: '/group-management', label: 'Group Management', icon: FolderKanban, roles: ['admin', 'teacher', 'supervisor'] },
   { href: '/grades-management', label: 'Grades Management', icon: ClipboardCheck, roles: ['admin', 'teacher', 'supervisor'] },
