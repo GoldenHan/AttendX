@@ -123,7 +123,6 @@ export default function StaffManagementPage() {
       );
       const usersSnapshotPromise = getDocs(usersQuery);
       
-      // Fetch groups and sedes belonging to the same institution
       const groupsQuery = query(collection(db, 'groups'), where('institutionId', '==', firestoreUser.institutionId));
       const groupsSnapshotPromise = getDocs(groupsQuery);
 
@@ -160,7 +159,6 @@ export default function StaffManagementPage() {
     }
     setUsernameCheckStatus('checking'); setUsernameCheckMessage('Checking username...');
     try {
-      // Check within the same institution
       const q = query(collection(db, 'users'), 
         where('username', '==', username.trim()), 
         where('institutionId', '==', firestoreUser?.institutionId), 
@@ -181,7 +179,6 @@ export default function StaffManagementPage() {
     }
     setEmailCheckStatus('checking'); setEmailCheckMessage(`Verifying email...`);
     try {
-       // Check within the same institution
       const q = query(collection(db, 'users'), 
         where('email', '==', email.trim()),
         where('institutionId', '==', firestoreUser?.institutionId), 
@@ -191,14 +188,13 @@ export default function StaffManagementPage() {
         setEmailCheckStatus('exists');
         setEmailCheckMessage(`An account with this email already exists in this institution's Firestore.`);
       } else {
-        // Also check Firebase Auth globally, as emails must be unique there
         const globalEmailAuthQuery = query(collection(db, 'users'), where('email', '==', email.trim()), limit(1));
         const globalAuthSnapshot = await getDocs(globalEmailAuthQuery);
         if (!globalAuthSnapshot.empty && globalAuthSnapshot.docs[0].data().institutionId !== firestoreUser?.institutionId) {
             setEmailCheckStatus('exists');
             setEmailCheckMessage(`This email is registered to another institution.`);
         } else if (!globalAuthSnapshot.empty && globalAuthSnapshot.docs[0].data().institutionId === firestoreUser?.institutionId) {
-             setEmailCheckStatus('exists'); // Should have been caught by first query
+             setEmailCheckStatus('exists');
              setEmailCheckMessage(`An account with this email already exists in this institution's Firestore.`);
         } else {
             setEmailCheckStatus('not_found');
@@ -219,6 +215,19 @@ export default function StaffManagementPage() {
 
   const watchedUsername = form.watch('username');
   const watchedEmailValue = form.watch('email');
+  const watchedRole = form.watch('role');
+
+  useEffect(() => {
+    if (!isStaffFormDialogOpen) return;
+
+    if (watchedRole !== 'teacher') {
+      form.setValue('assignedGroupId', undefined);
+    }
+    if (watchedRole === 'caja') {
+      form.setValue('attendanceCode', '');
+      form.setValue('sedeId', '');
+    }
+  }, [watchedRole, form, isStaffFormDialogOpen]);
 
   useEffect(() => {
     if (isStaffFormDialogOpen && watchedUsername && (!editingStaff || watchedUsername !== editingStaff.username)) {
@@ -249,46 +258,36 @@ export default function StaffManagementPage() {
     let filtered = staffUsers.filter(staff => staff.institutionId === firestoreUser.institutionId);
 
     if (firestoreUser.role === 'supervisor') {
-        // Supervisors see all teachers in their Sede, and themselves.
-        // They can also see other supervisors and admins of the same institution, but with limited actions.
         filtered = staffUsers.filter(staff => 
-            (staff.sedeId === firestoreUser.sedeId && staff.role === 'teacher') || // Teachers in their Sede
-            staff.id === firestoreUser.id || // Themselves
-            (staff.institutionId === firestoreUser.institutionId && (staff.role === 'supervisor' || staff.role === 'admin' || staff.role === 'caja')) // Other non-teacher staff in institution
+            (staff.sedeId === firestoreUser.sedeId && staff.role === 'teacher') ||
+            staff.id === firestoreUser.id ||
+            (staff.institutionId === firestoreUser.institutionId && (staff.role === 'supervisor' || staff.role === 'admin' || staff.role === 'caja'))
         );
     }
-    // Admins see all staff within their institution (already filtered above).
     return filtered;
   }, [staffUsers, firestoreUser]);
 
   const getSedeName = useCallback((sedeId?: string | null) => {
     if (!sedeId) return 'N/A';
-    const sede = allSedes.find(s => s.id === sedeId); // allSedes is already filtered by institution
+    const sede = allSedes.find(s => s.id === sedeId);
     return sede ? sede.name : 'Unknown Sede';
   }, [allSedes]);
   
   const availableSedesForAssignment = useMemo(() => {
     if (!firestoreUser || !firestoreUser.institutionId) return [];
-    // Admins can assign to any Sede within their institution
-    // Supervisors can only assign to their own Sede
     if (firestoreUser.role === 'supervisor') {
         return allSedes.filter(s => s.id === firestoreUser.sedeId);
     }
-    return allSedes; // allSedes is already filtered by admin's institution
+    return allSedes;
   }, [allSedes, firestoreUser]);
   
   const availableGroupsForTeacherAssignment = useMemo(() => {
      if (!firestoreUser || !firestoreUser.institutionId) return [];
-    // Admins can assign to any group within their institution's Sedes
-    // Supervisors can assign to any group within their Sede
     if (firestoreUser.role === 'supervisor') {
-        return allGroups.filter(g => g.sedeId === firestoreUser.sedeId); // allGroups is already filtered by institution
+        return allGroups.filter(g => g.sedeId === firestoreUser.sedeId);
     }
-    return allGroups; // allGroups is already filtered by institution
+    return allGroups;
   }, [allGroups, firestoreUser]);
-
-  const watchedRole = form.watch('role');
-
 
   if (isLoading && staffUsers.length === 0 && allGroups.length === 0 && allSedes.length === 0) {
     return (
@@ -335,12 +334,11 @@ export default function StaffManagementPage() {
     );
   }
 
-
   const handleOpenAddDialog = () => {
     setEditingStaff(null);
     const defaultValues: StaffFormValues = {
       name: '', username: '', email: '', phoneNumber: '', role: 'teacher', photoUrl: '', assignedGroupId: undefined, attendanceCode: '',
-      sedeId: firestoreUser?.role === 'supervisor' ? (firestoreUser.sedeId || '') : '', // Pre-fill Sede for supervisor
+      sedeId: firestoreUser?.role === 'supervisor' ? (firestoreUser.sedeId || '') : '',
     };
     if (firestoreUser?.role === 'supervisor') {
       defaultValues.role = 'teacher'; 
@@ -396,7 +394,6 @@ export default function StaffManagementPage() {
             setIsSubmitting(false); return;
         }
         if (data.sedeId !== firestoreUser.sedeId && (data.role === 'teacher' || data.role === 'supervisor')) {
-             // Supervisors can only manage staff within their own Sede.
             toast({ title: "Action Denied", description: `Staff must be assigned to your Sede (${getSedeName(firestoreUser.sedeId)}).`, variant: "destructive" });
             setIsSubmitting(false); return;
         }
@@ -406,7 +403,7 @@ export default function StaffManagementPage() {
     const staffDetailsForAuthContext = {
         sedeId: (data.role === 'teacher' || data.role === 'supervisor' || data.role === 'admin') ? (data.sedeId === UNASSIGN_VALUE_KEY ? undefined : data.sedeId || undefined) : undefined,
         attendanceCode: (data.role === 'teacher' || data.role === 'admin' || data.role === 'supervisor') ? data.attendanceCode : undefined,
-        institutionId: firestoreUser.institutionId, // Pass institutionId from logged-in admin/supervisor
+        institutionId: firestoreUser.institutionId,
     };
 
     try {
@@ -419,7 +416,7 @@ export default function StaffManagementPage() {
             photoUrl: data.photoUrl || null,
             attendanceCode: (data.role === 'teacher' || data.role === 'admin' || data.role === 'supervisor') ? (data.attendanceCode || null) : null,
             sedeId: (data.role === 'teacher' || data.role === 'supervisor' || data.role === 'admin') ? (data.sedeId === UNASSIGN_VALUE_KEY ? null : data.sedeId || null) : null,
-            institutionId: firestoreUser.institutionId, // Ensure institutionId is maintained
+            institutionId: firestoreUser.institutionId,
         };
         await updateDoc(staffRef, updateData);
         staffMemberId = editingStaff.id;
@@ -461,7 +458,7 @@ export default function StaffManagementPage() {
           }
           if (newlySelectedGroupId) {
             const newGroupRef = doc(db, 'groups', newlySelectedGroupId);
-            const groupDoc = allGroups.find(g => g.id === newlySelectedGroupId); // allGroups is already filtered by institution
+            const groupDoc = allGroups.find(g => g.id === newlySelectedGroupId);
             if(groupDoc && groupDoc.teacherId && groupDoc.teacherId !== staffMemberId) {
                  toast({
                     title: 'Group Reassignment',
@@ -473,7 +470,7 @@ export default function StaffManagementPage() {
           }
           await batch.commit();
         }
-      } else if (staffMemberId && data.role !== 'teacher') { // If role is not teacher, unassign from any group
+      } else if (staffMemberId && data.role !== 'teacher') {
         const previouslyAssignedGroup = allGroups.find(g => g.teacherId === staffMemberId);
         if (previouslyAssignedGroup) {
           const groupRef = doc(db, 'groups', previouslyAssignedGroup.id);
@@ -485,7 +482,7 @@ export default function StaffManagementPage() {
           const newSedeId = data.sedeId === UNASSIGN_VALUE_KEY ? null : data.sedeId || null;
           if (newSedeId) {
               const sedeRef = doc(db, 'sedes', newSedeId);
-              const currentSedeDoc = allSedes.find(s => s.id === newSedeId); // allSedes is institution-filtered
+              const currentSedeDoc = allSedes.find(s => s.id === newSedeId);
               if (currentSedeDoc?.supervisorId !== staffMemberId) {
                  const batch = writeBatch(db);
                  batch.update(sedeRef, { supervisorId: staffMemberId });
@@ -502,7 +499,6 @@ export default function StaffManagementPage() {
              }
           }
       }
-
 
       form.reset({ name: '', username:'', email: '', phoneNumber: '', role: 'teacher', photoUrl: '', assignedGroupId: undefined, attendanceCode: '', sedeId: firestoreUser?.role === 'supervisor' ? (firestoreUser.sedeId || '') : '' });
       setEditingStaff(null);
@@ -738,8 +734,8 @@ export default function StaffManagementPage() {
                           value={field.value} 
                           defaultValue={field.value}
                           disabled={
-                            (!!editingStaff && editingStaff.role === 'admin' && authUser?.uid === editingStaff.id && editingStaff.institutionId === firestoreUser?.institutionId) || // Admin cannot change own role
-                            (firestoreUser?.role === 'supervisor' && (!editingStaff || editingStaff.role !== 'teacher')) // Supervisor can only manage teachers
+                            (!!editingStaff && editingStaff.role === 'admin' && authUser?.uid === editingStaff.id && editingStaff.institutionId === firestoreUser?.institutionId) ||
+                            (firestoreUser?.role === 'supervisor' && (!editingStaff || editingStaff.role !== 'teacher'))
                           }
                         >
                           <FormControl><SelectTrigger><SelectValue placeholder="Select a role" /></SelectTrigger></FormControl>
@@ -768,7 +764,7 @@ export default function StaffManagementPage() {
                             <Select 
                               onValueChange={(value) => field.onChange(value === UNASSIGN_VALUE_KEY ? '' : value)} 
                               value={field.value || UNASSIGN_VALUE_KEY}
-                              disabled={firestoreUser?.role === 'supervisor'} // Supervisor's staff automatically assigned to their Sede
+                              disabled={firestoreUser?.role === 'supervisor'}
                             >
                               <FormControl><SelectTrigger><SelectValue placeholder="Select a Sede or unassign" /></SelectTrigger></FormControl>
                               <SelectContent>
@@ -850,7 +846,6 @@ export default function StaffManagementPage() {
               const canEditThisStaff = (firestoreUser?.role === 'admin' && staff.institutionId === firestoreUser.institutionId) || 
                                      (firestoreUser?.role === 'supervisor' && staff.role === 'teacher' && staff.sedeId === firestoreUser.sedeId && staff.institutionId === firestoreUser.institutionId);
               
-              // Admin cannot delete themselves. Supervisor cannot delete other supervisors or admins.
               const canDeleteThisStaff = (firestoreUser?.role === 'admin' && staff.id !== authUser?.uid && staff.institutionId === firestoreUser.institutionId) ||
                                        (firestoreUser?.role === 'supervisor' && staff.role === 'teacher' && staff.sedeId === firestoreUser.sedeId && staff.institutionId === firestoreUser.institutionId);
 
