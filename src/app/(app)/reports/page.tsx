@@ -12,11 +12,10 @@ import {
 } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import type { User, AttendanceRecord as AttendanceRecordType, Group, Session, ClassScheduleConfiguration } from '@/types';
-import { DEFAULT_CLASS_SCHEDULE_CONFIG } from '@/types';
+import type { User, AttendanceRecord as AttendanceRecordType, Group, Session } from '@/types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, query, doc, getDoc, where } from 'firebase/firestore';
+import { collection, getDocs, query, where } from 'firebase/firestore';
 import { Loader2, CalendarIcon, Download, FileText } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Label } from '@/components/ui/label';
@@ -53,7 +52,6 @@ export default function AttendanceReportsPage() {
   const [allGroups, setAllGroups] = useState<Group[]>([]);
   const [allAttendanceRecords, setAllAttendanceRecords] = useState<AttendanceRecordType[]>([]);
   const [allSessions, setAllSessions] = useState<Session[]>([]);
-  const [classScheduleConfig, setClassScheduleConfig] = useState<ClassScheduleConfiguration>(DEFAULT_CLASS_SCHEDULE_CONFIG);
   
   const [customStartDate, setCustomStartDate] = useState<Date | null>(null);
   const [customEndDate, setCustomEndDate] = useState<Date | null>(null);
@@ -76,21 +74,17 @@ export default function AttendanceReportsPage() {
       const attendanceQuery = query(collection(db, 'attendanceRecords'), where('institutionId', '==', institutionId));
       const groupsQuery = query(collection(db, 'groups'), where('institutionId', '==', institutionId));
       const sessionsQuery = query(collection(db, 'sessions'), where('institutionId', '==', institutionId));
-      // Assuming schedule config is global or becomes institution-specific later
-      const scheduleConfigPromise = getDoc(doc(db, 'appConfiguration', 'currentClassScheduleConfig')); 
       
       const [
         studentsSnapshot, 
         attendanceSnapshot, 
         groupsSnapshot, 
         sessionsSnapshot,
-        scheduleConfigSnap
       ] = await Promise.all([
         getDocs(studentQuery),
         getDocs(attendanceQuery),
         getDocs(groupsQuery),
         getDocs(sessionsQuery),
-        scheduleConfigPromise
       ]);
 
       setAllStudents(studentsSnapshot.docs.map(d => ({ id: d.id, ...d.data() } as User)));
@@ -98,16 +92,9 @@ export default function AttendanceReportsPage() {
       setAllGroups(groupsSnapshot.docs.map(d => ({ id: d.id, ...d.data() } as Group)));
       setAllSessions(sessionsSnapshot.docs.map(d => ({ id: d.id, ...d.data() } as Session)));
 
-      if (scheduleConfigSnap.exists()) {
-        setClassScheduleConfig(scheduleConfigSnap.data() as ClassScheduleConfiguration);
-      } else {
-        setClassScheduleConfig(DEFAULT_CLASS_SCHEDULE_CONFIG);
-      }
-
     } catch (error) {
       console.error("Error fetching report data:", error);
       toast({ title: 'Error fetching data', description: 'Could not load data for reports.', variant: 'destructive' });
-      setClassScheduleConfig(DEFAULT_CLASS_SCHEDULE_CONFIG);
     }
     setIsLoadingData(false);
   }, [toast, firestoreUser]);
@@ -319,7 +306,7 @@ export default function AttendanceReportsPage() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    URL.revokeObjectURL(link.href);
+    URL.revokeObjectURL(url);
     toast({ title: 'Export Successful', description: 'Attendance report exported as HTML.' });
   };
 
