@@ -145,41 +145,34 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const signIn = async (identifier: string, pass: string) => {
     setLoading(true);
-
     console.log(`[AuthContext] Attempting sign in for identifier: ${identifier}`);
     try {
-      // If identifier contains '@', assume it's an email and attempt direct login.
       if (identifier.includes('@')) {
         console.log(`[AuthContext] Identifier is an email. Proceeding directly with Firebase Auth.`);
         await signInWithEmailAndPassword(auth, identifier, pass);
         console.log(`[AuthContext] Firebase Auth successful for email: ${identifier}`);
-        return; // Early return on success
+        return; 
       }
 
-      // If no '@', assume it's a username. Query for all users with that username.
       console.log(`[AuthContext] Identifier is a username. Querying for matches.`);
       const usernameQuery = query(collection(db, 'users'), where('username', '==', identifier.trim()));
       const usernameSnapshot = await getDocs(usernameQuery);
 
       if (!usernameSnapshot.empty) {
         console.log(`[AuthContext] Found ${usernameSnapshot.size} user(s) with username "${identifier.trim()}".`);
-        // Iterate through each user and try to sign in. This handles multiple institutions having the same username.
         for (const userDoc of usernameSnapshot.docs) {
           const userData = userDoc.data() as FirestoreUserType;
           if (userData.email) {
             try {
               console.log(`[AuthContext] Attempting login with associated email: ${userData.email}`);
               await signInWithEmailAndPassword(auth, userData.email, pass);
-              // If we get here, login was successful.
               console.log(`[AuthContext] Login successful for user ${userData.username} from institution ${userData.institutionId}.`);
-              return; // Exit function on first successful login.
+              return; 
             } catch (error: any) {
-              // This is an expected failure if the password doesn't match this specific user account.
               if (error.code === 'auth/invalid-credential') {
                 console.log(`[AuthContext] Password incorrect for ${userData.email}. Trying next match if available...`);
-                continue; // Continue to the next user with the same username.
+                continue; 
               } else {
-                 // For any other error (e.g., network, etc.), we should stop and re-throw it.
                  throw error;
               }
             }
@@ -187,19 +180,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             console.warn(`[AuthContext] User ${userData.username} found but has no email associated.`);
           }
         }
-        // If the loop completes without a successful login, it means the password was wrong for all matching usernames.
         console.error(`[AuthContext] Password was incorrect for all users matching username "${identifier.trim()}".`);
         throw new Error('Nombre de usuario o contraseña incorrectos.');
       } else {
-        // If the username is not found at all, we can throw a specific error.
         console.error(`[AuthContext] Username "${identifier.trim()}" not found in any institution.`);
         throw new Error('Nombre de usuario o contraseña incorrectos.');
       }
     } catch (error: any) {
       console.error(`[AuthContext] signIn error:`, error.code, error.message);
       setLoading(false);
-      // Re-throw the original error or a more user-friendly one.
-      // Let the calling component handle the UI feedback.
       throw error;
     }
   };
@@ -215,77 +204,71 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     institutionName?: string
   ) => {
     setLoading(true);
+    let firebaseUser: FirebaseUser | null = null;
     try {
       const targetCollection = 'users';
       let effectiveInstitutionId = creatorContext?.institutionId;
-      let currentGradingConfigForNewUser = DEFAULT_GRADING_CONFIG;
-
-      console.log(`[AuthContext] signUp: Role: ${role}, Institution Name: ${institutionName}, Creator Context Inst ID: ${creatorContext?.institutionId}`);
-
+      
       if (role === 'admin' && institutionName && !effectiveInstitutionId) {
-        console.log(`[AuthContext] Creating new institution: ${institutionName}`);
         const instNameQuery = query(collection(db, 'institutions'), where('name', '==', institutionName.trim()), limit(1));
         const instNameSnapshot = await getDocs(instNameQuery);
         if (!instNameSnapshot.empty) {
           throw new Error(`An institution named "${institutionName}" already exists.`);
         }
+      }
+
+      if (effectiveInstitutionId) {
+        const usernameQuery = query(collection(db, targetCollection),
+          where('username', '==', username.trim()),
+          where('institutionId', '==', effectiveInstitutionId),
+          limit(1)
+        );
+        const usernameSnapshot = await getDocs(usernameQuery);
+        if (!usernameSnapshot.empty) {
+            const error = new Error(`Username "${username.trim()}" already exists in this institution.`);
+            (error as any).code = "auth/username-already-exists";
+            throw error;
+        }
+
+        const emailQueryFirestore = query(collection(db, targetCollection),
+            where('email', '==', email.trim()),
+            where('institutionId', '==', effectiveInstitutionId),
+            limit(1)
+        );
+        const emailSnapshotFirestore = await getDocs(emailQueryFirestore);
+        if (!emailSnapshotFirestore.empty) {
+            const error = new Error(`Email "${email.trim()}" is already registered to a user in this institution's records.`);
+            (error as any).code = "auth/email-already-linked-to-institution"; 
+            throw error;
+        }
+      }
+      
+      const userCredential = await createUserWithEmailAndPassword(auth, email, initialPasswordAsUsername);
+      firebaseUser = userCredential.user;
+
+      let currentGradingConfigForNewUser = DEFAULT_GRADING_CONFIG;
+
+      if (role === 'admin' && institutionName && !creatorContext?.institutionId) {
         const institutionRef = await addDoc(collection(db, 'institutions'), {
           name: institutionName,
-          adminUids: [], 
+          adminUids: [firebaseUser.uid],
           createdAt: new Date().toISOString(),
         });
         effectiveInstitutionId = institutionRef.id;
         console.log(`[AuthContext] New institution document created with ID: ${effectiveInstitutionId}`);
+        
         await setDoc(doc(db, 'institutionGradingConfigs', effectiveInstitutionId), DEFAULT_GRADING_CONFIG);
-        await setDoc(doc(db, 'institutionScheduleConfigs', effectiveInstitutionId), DEFAULT_CLASS_SCHEDULE_CONFIG); // Added
+        await setDoc(doc(db, 'institutionScheduleConfigs', effectiveInstitutionId), DEFAULT_CLASS_SCHEDULE_CONFIG);
         currentGradingConfigForNewUser = DEFAULT_GRADING_CONFIG;
 
       } else if (effectiveInstitutionId) {
         currentGradingConfigForNewUser = await fetchGradingConfigForInstitution(effectiveInstitutionId);
       }
 
-
       if (!effectiveInstitutionId) {
-        throw new Error("Institution ID is required to create a user.");
+        throw new Error("Institution ID could not be determined. User creation has been rolled back.");
       }
-
-      const usernameQuery = query(collection(db, targetCollection),
-        where('username', '==', username.trim()),
-        where('institutionId', '==', effectiveInstitutionId),
-        limit(1)
-      );
-      const usernameSnapshot = await getDocs(usernameQuery);
-      if (!usernameSnapshot.empty) {
-        const error = new Error(`Username "${username.trim()}" already exists in this institution. Please choose a different one.`);
-        (error as any).code = "auth/username-already-exists";
-        throw error;
-      }
-
-      const emailQueryFirestore = query(collection(db, targetCollection),
-          where('email', '==', email.trim()),
-          where('institutionId', '==', effectiveInstitutionId),
-          limit(1)
-      );
-      const emailSnapshotFirestore = await getDocs(emailQueryFirestore);
-      if (!emailSnapshotFirestore.empty) {
-          const error = new Error(`Email "${email.trim()}" is already registered to a user in this institution's records.`);
-          (error as any).code = "auth/email-already-linked-to-institution"; 
-          throw error;
-      }
-
-      const userCredential = await createUserWithEmailAndPassword(auth, email, initialPasswordAsUsername);
-      const firebaseUser = userCredential.user;
-
-      if (role === 'admin' && institutionName && effectiveInstitutionId) {
-          const institutionJustCreatedId = effectiveInstitutionId;
-          if (institutionName && institutionJustCreatedId) {
-            await updateDoc(doc(db, 'institutions', institutionJustCreatedId), {
-                adminUids: [firebaseUser.uid]
-            });
-            console.log(`[AuthContext] Updated institution ${institutionJustCreatedId} with admin UID ${firebaseUser.uid}`);
-          }
-      }
-
+      
       const newUserDocData: Omit<FirestoreUserType, 'id'> = {
         uid: firebaseUser.uid,
         name: name,
@@ -314,6 +297,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       console.log(`[AuthContext] User document created in '${targetCollection}' for UID: ${firebaseUser.uid} with Institution ID: ${newUserDocData.institutionId}`);
 
     } catch (error) {
+      if (firebaseUser) {
+        // If user was created but subsequent Firestore operations failed, delete the orphaned auth user
+        await firebaseUser.delete().catch(deleteError => {
+            console.error("[AuthContext] Failed to clean up orphaned Firebase Auth user:", deleteError);
+        });
+      }
       setLoading(false);
       throw error;
     }
