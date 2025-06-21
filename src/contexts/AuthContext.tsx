@@ -206,19 +206,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setLoading(true);
     let firebaseUser: FirebaseUser | null = null;
     try {
-      const targetCollection = 'users';
       let effectiveInstitutionId = creatorContext?.institutionId;
-      
-      if (role === 'admin' && institutionName && !effectiveInstitutionId) {
-        const instNameQuery = query(collection(db, 'institutions'), where('name', '==', institutionName.trim()), limit(1));
-        const instNameSnapshot = await getDocs(instNameQuery);
-        if (!instNameSnapshot.empty) {
-          throw new Error(`An institution named "${institutionName}" already exists.`);
-        }
-      }
 
+      // For existing institutions, check for conflicts before creating the auth user.
+      // This is safe because the creator is already authenticated and has read permissions.
       if (effectiveInstitutionId) {
-        const usernameQuery = query(collection(db, targetCollection),
+        const usernameQuery = query(collection(db, 'users'),
           where('username', '==', username.trim()),
           where('institutionId', '==', effectiveInstitutionId),
           limit(1)
@@ -230,7 +223,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             throw error;
         }
 
-        const emailQueryFirestore = query(collection(db, targetCollection),
+        const emailQueryFirestore = query(collection(db, 'users'),
             where('email', '==', email.trim()),
             where('institutionId', '==', effectiveInstitutionId),
             limit(1)
@@ -242,13 +235,19 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             throw error;
         }
       }
-      
+
+      // Create the user in Firebase Auth FIRST.
       const userCredential = await createUserWithEmailAndPassword(auth, email, initialPasswordAsUsername);
       firebaseUser = userCredential.user;
 
-      let currentGradingConfigForNewUser = DEFAULT_GRADING_CONFIG;
-
+      // If it's a new admin for a new institution, perform checks and writes AFTER auth user is created.
       if (role === 'admin' && institutionName && !creatorContext?.institutionId) {
+        const instNameQuery = query(collection(db, 'institutions'), where('name', '==', institutionName.trim()), limit(1));
+        const instNameSnapshot = await getDocs(instNameQuery);
+        if (!instNameSnapshot.empty) {
+          throw new Error(`An institution named "${institutionName}" already exists.`);
+        }
+        
         const institutionRef = await addDoc(collection(db, 'institutions'), {
           name: institutionName,
           adminUids: [firebaseUser.uid],
@@ -259,16 +258,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         
         await setDoc(doc(db, 'institutionGradingConfigs', effectiveInstitutionId), DEFAULT_GRADING_CONFIG);
         await setDoc(doc(db, 'institutionScheduleConfigs', effectiveInstitutionId), DEFAULT_CLASS_SCHEDULE_CONFIG);
-        currentGradingConfigForNewUser = DEFAULT_GRADING_CONFIG;
-
-      } else if (effectiveInstitutionId) {
-        currentGradingConfigForNewUser = await fetchGradingConfigForInstitution(effectiveInstitutionId);
       }
-
+      
       if (!effectiveInstitutionId) {
         throw new Error("Institution ID could not be determined. User creation has been rolled back.");
       }
-      
+
+      const currentGradingConfigForNewUser = await fetchGradingConfigForInstitution(effectiveInstitutionId);
+
       const newUserDocData: Omit<FirestoreUserType, 'id'> = {
         uid: firebaseUser.uid,
         name: name,
@@ -293,8 +290,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         })
       };
       
-      await setDoc(doc(db, targetCollection, firebaseUser.uid), newUserDocData);
-      console.log(`[AuthContext] User document created in '${targetCollection}' for UID: ${firebaseUser.uid} with Institution ID: ${newUserDocData.institutionId}`);
+      await setDoc(doc(db, 'users', firebaseUser.uid), newUserDocData);
+      console.log(`[AuthContext] User document created in 'users' for UID: ${firebaseUser.uid} with Institution ID: ${newUserDocData.institutionId}`);
 
     } catch (error) {
       if (firebaseUser) {
