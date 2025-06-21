@@ -147,49 +147,27 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setLoading(true);
     console.log(`[AuthContext] Attempting sign in for identifier: ${identifier}`);
     try {
-      if (identifier.includes('@')) {
-        console.log(`[AuthContext] Identifier is an email. Proceeding directly with Firebase Auth.`);
+        // The identifier must be an email address to proceed for unauthenticated users.
+        // This is a security measure to avoid querying the database before login.
+        if (!identifier.includes('@')) {
+            console.error(`[AuthContext] Login attempt with a non-email identifier ("${identifier}"). Login with email is required.`);
+            // Throw a user-friendly error that the login page can display.
+            throw new Error('Please use your email address to log in. Usernames are not supported for login.');
+        }
+
+        console.log(`[AuthContext] Identifier is an email. Proceeding with Firebase Auth.`);
         await signInWithEmailAndPassword(auth, identifier, pass);
         console.log(`[AuthContext] Firebase Auth successful for email: ${identifier}`);
-        return; 
-      }
 
-      console.log(`[AuthContext] Identifier is a username. Querying for matches.`);
-      const usernameQuery = query(collection(db, 'users'), where('username', '==', identifier.trim()));
-      const usernameSnapshot = await getDocs(usernameQuery);
-
-      if (!usernameSnapshot.empty) {
-        console.log(`[AuthContext] Found ${usernameSnapshot.size} user(s) with username "${identifier.trim()}".`);
-        for (const userDoc of usernameSnapshot.docs) {
-          const userData = userDoc.data() as FirestoreUserType;
-          if (userData.email) {
-            try {
-              console.log(`[AuthContext] Attempting login with associated email: ${userData.email}`);
-              await signInWithEmailAndPassword(auth, userData.email, pass);
-              console.log(`[AuthContext] Login successful for user ${userData.username} from institution ${userData.institutionId}.`);
-              return; 
-            } catch (error: any) {
-              if (error.code === 'auth/invalid-credential') {
-                console.log(`[AuthContext] Password incorrect for ${userData.email}. Trying next match if available...`);
-                continue; 
-              } else {
-                 throw error;
-              }
-            }
-          } else {
-            console.warn(`[AuthContext] User ${userData.username} found but has no email associated.`);
-          }
-        }
-        console.error(`[AuthContext] Password was incorrect for all users matching username "${identifier.trim()}".`);
-        throw new Error('Nombre de usuario o contraseña incorrectos.');
-      } else {
-        console.error(`[AuthContext] Username "${identifier.trim()}" not found in any institution.`);
-        throw new Error('Nombre de usuario o contraseña incorrectos.');
-      }
     } catch (error: any) {
-      console.error(`[AuthContext] signIn error:`, error.code, error.message);
-      setLoading(false);
-      throw error;
+        console.error(`[AuthContext] signIn error:`, error.code, error.message);
+        setLoading(false);
+        // Provide a more generic but user-friendly message for common auth errors.
+        if (error.code === 'auth/invalid-credential' || error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
+            throw new Error('El correo electrónico o la contraseña son incorrectos.');
+        }
+        // Re-throw other errors (like my custom one) or unexpected Firebase errors.
+        throw error;
     }
   };
 
@@ -207,9 +185,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     let firebaseUser: FirebaseUser | null = null;
     try {
       let effectiveInstitutionId = creatorContext?.institutionId;
-
+      
       // For existing institutions, check for conflicts before creating the auth user.
-      // This is safe because the creator is already authenticated and has read permissions.
       if (effectiveInstitutionId) {
         const usernameQuery = query(collection(db, 'users'),
           where('username', '==', username.trim()),
@@ -222,7 +199,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             (error as any).code = "auth/username-already-exists";
             throw error;
         }
-
         const emailQueryFirestore = query(collection(db, 'users'),
             where('email', '==', email.trim()),
             where('institutionId', '==', effectiveInstitutionId),
@@ -235,7 +211,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             throw error;
         }
       }
-
+      
       // Create the user in Firebase Auth FIRST.
       const userCredential = await createUserWithEmailAndPassword(auth, email, initialPasswordAsUsername);
       firebaseUser = userCredential.user;

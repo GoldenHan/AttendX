@@ -33,7 +33,7 @@ import {
 } from "@/components/ui/dialog";
 
 const loginFormSchema = z.object({
-  identifier: z.string().min(1, { message: "El nombre de usuario o email es requerido." }),
+  identifier: z.string().email({ message: "Por favor, ingresa un correo electrónico válido." }),
   password: z.string().min(1, { message: "La contraseña es requerida." }),
 });
 
@@ -92,17 +92,9 @@ export default function AuthPage() {
       await signIn(data.identifier, data.password);
       toast({ title: 'Ingreso Exitoso', description: '¡Bienvenido/a de nuevo!' });
     } catch (error: any) {
-      // The signIn function now throws user-friendly error messages for most cases.
-      // We can display them directly.
-      let errorMessage = error.message || 'Fallo al ingresar. Verifica tus credenciales.';
-
-      // Fallback for generic firebase errors if the identifier was an email.
-      if (error.code === 'auth/invalid-credential' || error.code === 'auth/invalid-email') {
-        errorMessage = 'Correo electrónico o contraseña incorrectos.';
-      }
-      
+      // The signIn function now throws user-friendly error messages.
       console.error("Login page error:", error);
-      toast({ title: 'Fallo de Ingreso', description: errorMessage, variant: 'destructive' });
+      toast({ title: 'Fallo de Ingreso', description: error.message, variant: 'destructive' });
     } finally {
       setIsSubmitting(false);
     }
@@ -294,13 +286,13 @@ export default function AuthPage() {
                 name="identifier"
                 render={({ field }) => (
                   <FormItem className="w-full">
-                    <FormLabel className="sr-only">Nombre de Usuario o Email</FormLabel>
+                    <FormLabel className="sr-only">Email</FormLabel>
                      <div className="relative">
                         <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                          <UserIcon className="h-5 w-5 text-muted-foreground" />
+                          <Mail className="h-5 w-5 text-muted-foreground" />
                         </div>
                         <FormControl>
-                          <Input placeholder="Nombre de Usuario o Email" {...field} disabled={currentLoadingState} className="bg-input pl-10" />
+                          <Input placeholder="Email" {...field} disabled={currentLoadingState} className="bg-input pl-10" />
                         </FormControl>
                     </div>
                     <FormMessage className="text-xs text-left"/>
