@@ -27,6 +27,7 @@ import {
   Building,
   ClipboardSignature,
   NotebookPen,
+  Banknote,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import type { User } from '@/types';
@@ -64,6 +65,9 @@ const navItems: NavItem[] = [
   { href: '/partial-grades-report', label: 'Partial Grades Report', icon: ClipboardList, roles: ['admin', 'teacher', 'supervisor'] },
   { href: '/certificate-management', label: 'Certificate Records', icon: Award, roles: ['admin', 'teacher', 'supervisor'] },
 
+  // Financial
+  { href: '/payment-registration', label: 'Register Payment', icon: Banknote, roles: ['admin', 'caja', 'supervisor'] },
+
   // Administration (for Admin, Supervisor)
   { href: '/user-management', label: 'Staff Management', icon: Briefcase, roles: ['admin', 'supervisor'] },
   { href: '/sede-management', label: 'Sede Management', icon: Building, roles: ['admin'] },
@@ -98,6 +102,7 @@ export function SidebarNav() {
   const generalItems = visibleNavItems.filter(item => ['/dashboard', '/attendance-log', '/attendance-records', '/reports', '/student-grades', '/classroom/assignments', '/classroom/my-tasks'].includes(item.href));
   const aiItems = visibleNavItems.filter(item => ['/ai-analysis', '/lesson-planner'].includes(item.href));
   const managementItems = visibleNavItems.filter(item => ['/student-management', '/group-management', '/grades-management', '/partial-grades-report', '/certificate-management'].includes(item.href));
+  const financialItems = visibleNavItems.filter(item => ['/payment-registration'].includes(item.href));
   const adminItems = visibleNavItems.filter(item => ['/user-management', '/sede-management', '/app-settings'].includes(item.href));
 
 
@@ -131,17 +136,24 @@ export function SidebarNav() {
           </SidebarGroup>
         )}
         
-        {aiItems.length > 0 && (
-          <SidebarGroup>
-            <SidebarGroupLabel>AI Tools</SidebarGroupLabel>
-            {aiItems.map(renderNavItem)}
-          </SidebarGroup>
-        )}
-
         {managementItems.length > 0 && (
           <SidebarGroup>
             <SidebarGroupLabel>Management</SidebarGroupLabel>
             {managementItems.map(renderNavItem)}
+          </SidebarGroup>
+        )}
+        
+        {financialItems.length > 0 && (
+          <SidebarGroup>
+            <SidebarGroupLabel>Financial</SidebarGroupLabel>
+            {financialItems.map(renderNavItem)}
+          </SidebarGroup>
+        )}
+        
+        {aiItems.length > 0 && (
+          <SidebarGroup>
+            <SidebarGroupLabel>AI Tools</SidebarGroupLabel>
+            {aiItems.map(renderNavItem)}
           </SidebarGroup>
         )}
 

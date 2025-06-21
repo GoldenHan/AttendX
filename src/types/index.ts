@@ -209,3 +209,17 @@ export interface EnrichedSubmission extends ClassroomItemSubmission {
   studentName: string;
   studentPhotoUrl?: string | null;
 }
+
+// New type for Payments
+export interface Payment {
+  id: string;
+  studentId: string;
+  studentName: string;
+  amount: number;
+  concept: string;
+  paymentDate: string; // ISO String
+  createdAt: string; // ISO String
+  recordedByUid: string;
+  recordedByName: string;
+  institutionId: string;
+}
