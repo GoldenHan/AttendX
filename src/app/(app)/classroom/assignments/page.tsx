@@ -41,10 +41,10 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Loader2, PlusCircle, CalendarIcon, AlertTriangle, Info, Edit, Trash2, Users } from 'lucide-react';
+import { Loader2, PlusCircle, CalendarIcon, AlertTriangle, Info, Edit, Trash2, Users, Save } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, query, where, addDoc, orderBy, serverTimestamp, Timestamp, doc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { collection, getDocs, query, where, addDoc, orderBy, serverTimestamp, Timestamp, doc, updateDoc, deleteDoc, writeBatch } from 'firebase/firestore';
 import type { Group, ClassroomItem as ClassroomItemType, ClassroomItemSubmission, EnrichedSubmission, User } from '@/types';
 import { useAuth } from '@/contexts/AuthContext';
 import { useForm } from 'react-hook-form';
@@ -97,7 +97,9 @@ export default function ClassroomAssignmentsPage() {
   const [isSubmissionsDialogOpen, setIsSubmissionsDialogOpen] = useState(false);
   const [selectedItemForSubmissions, setSelectedItemForSubmissions] = useState<DisplayableClassroomItem | null>(null);
   const [submissions, setSubmissions] = useState<EnrichedSubmission[]>([]);
+  const [editableSubmissions, setEditableSubmissions] = useState<EnrichedSubmission[]>([]);
   const [isLoadingSubmissions, setIsLoadingSubmissions] = useState(false);
+  const [isSavingGrades, setIsSavingGrades] = useState(false);
 
 
   const form = useForm<ClassroomItemFormValues>({
@@ -360,47 +362,56 @@ export default function ClassroomAssignmentsPage() {
     }
   };
   
+  const fetchSubmissionsForItem = useCallback(async (itemId: string): Promise<EnrichedSubmission[]> => {
+    if (!firestoreUser?.institutionId) return [];
+
+    const submissionsQuery = query(
+        collection(db, 'classroomItemSubmissions'),
+        where('itemId', '==', itemId),
+        where('institutionId', '==', firestoreUser.institutionId),
+        orderBy('submittedAt', 'asc')
+    );
+    const submissionsSnapshot = await getDocs(submissionsQuery);
+    const submissionData = submissionsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ClassroomItemSubmission));
+
+    if (submissionData.length > 0) {
+        const studentIds = [...new Set(submissionData.map(sub => sub.studentId))];
+        const usersMap = new Map<string, User>();
+
+        const chunks: string[][] = [];
+        for (let i = 0; i < studentIds.length; i += 30) {
+            chunks.push(studentIds.slice(i, i + 30));
+        }
+
+        for (const chunk of chunks) {
+            if (chunk.length > 0) {
+                const usersQuery = query(collection(db, 'users'), where('id', 'in', chunk));
+                const usersSnapshot = await getDocs(usersQuery);
+                usersSnapshot.forEach(userDoc => usersMap.set(userDoc.id, { id: userDoc.id, ...userDoc.data() } as User));
+            }
+        }
+        
+        const enrichedSubmissions: EnrichedSubmission[] = submissionData.map(sub => ({
+            ...sub,
+            studentName: usersMap.get(sub.studentId)?.name || 'Unknown Student',
+            studentPhotoUrl: usersMap.get(sub.studentId)?.photoUrl || null,
+        }));
+        return enrichedSubmissions;
+    }
+    return [];
+  }, [firestoreUser?.institutionId]);
+
   const handleViewSubmissions = async (item: DisplayableClassroomItem) => {
-    if (!firestoreUser?.institutionId) return;
     setSelectedItemForSubmissions(item);
     setIsSubmissionsDialogOpen(true);
     setIsLoadingSubmissions(true);
-    setSubmissions([]); // Clear previous submissions
+    setSubmissions([]);
+    setEditableSubmissions([]);
 
     try {
-        const submissionsQuery = query(
-            collection(db, 'classroomItemSubmissions'),
-            where('itemId', '==', item.id),
-            where('institutionId', '==', firestoreUser.institutionId),
-            orderBy('submittedAt', 'asc')
-        );
-        const submissionsSnapshot = await getDocs(submissionsQuery);
-        const submissionData = submissionsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ClassroomItemSubmission));
-
-        if (submissionData.length > 0) {
-            const studentIds = [...new Set(submissionData.map(sub => sub.studentId))];
-            const usersMap = new Map<string, User>();
-
-            const chunks: string[][] = [];
-            for (let i = 0; i < studentIds.length; i += 30) {
-                chunks.push(studentIds.slice(i, i + 30));
-            }
-
-            for (const chunk of chunks) {
-                if (chunk.length > 0) {
-                    const usersQuery = query(collection(db, 'users'), where('id', 'in', chunk));
-                    const usersSnapshot = await getDocs(usersQuery);
-                    usersSnapshot.forEach(userDoc => usersMap.set(userDoc.id, { id: userDoc.id, ...userDoc.data() } as User));
-                }
-            }
-
-            const enrichedSubmissions: EnrichedSubmission[] = submissionData.map(sub => ({
-                ...sub,
-                studentName: usersMap.get(sub.studentId)?.name || 'Unknown Student',
-                studentPhotoUrl: usersMap.get(sub.studentId)?.photoUrl || null,
-            }));
-            setSubmissions(enrichedSubmissions);
-        }
+        const enrichedSubmissions = await fetchSubmissionsForItem(item.id);
+        setSubmissions(enrichedSubmissions);
+        setEditableSubmissions(enrichedSubmissions); // Initialize editable state
     } catch (error) {
         console.error("Error fetching submissions:", error);
         toast({ title: "Error", description: "Could not fetch submission details.", variant: "destructive" });
@@ -409,6 +420,67 @@ export default function ClassroomAssignmentsPage() {
     }
   };
 
+  const handleGradeInputChange = (submissionId: string, field: 'grade' | 'feedback', value: string | number) => {
+    setEditableSubmissions(prev => 
+        prev.map(sub => {
+            if (sub.id === submissionId) {
+                if (field === 'grade') {
+                    const gradeValue = value === '' ? null : Number(value);
+                    return { ...sub, grade: isNaN(gradeValue) ? sub.grade : gradeValue };
+                }
+                return { ...sub, [field]: value };
+            }
+            return sub;
+        })
+    );
+  };
+
+  const handleSaveGrades = async () => {
+    if (!selectedItemForSubmissions) return;
+    setIsSavingGrades(true);
+    const batch = writeBatch(db);
+
+    let changesMade = false;
+    editableSubmissions.forEach(editableSub => {
+      const originalSub = submissions.find(s => s.id === editableSub.id);
+      if (!originalSub) return;
+      
+      const gradeChanged = editableSub.grade !== originalSub.grade && !(editableSub.grade == null && originalSub.grade == null);
+      const feedbackChanged = editableSub.feedback !== originalSub.feedback && !(editableSub.feedback == null && originalSub.feedback == null);
+
+      if (gradeChanged || feedbackChanged) {
+        changesMade = true;
+        const submissionRef = doc(db, 'classroomItemSubmissions', editableSub.id);
+        const dataToUpdate: { grade?: number | null; feedback?: string | null } = {};
+        
+        if (gradeChanged) dataToUpdate.grade = editableSub.grade ?? null;
+        if (feedbackChanged) dataToUpdate.feedback = editableSub.feedback ?? null;
+        
+        batch.update(submissionRef, dataToUpdate);
+      }
+    });
+
+    if (!changesMade) {
+        toast({ title: "No Changes", description: "No grades or feedback were modified.", variant: "default" });
+        setIsSavingGrades(false);
+        return;
+    }
+
+    try {
+        await batch.commit();
+        toast({ title: "Success", description: "Grades and feedback have been saved." });
+        // Refresh data in dialog
+        setIsLoadingSubmissions(true);
+        const newSubmissions = await fetchSubmissionsForItem(selectedItemForSubmissions.id);
+        setSubmissions(newSubmissions);
+        setEditableSubmissions(newSubmissions);
+    } catch (error) {
+        console.error("Error saving grades:", error);
+        toast({ title: "Error", description: "Could not save grades and feedback.", variant: "destructive" });
+    } finally {
+        setIsSavingGrades(false);
+    }
+  };
 
   if (authLoading || (!firestoreUser && !firestoreUser?.institutionId)) {
     return <div className="flex justify-center items-center h-full"><Loader2 className="h-8 w-8 animate-spin text-primary" /> <span className="ml-2">Loading user data...</span></div>;
@@ -658,11 +730,11 @@ export default function ClassroomAssignmentsPage() {
       </AlertDialog>
       
       <Dialog open={isSubmissionsDialogOpen} onOpenChange={setIsSubmissionsDialogOpen}>
-        <DialogContent className="sm:max-w-2xl">
+        <DialogContent className="sm:max-w-4xl">
             <DialogHeader>
                 <DialogTitle>Submissions for: {selectedItemForSubmissions?.title}</DialogTitle>
                 <DialogPrimitiveDescription>
-                    List of students who have completed this assignment.
+                    Review student submissions, provide grades, and leave feedback.
                 </DialogPrimitiveDescription>
             </DialogHeader>
             <div className="max-h-[60vh] overflow-y-auto">
@@ -670,17 +742,19 @@ export default function ClassroomAssignmentsPage() {
                     <div className="flex justify-center items-center py-10">
                         <Loader2 className="h-8 w-8 animate-spin text-primary" />
                     </div>
-                ) : submissions.length > 0 ? (
+                ) : editableSubmissions.length > 0 ? (
                     <Table>
                         <TableHeader>
                             <TableRow>
                                 <TableHead>Student</TableHead>
                                 <TableHead>Submitted At</TableHead>
                                 <TableHead>Status</TableHead>
+                                <TableHead className="w-[100px]">Grade</TableHead>
+                                <TableHead>Feedback</TableHead>
                             </TableRow>
                         </TableHeader>
                         <TableBody>
-                            {submissions.map(sub => (
+                            {editableSubmissions.map(sub => (
                                 <TableRow key={sub.id}>
                                     <TableCell className="font-medium flex items-center gap-2">
                                         <Avatar className="h-8 w-8">
@@ -698,6 +772,24 @@ export default function ClassroomAssignmentsPage() {
                                             {sub.status === 'late' ? 'Late' : 'On Time'}
                                         </span>
                                     </TableCell>
+                                    <TableCell>
+                                        <Input 
+                                            type="number"
+                                            placeholder="N/A"
+                                            value={sub.grade ?? ''}
+                                            onChange={(e) => handleGradeInputChange(sub.id, 'grade', e.target.value)}
+                                            className="h-8"
+                                        />
+                                    </TableCell>
+                                     <TableCell>
+                                        <Textarea
+                                            placeholder="Leave feedback..."
+                                            value={sub.feedback ?? ''}
+                                            onChange={(e) => handleGradeInputChange(sub.id, 'feedback', e.target.value)}
+                                            rows={1}
+                                            className="min-w-[200px]"
+                                        />
+                                    </TableCell>
                                 </TableRow>
                             ))}
                         </TableBody>
@@ -707,9 +799,13 @@ export default function ClassroomAssignmentsPage() {
                 )}
             </div>
             <DialogFooter>
-                <DialogClose asChild>
+                 <DialogClose asChild>
                     <Button type="button" variant="outline">Close</Button>
                 </DialogClose>
+                <Button onClick={handleSaveGrades} disabled={isSavingGrades || isLoadingSubmissions}>
+                    {isSavingGrades ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                    Save Changes
+                </Button>
             </DialogFooter>
         </DialogContent>
       </Dialog>

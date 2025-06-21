@@ -192,6 +192,8 @@ export interface ClassroomItemSubmission {
   groupId: string; // groupId of the original item, for easier querying
   submittedAt: string; // ISO string timestamp of when it was submitted
   status: 'submitted' | 'late'; // Status of the submission
+  grade?: number | null; // Optional grade given by the teacher
+  feedback?: string | null; // Optional feedback from the teacher
 }
 
 // New type for displaying enriched submission data

@@ -3,7 +3,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
-import { Loader2, ClipboardList, Info, CheckCircle, AlertCircle } from 'lucide-react';
+import { Loader2, ClipboardList, Info, CheckCircle, AlertCircle, Award } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, query, where, Timestamp, orderBy, addDoc, serverTimestamp } from 'firebase/firestore';
@@ -12,6 +12,13 @@ import { useAuth } from '@/contexts/AuthContext';
 import { format, parseISO, isPast, isValid } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
+
 
 interface DisplayableClassroomItem extends ClassroomItemType {
   submission?: ClassroomItemSubmission | null;
@@ -125,6 +132,8 @@ export default function StudentMyTasksPage() {
         groupId: item.groupId,
         submittedAt: submissionTime.toISOString(),
         status: isItemLate ? 'late' : 'submitted',
+        grade: null,
+        feedback: null,
       };
 
       const docRef = await addDoc(collection(db, 'classroomItemSubmissions'), newSubmission);
@@ -171,6 +180,7 @@ export default function StudentMyTasksPage() {
             const groupName = studentGroups.find(g => g.id === item.groupId)?.name || 'Unknown Group';
             const isItemOverdue = item.dueDate && isValid(parseISO(item.dueDate)) && isPast(parseISO(item.dueDate));
             const submittedLate = item.submission?.status === 'late';
+            const hasGradeOrFeedback = (item.submission?.grade != null) || (item.submission?.feedback != null);
 
             return (
               <Card key={item.id} className="mb-4">
@@ -194,6 +204,29 @@ export default function StudentMyTasksPage() {
                 </CardHeader>
                 <CardContent>
                   <p className="text-sm whitespace-pre-wrap">{item.description || "No description provided."}</p>
+                   {hasGradeOrFeedback && (
+                      <Accordion type="single" collapsible className="w-full mt-4">
+                        <AccordionItem value="grade-feedback">
+                          <AccordionTrigger className="text-sm">
+                             <div className="flex items-center gap-2">
+                                <Award className="h-4 w-4 text-primary"/>
+                                View Grade & Feedback
+                             </div>
+                          </AccordionTrigger>
+                          <AccordionContent className="pt-2 space-y-2">
+                             {item.submission?.grade != null && (
+                                <p><strong>Grade: </strong> <span className="text-lg font-bold text-primary">{item.submission.grade}</span></p>
+                              )}
+                              {item.submission?.feedback && (
+                                <div>
+                                  <p className="font-semibold">Feedback:</p>
+                                  <p className="text-muted-foreground whitespace-pre-wrap">{item.submission.feedback}</p>
+                                </div>
+                              )}
+                          </AccordionContent>
+                        </AccordionItem>
+                      </Accordion>
+                    )}
                 </CardContent>
                 <CardFooter className="text-xs text-muted-foreground flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
                   <span>Posted: {item.createdAt && isValid(parseISO(item.createdAt)) ? format(parseISO(item.createdAt), 'PPP p') : 'Not available'}</span>
