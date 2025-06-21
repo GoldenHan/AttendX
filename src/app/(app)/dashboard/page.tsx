@@ -62,7 +62,7 @@ const QuickActionButton: React.FC<Omit<QuickActionProps, 'roles'>> = ({ href, ic
 );
 
 export default function DashboardPage() {
-  const [stats, setStats] = useState({ students: 0, groups: 0 });
+  const [stats, setStats] = useState({ students: 0, groups: 0, staff: 0 });
   const [supervisorStats, setSupervisorStats] = useState({ teachers: 0, students: 0, groups: 0 });
   
   const [teacherGroups, setTeacherGroups] = useState<Group[]>([]);
@@ -101,12 +101,14 @@ export default function DashboardPage() {
       if (firestoreUser.role === 'admin') {
         const studentsQuery = query(collection(db, 'users'), where('role', '==', 'student'), where('institutionId', '==', institutionId));
         const groupsQuery = query(collection(db, 'groups'), where('institutionId', '==', institutionId));
+        const staffQuery = query(collection(db, 'users'), where('role', '!=', 'student'), where('institutionId', '==', institutionId));
         
-        const [studentsSnapshot, groupsSnapshot] = await Promise.all([
+        const [studentsSnapshot, groupsSnapshot, staffSnapshot] = await Promise.all([
             getDocs(studentsQuery),
             getDocs(groupsQuery),
+            getDocs(staffQuery),
         ]);
-        setStats({ students: studentsSnapshot.size, groups: groupsSnapshot.size });
+        setStats({ students: studentsSnapshot.size, groups: groupsSnapshot.size, staff: staffSnapshot.size });
 
         const levelCounts: { [key: string]: number } = { Beginner: 0, Intermediate: 0, Advanced: 0, Other: 0 };
         studentsSnapshot.docs.forEach(doc => {
@@ -133,7 +135,7 @@ export default function DashboardPage() {
 
         const studentIdsInTeacherGroups = new Set<string>();
         fetchedTeacherGroups.forEach(g => g.studentIds.forEach(sid => studentIdsInTeacherGroups.add(sid)));
-        setStats({ students: studentIdsInTeacherGroups.size, groups: fetchedTeacherGroups.length });
+        setStats({ students: studentIdsInTeacherGroups.size, groups: fetchedTeacherGroups.length, staff: 0 });
 
         // Fetch assignments to grade
         if (fetchedTeacherGroups.length > 0) {
@@ -291,7 +293,7 @@ export default function DashboardPage() {
   const allQuickActions: QuickActionProps[] = [
     { href: "/attendance-log", icon: ClipboardEdit, label: "Log Attendance", bgColorClass: "bg-blue-500", hoverBgColorClass: "hover:bg-blue-600", textColorClass: "text-white", roles: ['admin', 'teacher', 'caja', 'supervisor'] },
     { href: "/attendance-records", icon: BookUser, label: "View Records", bgColorClass: "bg-green-500", hoverBgColorClass: "hover:bg-green-600", textColorClass: "text-white", roles: ['admin', 'teacher', 'caja', 'supervisor'] },
-    { href: "/student-management", icon: GraduationCap, label: "Students", bgColorClass: "bg-purple-500", hoverBgColorClass: "hover:bg-purple-600", textColorClass: "text-white", roles: ['admin', 'teacher', 'supervisor'] },
+    { href: "/student-management", icon: GraduationCap, label: "Students", bgColorClass: "bg-purple-500", hoverBgColorClass: "hover:bg-purple-600", textColorClass: "text-white", roles: ['admin', 'teacher', 'supervisor', 'caja'] },
     { href: "/group-management", icon: FolderKanban, label: "Groups", bgColorClass: "bg-yellow-400", hoverBgColorClass: "hover:bg-yellow-500", textColorClass: "text-yellow-900", roles: ['admin', 'teacher', 'supervisor'] },
     { href: "/grades-management", icon: ClipboardCheck, label: "Grades", bgColorClass: "bg-pink-500", hoverBgColorClass: "hover:bg-pink-600", textColorClass: "text-white", roles: ['admin', 'teacher', 'supervisor'] },
     { href: "/reports", icon: BarChart3, label: "Reports", bgColorClass: "bg-teal-500", hoverBgColorClass: "hover:bg-teal-600", textColorClass: "text-white", roles: ['admin', 'teacher', 'caja', 'supervisor'] },
@@ -339,7 +341,7 @@ export default function DashboardPage() {
           <>
             {renderStatCard("Total Students", stats.students, Users, "Currently enrolled in your institution")}
             {renderStatCard("Active Groups", stats.groups, FolderKanban, "Across all programs in your institution")}
-            {renderStatCard("Staff Members", (staffUsers.length > 0 ? staffUsers.length : '...'), Briefcase, "Total staff in your institution")}
+            {renderStatCard("Staff Members", stats.staff, Briefcase, "Total staff in your institution")}
           </>
         )}
         {firestoreUser?.role === 'teacher' && (

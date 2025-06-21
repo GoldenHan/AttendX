@@ -166,7 +166,7 @@ export default function StudentManagementPage() {
     fetchData();
   }, [fetchData]);
 
-  const canManageStudents = firestoreUser?.role === 'admin' || firestoreUser?.role === 'supervisor' || firestoreUser?.role === 'teacher';
+  const canManageStudents = firestoreUser?.role === 'admin' || firestoreUser?.role === 'supervisor' || firestoreUser?.role === 'teacher' || firestoreUser?.role === 'caja';
 
   const availableGroupsForAssignment = useMemo(() => {
     if (!firestoreUser || !allGroups.length) return [];
@@ -206,7 +206,7 @@ export default function StudentManagementPage() {
         } else { // Show all students in supervisor's Sede
             studentsToDisplay = studentsToDisplay.filter(student => student.sedeId === firestoreUser.sedeId);
         }
-    } else { // Admin
+    } else { // Admin or Caja
         if (selectedGroupIdForFilter !== 'all') {
             const group = allGroups.find(g => g.id === selectedGroupIdForFilter);
             if (group && Array.isArray(group.studentIds)) {
@@ -641,13 +641,13 @@ export default function StudentManagementPage() {
                         <FormItem>
                           <FormLabel>Email (for login & password resets)*</FormLabel>
                           <FormControl><Input type="email" placeholder="john.doe@example.com" {...field} disabled={!!editingStudent} /></FormControl>
+                          {!!editingStudent && <FormDescription className="text-xs">Email cannot be changed for existing students here.</FormDescription>}
                           {!editingStudent && emailCheckMessage && (
                             <p className={`text-xs mt-1 ${getFieldCheckMessageColor(emailCheckStatus)}`}>
                               {emailCheckStatus === 'checking' && <Loader2 className="inline h-3 w-3 mr-1 animate-spin" />}
                               {emailCheckMessage}
                             </p>
                           )}
-                          {!!editingStudent && <FormDescription className="text-xs">Email cannot be changed for existing students here.</FormDescription>}
                           <FormMessage />
                         </FormItem>
                     )}/>
