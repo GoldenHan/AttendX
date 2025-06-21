@@ -17,12 +17,18 @@ import { DEFAULT_CLASS_SCHEDULE_CONFIG } from '@/types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, query, doc, getDoc, where } from 'firebase/firestore';
-import { Loader2, CalendarIcon } from 'lucide-react';
+import { Loader2, CalendarIcon, Download, FileText } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { useAuth } from '@/contexts/AuthContext';
@@ -201,14 +207,122 @@ export default function AttendanceReportsPage() {
     return statsToDisplay;
   }, [userAttendanceStats, selectedGroupId, selectedUserId, allGroups]);
 
-
   const chartData = displayedStats.map(stat => ({
     name: stat.userName.split(' ')[0], 
     Present: stat.present,
     Late: stat.late,
     Absent: stat.absent,
   }));
+
+  const reportDateDescription = reportType === 'customRange' && customStartDate && customEndDate
+    ? `from ${format(customStartDate, "PPP")} to ${format(customEndDate, "PPP")}`
+    : (reportType === 'customRange' ? "(select date range)" : "overall");
+
+  const handleExportToCSV = () => {
+    if (displayedStats.length === 0) {
+      toast({ title: 'No data to export', description: 'There is no data for the current selection.', variant: 'default' });
+      return;
+    }
+
+    const headers = ['Student Name', 'Sessions w/ Record', 'Present', 'Late', 'Absent', 'Attendance Rate (%)'];
+    const csvRows = [
+      headers.join(','),
+      ...displayedStats.map(stat => [
+        `"${stat.userName.replace(/"/g, '""')}"`, // Handle names with quotes
+        stat.totalSessionsWithRecord,
+        stat.present,
+        stat.late,
+        stat.absent,
+        stat.attendanceRate.toFixed(1)
+      ].join(','))
+    ];
+
+    const csvString = csvRows.join('\n');
+    const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    const today = new Date().toISOString().split('T')[0];
+    link.setAttribute('download', `Attendance_Report_${today}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    toast({ title: 'Export Successful', description: 'Attendance report exported as CSV.' });
+  };
   
+  const handleExportToHTML = () => {
+    if (displayedStats.length === 0) {
+      toast({ title: 'No data to export', description: 'There is no data for the current selection.', variant: 'default' });
+      return;
+    }
+    
+    let htmlString = `
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8">
+        <title>Attendance Report</title>
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 20px; }
+          table { border-collapse: collapse; width: 100%; font-size: 0.9em; }
+          th, td { border: 1px solid #ddd; padding: 8px; }
+          th { background-color: #f2f2f2; text-align: left; }
+          tr:nth-child(even) { background-color: #f9f9f9; }
+          h2, p { color: #333; }
+        </style>
+      </head>
+      <body>
+        <h2>Attendance Report ${reportDateDescription}</h2>
+        <p>Filters: Group - ${allGroups.find(g => g.id === selectedGroupId)?.name || 'All'}, Student - ${allStudents.find(s => s.id === selectedUserId)?.name || 'All'}</p>
+        <table>
+          <thead>
+            <tr>
+              <th>Student Name</th>
+              <th>Sessions w/ Record</th>
+              <th>Present</th>
+              <th>Late</th>
+              <th>Absent</th>
+              <th>Attendance Rate</th>
+            </tr>
+          </thead>
+          <tbody>
+    `;
+
+    displayedStats.forEach(stat => {
+      htmlString += `
+        <tr>
+          <td>${stat.userName}</td>
+          <td>${stat.totalSessionsWithRecord}</td>
+          <td>${stat.present}</td>
+          <td>${stat.late}</td>
+          <td>${stat.absent}</td>
+          <td>${stat.attendanceRate.toFixed(1)}%</td>
+        </tr>
+      `;
+    });
+
+    htmlString += `
+          </tbody>
+        </table>
+      </body>
+      </html>
+    `;
+
+    const blob = new Blob([htmlString], { type: 'text/html' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.href = url;
+    const today = new Date().toISOString().split('T')[0];
+    link.download = `Attendance_Report_${today}.html`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(link.href);
+    toast({ title: 'Export Successful', description: 'Attendance report exported as HTML.' });
+  };
+
   if (isLoadingData || !firestoreUser) {
     return (
       <Card>
@@ -224,20 +338,42 @@ export default function AttendanceReportsPage() {
     );
   }
 
-  const reportDateDescription = reportType === 'customRange' && customStartDate && customEndDate
-    ? `from ${format(customStartDate, "PPP")} to ${format(customEndDate, "PPP")}`
-    : (reportType === 'customRange' ? "(select date range)" : "overall");
-
-
   return (
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle>Attendance Reports</CardTitle>
-          <CardDescription>
-            View attendance statistics for your institution {reportDateDescription}. Filter by report type, group, and then by student.
-            The "Attendance Rate" is based on sessions where the student has at least one record or expected sessions.
-          </CardDescription>
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+            <div>
+              <CardTitle>Attendance Reports</CardTitle>
+              <CardDescription>
+                View attendance statistics for your institution {reportDateDescription}. Filter by report type, group, and then by student.
+                The "Attendance Rate" is based on sessions where the student has at least one record or expected sessions.
+              </CardDescription>
+            </div>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={isLoadingData || displayedStats.length === 0}
+                  className="gap-1.5 text-sm"
+                >
+                  <Download className="size-3.5" />
+                  Export
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent>
+                <DropdownMenuItem onSelect={handleExportToCSV}>
+                  <FileText className="mr-2 h-4 w-4" />
+                  Export to CSV
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={handleExportToHTML}>
+                  <FileText className="mr-2 h-4 w-4" />
+                  Export to HTML
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </CardHeader>
         <CardContent>
           <div className="mb-6 grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -427,4 +563,3 @@ export default function AttendanceReportsPage() {
     </div>
   );
 }
-

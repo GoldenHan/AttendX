@@ -27,6 +27,12 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Label } from '@/components/ui/label';
 import { useAuth } from '@/contexts/AuthContext'; 
 
@@ -255,7 +261,7 @@ export default function PartialGradesReportPage() {
     return cells;
   };
   
-  const getScoreForHTML = (scoreValue?: number | null, isTotal: boolean = false, isFinalGrade: boolean = false) => {
+  const getScoreForExport = (scoreValue?: number | null, isTotal: boolean = false, isFinalGrade: boolean = false) => {
     if (typeof scoreValue === 'number') {
       if (isFinalGrade || (isTotal && scoreValue % 1 !== 0)) {
         return scoreValue.toFixed(isFinalGrade ? 2 : 1);
@@ -343,14 +349,14 @@ export default function PartialGradesReportPage() {
         
         for (let j = 0; j < MAX_ACCUMULATED_ACTIVITIES_DISPLAY; j++) {
           const activity = partialData?.accumulatedActivities?.[j];
-          htmlString += `<td style="${getScoreCellStyle(activity?.score)}">${getScoreForHTML(activity?.score)}</td>`;
+          htmlString += `<td style="${getScoreCellStyle(activity?.score)}">${getScoreForExport(activity?.score)}</td>`;
         }
-        htmlString += `<td style="${getScoreCellStyle(partialData?.exam?.score)}">${getScoreForHTML(partialData?.exam?.score)}</td>`;
+        htmlString += `<td style="${getScoreCellStyle(partialData?.exam?.score)}">${getScoreForExport(partialData?.exam?.score)}</td>`;
         const partialTotalKey = `calculatedPartial${i}Total` as keyof StudentWithDetailedGrades;
         const studentPartialTotal = (student as any)[partialTotalKey];
-        htmlString += `<td style="${getScoreCellStyle(studentPartialTotal, true)}" class="font-bold">${getScoreForHTML(studentPartialTotal, true)}</td>`;
+        htmlString += `<td style="${getScoreCellStyle(studentPartialTotal, true)}" class="font-bold">${getScoreForExport(studentPartialTotal, true)}</td>`;
       }
-      htmlString += `<td style="${getScoreCellStyle(student.calculatedFinalGrade, false, true)}" class="font-bold">${getScoreForHTML(student.calculatedFinalGrade, false, true)}</td></tr>`;
+      htmlString += `<td style="${getScoreCellStyle(student.calculatedFinalGrade, false, true)}" class="font-bold">${getScoreForExport(student.calculatedFinalGrade, false, true)}</td></tr>`;
     });
 
     htmlString += `</tbody></table></body></html>`;
@@ -370,6 +376,68 @@ export default function PartialGradesReportPage() {
       console.error("Error exporting to HTML:", error);
       toast({ title: "Exportación Fallida", description: "No se pudo generar el archivo HTML.", variant: "destructive" });
     }
+  };
+
+  const handleExportToCSV = () => {
+    if (isLoading || studentsToDisplayInTable.length === 0) {
+      toast({ title: "No data to export", description: "Please filter to display some students or wait for data to load.", variant: "default" });
+      return;
+    }
+    const numPartials = gradingConfig.numberOfPartials;
+    
+    // Create headers
+    const headers = ['Student Name'];
+    for (let pNum = 1; pNum <= numPartials; pNum++) {
+      for (let i = 0; i < MAX_ACCUMULATED_ACTIVITIES_DISPLAY; i++) {
+        headers.push(`P${pNum} Act ${i + 1}`);
+      }
+      headers.push(`P${pNum} Exam`);
+      headers.push(`P${pNum} Total`);
+    }
+    headers.push('Final Grade');
+    
+    // Create rows
+    const csvRows = [
+      headers.join(','),
+      ...studentsToDisplayInTable.map(student => {
+        const row = [`"${student.name.replace(/"/g, '""')}"`];
+        for (let pNum = 1; pNum <= numPartials; pNum++) {
+          const partialKey = `partial${pNum}` as keyof User['grades'];
+          const partialData = student.grades?.[partialKey];
+          
+          for (let i = 0; i < MAX_ACCUMULATED_ACTIVITIES_DISPLAY; i++) {
+            const activityScore = partialData?.accumulatedActivities?.[i]?.score;
+            row.push(typeof activityScore === 'number' ? String(activityScore) : '');
+          }
+          
+          const examScore = partialData?.exam?.score;
+          row.push(typeof examScore === 'number' ? String(examScore) : '');
+          
+          const partialTotalKey = `calculatedPartial${pNum}Total` as keyof StudentWithDetailedGrades;
+          const studentPartialTotal = (student as any)[partialTotalKey];
+          row.push(typeof studentPartialTotal === 'number' ? studentPartialTotal.toFixed(2) : '');
+        }
+        
+        const finalGrade = student.calculatedFinalGrade;
+        row.push(typeof finalGrade === 'number' ? finalGrade.toFixed(2) : '');
+        
+        return row.join(',');
+      })
+    ];
+    
+    const csvString = csvRows.join('\n');
+    const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    const today = new Date().toISOString().split('T')[0];
+    link.setAttribute('download', `Partial_Grades_Report_${today}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    toast({ title: 'Export Successful', description: 'Partial grades report exported as CSV.' });
   };
   
   if (isLoading) {
@@ -451,16 +519,29 @@ export default function PartialGradesReportPage() {
                 Institution Configuration: {currentNumberOfPartials} partials, passing with {gradingConfig.passingGrade}pts.
               </CardDescription>
             </div>
-            <Button
-                variant="outline"
-                size="sm"
-                onClick={handleExportToHTML}
-                disabled={isLoading || studentsToDisplayInTable.length === 0}
-                className="gap-1.5 text-sm"
-              >
-                <FileText className="size-3.5" />
-                Export to HTML
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={isLoading || studentsToDisplayInTable.length === 0}
+                  className="gap-1.5 text-sm"
+                >
+                  <Download className="size-3.5" />
+                  Export
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent>
+                <DropdownMenuItem onSelect={handleExportToHTML}>
+                  <FileText className="mr-2 h-4 w-4" />
+                  Export to HTML
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={handleExportToCSV}>
+                  <FileText className="mr-2 h-4 w-4" />
+                  Export to CSV
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
            {gradingConfig.numberOfPartials < 1 && ( // Use gradingConfig from context
             <div className="mt-2 p-3 border border-red-500/50 bg-red-50 dark:bg-red-900/30 rounded-md text-sm text-red-700 dark:text-red-300 flex items-start gap-2">
