@@ -21,6 +21,14 @@ import {
   DialogClose,
 } from '@/components/ui/dialog';
 import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -30,13 +38,14 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Loader2, PlusCircle, CalendarIcon, AlertTriangle, Info, Edit, Trash2, Users } from 'lucide-react'; // Added Users icon
+import { Loader2, PlusCircle, CalendarIcon, AlertTriangle, Info, Edit, Trash2, Users } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, query, where, addDoc, orderBy, serverTimestamp, Timestamp, doc, updateDoc, deleteDoc } from 'firebase/firestore';
-import type { Group, ClassroomItem as ClassroomItemType, ClassroomItemSubmission } from '@/types';
+import type { Group, ClassroomItem as ClassroomItemType, ClassroomItemSubmission, EnrichedSubmission, User } from '@/types';
 import { useAuth } from '@/contexts/AuthContext';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -84,6 +93,11 @@ export default function ClassroomAssignmentsPage() {
   const [editingItem, setEditingItem] = useState<ClassroomItemType | null>(null);
   const [isConfirmDeleteDialogOpen, setIsConfirmDeleteDialogOpen] = useState(false);
   const [itemToDelete, setItemToDelete] = useState<ClassroomItemType | null>(null);
+  
+  const [isSubmissionsDialogOpen, setIsSubmissionsDialogOpen] = useState(false);
+  const [selectedItemForSubmissions, setSelectedItemForSubmissions] = useState<DisplayableClassroomItem | null>(null);
+  const [submissions, setSubmissions] = useState<EnrichedSubmission[]>([]);
+  const [isLoadingSubmissions, setIsLoadingSubmissions] = useState(false);
 
 
   const form = useForm<ClassroomItemFormValues>({
@@ -190,24 +204,34 @@ export default function ClassroomAssignmentsPage() {
       // Fetch submission counts for assignment items
       if (fetchedItems.length > 0) {
         const assignmentItemIds = fetchedItems.filter(item => item.itemType === 'assignment').map(item => item.id);
+        const counts = new Map<string, number>();
+
         if (assignmentItemIds.length > 0) {
-          // Firestore 'in' query limit is 30. For more items, batching or different strategy needed.
-          const submissionsQuery = query(
-            collection(db, 'classroomItemSubmissions'),
-            where('itemId', 'in', assignmentItemIds),
-            where('institutionId', '==', firestoreUser.institutionId)
-          );
-          const submissionsSnapshot = await getDocs(submissionsQuery);
-          const counts = new Map<string, number>();
-          submissionsSnapshot.forEach(subDoc => {
-            const itemId = subDoc.data().itemId;
-            counts.set(itemId, (counts.get(itemId) || 0) + 1);
-          });
-          fetchedItems = fetchedItems.map(item => ({
-            ...item,
-            submissionCount: item.itemType === 'assignment' ? (counts.get(item.id) || 0) : undefined,
-          }));
+            // Firestore 'in' query is limited to 30 values. Chunk the requests.
+            const chunks = [];
+            for (let i = 0; i < assignmentItemIds.length; i += 30) {
+                chunks.push(assignmentItemIds.slice(i, i + 30));
+            }
+
+            for (const chunk of chunks) {
+                if (chunk.length > 0) {
+                    const submissionsQuery = query(
+                        collection(db, 'classroomItemSubmissions'),
+                        where('itemId', 'in', chunk),
+                        where('institutionId', '==', firestoreUser.institutionId)
+                    );
+                    const submissionsSnapshot = await getDocs(submissionsQuery);
+                    submissionsSnapshot.forEach(subDoc => {
+                        const itemId = subDoc.data().itemId;
+                        counts.set(itemId, (counts.get(itemId) || 0) + 1);
+                    });
+                }
+            }
         }
+        fetchedItems = fetchedItems.map(item => ({
+          ...item,
+          submissionCount: item.itemType === 'assignment' ? (counts.get(item.id) || 0) : undefined,
+        }));
       }
       setClassroomItems(fetchedItems);
     } catch (error) {
@@ -265,7 +289,6 @@ export default function ClassroomAssignmentsPage() {
     }
     setIsSubmitting(true);
 
-    // Ensure dueDate is either a valid ISO string or null
     let dueDateISO: string | null = null;
     if (data.dueDate && isValid(data.dueDate)) {
         dueDateISO = data.dueDate.toISOString();
@@ -274,7 +297,7 @@ export default function ClassroomAssignmentsPage() {
     const itemDataPayload = {
         groupId: data.groupId,
         institutionId: firestoreUser.institutionId,
-        teacherId: firestoreUser.id, // ID of the user creating/editing (admin/supervisor/teacher)
+        teacherId: firestoreUser.id, 
         title: data.title,
         description: data.description || '',
         itemType: data.itemType,
@@ -286,7 +309,6 @@ export default function ClassroomAssignmentsPage() {
     try {
       if (editingItem) {
         const itemRef = doc(db, 'classroomItems', editingItem.id);
-        // Explicitly cast to include serverTimestamp for updatedAt
         await updateDoc(itemRef, itemDataPayload as any);
         toast({ title: 'Success', description: `${data.itemType === 'assignment' ? 'Assignment' : 'Reminder'} "${data.title}" updated.` });
       } else {
@@ -296,7 +318,7 @@ export default function ClassroomAssignmentsPage() {
         });
         toast({ title: 'Success', description: `${data.itemType === 'assignment' ? 'Assignment' : 'Reminder'} "${data.title}" created.` });
       }
-      fetchClassroomItemsForGroup(data.groupId); // Refresh items for the current group
+      fetchClassroomItemsForGroup(data.groupId); 
       form.reset({
         title: '', description: '', itemType: 'assignment', dueDate: null,
         groupId: data.groupId, status: 'published',
@@ -325,12 +347,6 @@ export default function ClassroomAssignmentsPage() {
     try {
       const itemRef = doc(db, 'classroomItems', itemToDelete.id);
       await deleteDoc(itemRef);
-      // Consider deleting related submissions if any:
-      // const submissionsQuery = query(collection(db, 'classroomItemSubmissions'), where('itemId', '==', itemToDelete.id));
-      // const submissionsSnapshot = await getDocs(submissionsQuery);
-      // const batch = writeBatch(db);
-      // submissionsSnapshot.forEach(subDoc => batch.delete(subDoc.ref));
-      // await batch.commit();
       
       toast({ title: 'Item Deleted', description: `"${itemToDelete.title}" has been removed.` });
       fetchClassroomItemsForGroup(itemToDelete.groupId);
@@ -341,6 +357,55 @@ export default function ClassroomAssignmentsPage() {
       setIsSubmitting(false);
       setIsConfirmDeleteDialogOpen(false);
       setItemToDelete(null);
+    }
+  };
+  
+  const handleViewSubmissions = async (item: DisplayableClassroomItem) => {
+    if (!firestoreUser?.institutionId) return;
+    setSelectedItemForSubmissions(item);
+    setIsSubmissionsDialogOpen(true);
+    setIsLoadingSubmissions(true);
+    setSubmissions([]); // Clear previous submissions
+
+    try {
+        const submissionsQuery = query(
+            collection(db, 'classroomItemSubmissions'),
+            where('itemId', '==', item.id),
+            where('institutionId', '==', firestoreUser.institutionId),
+            orderBy('submittedAt', 'asc')
+        );
+        const submissionsSnapshot = await getDocs(submissionsQuery);
+        const submissionData = submissionsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ClassroomItemSubmission));
+
+        if (submissionData.length > 0) {
+            const studentIds = [...new Set(submissionData.map(sub => sub.studentId))];
+            const usersMap = new Map<string, User>();
+
+            const chunks: string[][] = [];
+            for (let i = 0; i < studentIds.length; i += 30) {
+                chunks.push(studentIds.slice(i, i + 30));
+            }
+
+            for (const chunk of chunks) {
+                if (chunk.length > 0) {
+                    const usersQuery = query(collection(db, 'users'), where('id', 'in', chunk));
+                    const usersSnapshot = await getDocs(usersQuery);
+                    usersSnapshot.forEach(userDoc => usersMap.set(userDoc.id, { id: userDoc.id, ...userDoc.data() } as User));
+                }
+            }
+
+            const enrichedSubmissions: EnrichedSubmission[] = submissionData.map(sub => ({
+                ...sub,
+                studentName: usersMap.get(sub.studentId)?.name || 'Unknown Student',
+                studentPhotoUrl: usersMap.get(sub.studentId)?.photoUrl || null,
+            }));
+            setSubmissions(enrichedSubmissions);
+        }
+    } catch (error) {
+        console.error("Error fetching submissions:", error);
+        toast({ title: "Error", description: "Could not fetch submission details.", variant: "destructive" });
+    } finally {
+        setIsLoadingSubmissions(false);
     }
   };
 
@@ -380,7 +445,7 @@ export default function ClassroomAssignmentsPage() {
                         <Select 
                             onValueChange={(value) => {
                                 field.onChange(value);
-                                setSelectedGroupId(value); // Also update page's selected group if form's group changes
+                                setSelectedGroupId(value); 
                             }} 
                             value={field.value} 
                             disabled={manageableGroups.length === 0 || isLoadingGroups || !!editingItem}
@@ -457,7 +522,7 @@ export default function ClassroomAssignmentsPage() {
                 value={selectedGroupId} 
                 onValueChange={(value) => {
                     setSelectedGroupId(value);
-                    if (value) form.setValue('groupId', value); // Update form's default group when page selection changes
+                    if (value) form.setValue('groupId', value); 
                 }} 
                 disabled={isLoadingGroups || manageableGroups.length === 0}
             >
@@ -541,12 +606,6 @@ export default function ClassroomAssignmentsPage() {
                       <CardDescription>
                         Status: <span className={item.status === 'published' ? 'text-green-600 dark:text-green-400' : 'text-orange-600 dark:text-orange-400'}>{item.status.charAt(0).toUpperCase() + item.status.slice(1)}</span>
                         {item.dueDate && ` | Due: ${isValid(parseISO(item.dueDate)) ? format(parseISO(item.dueDate), 'PPP p') : 'Invalid Date'}`}
-                        {item.itemType === 'assignment' && typeof item.submissionCount === 'number' && (
-                            <span className="ml-2 inline-flex items-center">
-                                <Users className="h-3.5 w-3.5 mr-1 text-muted-foreground"/>
-                                {item.submissionCount} {item.submissionCount === 1 ? 'Submission' : 'Submissions'}
-                            </span>
-                        )}
                       </CardDescription>
                     </CardHeader>
                     <CardContent>
@@ -554,7 +613,13 @@ export default function ClassroomAssignmentsPage() {
                     </CardContent>
                     <CardFooter className="text-xs text-muted-foreground flex justify-between items-center">
                       <span>Created: {item.createdAt && isValid(parseISO(item.createdAt)) ? format(parseISO(item.createdAt), 'PPP p') : 'Not available'}</span>
-                      <div className="space-x-1">
+                      <div className="flex items-center gap-1">
+                        {item.itemType === 'assignment' && (
+                            <Button variant="outline" size="sm" onClick={() => handleViewSubmissions(item)} disabled={!item.submissionCount}>
+                                <Users className="h-3.5 w-3.5 mr-1.5" />
+                                Submissions ({item.submissionCount || 0})
+                            </Button>
+                        )}
                         <Button variant="ghost" size="icon" onClick={() => openEditFormDialog(item)} title="Edit Item">
                             <Edit className="h-4 w-4" />
                             <span className="sr-only">Edit</span>
@@ -579,7 +644,7 @@ export default function ClassroomAssignmentsPage() {
             <AlertDialogTitle>Are you sure?</AlertDialogTitle>
             <AlertDialogDescription>
               This action cannot be undone. This will permanently delete the item
-              "{itemToDelete?.title}". Related student submissions (if any) will NOT be deleted by this action yet.
+              "{itemToDelete?.title}". Related student submissions will NOT be deleted by this action.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -591,7 +656,63 @@ export default function ClassroomAssignmentsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      
+      <Dialog open={isSubmissionsDialogOpen} onOpenChange={setIsSubmissionsDialogOpen}>
+        <DialogContent className="sm:max-w-2xl">
+            <DialogHeader>
+                <DialogTitle>Submissions for: {selectedItemForSubmissions?.title}</DialogTitle>
+                <DialogPrimitiveDescription>
+                    List of students who have completed this assignment.
+                </DialogPrimitiveDescription>
+            </DialogHeader>
+            <div className="max-h-[60vh] overflow-y-auto">
+                {isLoadingSubmissions ? (
+                    <div className="flex justify-center items-center py-10">
+                        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                    </div>
+                ) : submissions.length > 0 ? (
+                    <Table>
+                        <TableHeader>
+                            <TableRow>
+                                <TableHead>Student</TableHead>
+                                <TableHead>Submitted At</TableHead>
+                                <TableHead>Status</TableHead>
+                            </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                            {submissions.map(sub => (
+                                <TableRow key={sub.id}>
+                                    <TableCell className="font-medium flex items-center gap-2">
+                                        <Avatar className="h-8 w-8">
+                                            <AvatarImage src={sub.studentPhotoUrl || undefined} alt={sub.studentName} />
+                                            <AvatarFallback>{sub.studentName?.charAt(0).toUpperCase()}</AvatarFallback>
+                                        </Avatar>
+                                        {sub.studentName}
+                                    </TableCell>
+                                    <TableCell>{format(parseISO(sub.submittedAt), 'PPP p')}</TableCell>
+                                    <TableCell>
+                                        <span className={cn(
+                                            "text-xs font-semibold px-2 py-1 rounded-full",
+                                            sub.status === 'late' ? "bg-orange-100 text-orange-700 dark:bg-orange-900/50 dark:text-orange-300" : "bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300"
+                                        )}>
+                                            {sub.status === 'late' ? 'Late' : 'On Time'}
+                                        </span>
+                                    </TableCell>
+                                </TableRow>
+                            ))}
+                        </TableBody>
+                    </Table>
+                ) : (
+                    <p className="text-center text-muted-foreground py-10">No submissions found for this assignment yet.</p>
+                )}
+            </div>
+            <DialogFooter>
+                <DialogClose asChild>
+                    <Button type="button" variant="outline">Close</Button>
+                </DialogClose>
+            </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
-

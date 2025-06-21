@@ -1,4 +1,5 @@
 
+
 export interface ScoreDetail { // Used in User.grades
   name?: string | null;
   score?: number | null;
@@ -191,7 +192,10 @@ export interface ClassroomItemSubmission {
   groupId: string; // groupId of the original item, for easier querying
   submittedAt: string; // ISO string timestamp of when it was submitted
   status: 'submitted' | 'late'; // Status of the submission
-  // grade?: number | null; // Optional: for teacher's grade
-  // teacherFeedback?: string | null; // Optional: for teacher's feedback
-  // studentComment?: string | null; // Optional: for student's comment upon submission
+}
+
+// New type for displaying enriched submission data
+export interface EnrichedSubmission extends ClassroomItemSubmission {
+  studentName: string;
+  studentPhotoUrl?: string | null;
 }
