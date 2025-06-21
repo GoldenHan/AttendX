@@ -6,7 +6,6 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import {
   Users,
-  BarChartBig,
   ClipboardEdit,
   BookUser,
   BarChart3,
@@ -32,6 +31,13 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useAuth } from '@/contexts/AuthContext';
 import { formatDistanceToNow, parseISO } from 'date-fns';
+import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
+import {
+  ChartConfig,
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+} from "@/components/ui/chart"
 
 interface QuickActionProps {
   href: string;
@@ -56,11 +62,15 @@ const QuickActionButton: React.FC<Omit<QuickActionProps, 'roles'>> = ({ href, ic
 );
 
 export default function DashboardPage() {
-  const [stats, setStats] = useState({ students: 0, groups: 0, attendance: 0 });
+  const [stats, setStats] = useState({ students: 0, groups: 0 });
+  const [supervisorStats, setSupervisorStats] = useState({ teachers: 0, students: 0, groups: 0 });
+  
   const [teacherGroups, setTeacherGroups] = useState<Group[]>([]);
   const [supervisorSede, setSupervisorSede] = useState<Sede | null>(null);
-  const [supervisorStats, setSupervisorStats] = useState({ teachers: 0, students: 0, groups: 0 });
 
+  const [studentLevelDistribution, setStudentLevelDistribution] = useState<{ name: string; value: number }[]>([]);
+  const [groupStudentCount, setGroupStudentCount] = useState<{ name: string; students: number }[]>([]);
+  
   const [assignmentsToGrade, setAssignmentsToGrade] = useState<ClassroomItem[]>([]);
   const [pendingTasks, setPendingTasks] = useState<ClassroomItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -96,7 +106,24 @@ export default function DashboardPage() {
             getDocs(studentsQuery),
             getDocs(groupsQuery),
         ]);
-        setStats({ students: studentsSnapshot.size, groups: groupsSnapshot.size, attendance: stats.attendance });
+        setStats({ students: studentsSnapshot.size, groups: groupsSnapshot.size });
+
+        const levelCounts: { [key: string]: number } = { Beginner: 0, Intermediate: 0, Advanced: 0, Other: 0 };
+        studentsSnapshot.docs.forEach(doc => {
+            const student = doc.data() as User;
+            if (student.level) {
+                levelCounts[student.level] = (levelCounts[student.level] || 0) + 1;
+            } else {
+                levelCounts['Other'] = (levelCounts['Other'] || 0) + 1;
+            }
+        });
+        setStudentLevelDistribution(Object.entries(levelCounts).map(([name, value]) => ({ name, value })));
+
+        setGroupStudentCount(groupsSnapshot.docs.map(doc => ({
+            name: (doc.data() as Group).name,
+            students: (doc.data() as Group).studentIds?.length || 0,
+        })));
+
 
       } else if (firestoreUser.role === 'teacher') {
         const groupsQuery = query(collection(db, 'groups'), where('teacherId', '==', firestoreUser.id), where('institutionId', '==', institutionId));
@@ -106,7 +133,7 @@ export default function DashboardPage() {
 
         const studentIdsInTeacherGroups = new Set<string>();
         fetchedTeacherGroups.forEach(g => g.studentIds.forEach(sid => studentIdsInTeacherGroups.add(sid)));
-        setStats({ students: studentIdsInTeacherGroups.size, groups: fetchedTeacherGroups.length, attendance: 0 });
+        setStats({ students: studentIdsInTeacherGroups.size, groups: fetchedTeacherGroups.length });
 
         // Fetch assignments to grade
         if (fetchedTeacherGroups.length > 0) {
@@ -121,7 +148,7 @@ export default function DashboardPage() {
             
             const itemsToGrade = items.filter(item => {
                 const itemSubmissions = submissions.filter(s => s.itemId === item.id);
-                if (itemSubmissions.length === 0) return false; // No submissions yet
+                if (itemSubmissions.length === 0) return false;
                 const hasUngraded = itemSubmissions.some(s => s.grade == null);
                 return hasUngraded;
             });
@@ -130,17 +157,36 @@ export default function DashboardPage() {
 
       } else if (firestoreUser.role === 'supervisor' && firestoreUser.sedeId) {
           const sedeQuery = query(collection(db, 'sedes'), where('id', '==', firestoreUser.sedeId), where('institutionId', '==', institutionId), limit(1));
-          const sedeDocSnapshot = await getDocs(sedeQuery);
-          if (!sedeDocSnapshot.empty) setSupervisorSede(sedeDocSnapshot.docs[0].data() as Sede);
-
           const teachersInSedeQuery = query(collection(db, 'users'), where('role', '==', 'teacher'), where('sedeId', '==', firestoreUser.sedeId), where('institutionId', '==', institutionId));
           const groupsInSedeQuery = query(collection(db, 'groups'), where('sedeId', '==', firestoreUser.sedeId), where('institutionId', '==', institutionId));
+          const studentsInSedeQuery = query(collection(db, 'users'), where('role', '==', 'student'), where('sedeId', '==', firestoreUser.sedeId), where('institutionId', '==', institutionId));
           
-          const [teachersSnapshot, groupsSnapshot] = await Promise.all([getDocs(teachersInSedeQuery), getDocs(groupsInSedeQuery)]);
+          const [sedeDocSnapshot, teachersSnapshot, groupsSnapshot, studentsInSedeSnapshot] = await Promise.all([
+            getDocs(sedeQuery),
+            getDocs(teachersInSedeQuery),
+            getDocs(groupsInSedeQuery),
+            getDocs(studentsInSedeQuery)
+          ]);
+
+          if (!sedeDocSnapshot.empty) setSupervisorSede(sedeDocSnapshot.docs[0].data() as Sede);
           
-          const studentIdsInSedeGroups = new Set<string>();
-          groupsSnapshot.docs.forEach(gDoc => (gDoc.data() as Group).studentIds.forEach(sid => studentIdsInSedeGroups.add(sid)));
-          setSupervisorStats({ teachers: teachersSnapshot.size, students: studentIdsInSedeGroups.size, groups: groupsSnapshot.size });
+          setSupervisorStats({ teachers: teachersSnapshot.size, students: studentsInSedeSnapshot.size, groups: groupsSnapshot.size });
+
+          const levelCounts: { [key: string]: number } = { Beginner: 0, Intermediate: 0, Advanced: 0, Other: 0 };
+          studentsInSedeSnapshot.docs.forEach(doc => {
+              const student = doc.data() as User;
+              if (student.level) {
+                  levelCounts[student.level] = (levelCounts[student.level] || 0) + 1;
+              } else {
+                  levelCounts['Other'] = (levelCounts['Other'] || 0) + 1;
+              }
+          });
+          setStudentLevelDistribution(Object.entries(levelCounts).map(([name, value]) => ({ name, value })));
+
+          setGroupStudentCount(groupsSnapshot.docs.map(doc => ({
+              name: (doc.data() as Group).name,
+              students: (doc.data() as Group).studentIds?.length || 0,
+          })));
 
       } else if (firestoreUser.role === 'student') {
         const studentGroupsQuery = query(collection(db, 'groups'), where('studentIds', 'array-contains', firestoreUser.id), where('institutionId', '==', institutionId));
@@ -169,7 +215,7 @@ export default function DashboardPage() {
       toast({ title: 'Error', description: 'Could not load dashboard statistics.', variant: 'destructive' });
     }
     setIsLoading(false);
-  }, [firestoreUser, stats.attendance, toast]);
+  }, [firestoreUser, toast]);
 
   useEffect(() => {
     fetchDashboardData();
@@ -260,6 +306,20 @@ export default function DashboardPage() {
   }, [firestoreUser?.role]);
 
   const showTeacherAttendancePanel = firestoreUser && ['admin', 'teacher', 'supervisor'].includes(firestoreUser.role);
+  
+  const levelChartConfig = {
+    value: {
+      label: "Students",
+      color: "hsl(var(--chart-1))",
+    },
+  } satisfies ChartConfig
+
+  const groupChartConfig = {
+    students: {
+      label: "Students",
+      color: "hsl(var(--chart-2))",
+    },
+  } satisfies ChartConfig
 
   return (
     <div className="flex flex-col gap-6">
@@ -279,7 +339,7 @@ export default function DashboardPage() {
           <>
             {renderStatCard("Total Students", stats.students, Users, "Currently enrolled in your institution")}
             {renderStatCard("Active Groups", stats.groups, FolderKanban, "Across all programs in your institution")}
-            {renderStatCard("Student Attendance Today", stats.attendance, BarChartBig, "Students marked present in your institution")}
+            {renderStatCard("Staff Members", (staffUsers.length > 0 ? staffUsers.length : '...'), Briefcase, "Total staff in your institution")}
           </>
         )}
         {firestoreUser?.role === 'teacher' && (
@@ -355,6 +415,62 @@ export default function DashboardPage() {
            </div>
         )}
       </div>
+
+       {/* Charts for Admin and Supervisor */}
+      {(firestoreUser?.role === 'admin' || firestoreUser?.role === 'supervisor') && !isLoading && (
+        <div className="grid gap-4 md:grid-cols-1 lg:grid-cols-2">
+            <Card>
+                <CardHeader>
+                    <CardTitle>Student Distribution by Level</CardTitle>
+                    <CardDescription>
+                        {firestoreUser?.role === 'supervisor' ? `For Sede: ${supervisorSede?.name}` : 'For the entire institution'}
+                    </CardDescription>
+                </CardHeader>
+                <CardContent>
+                    <ChartContainer config={levelChartConfig} className="min-h-[200px] w-full">
+                        <BarChart accessibilityLayer data={studentLevelDistribution}>
+                            <CartesianGrid vertical={false} />
+                            <XAxis
+                                dataKey="name"
+                                tickLine={false}
+                                tickMargin={10}
+                                axisLine={false}
+                                tickFormatter={(value) => value.slice(0, 3)}
+                            />
+                            <YAxis />
+                            <ChartTooltip content={<ChartTooltipContent />} />
+                            <Bar dataKey="value" fill="var(--color-value)" radius={4} />
+                        </BarChart>
+                    </ChartContainer>
+                </CardContent>
+            </Card>
+            <Card>
+                <CardHeader>
+                    <CardTitle>Students per Group</CardTitle>
+                     <CardDescription>
+                        {firestoreUser?.role === 'supervisor' ? `For Sede: ${supervisorSede?.name}` : 'For the entire institution'}
+                    </CardDescription>
+                </CardHeader>
+                <CardContent>
+                     <ChartContainer config={groupChartConfig} className="min-h-[200px] w-full">
+                        <BarChart accessibilityLayer data={groupStudentCount}>
+                            <CartesianGrid vertical={false} />
+                            <XAxis
+                                dataKey="name"
+                                tickLine={false}
+                                tickMargin={10}
+                                axisLine={false}
+                                tickFormatter={(value) => value.slice(0, 8) + (value.length > 8 ? '...' : '')}
+                            />
+                            <YAxis />
+                            <ChartTooltip content={<ChartTooltipContent />} />
+                            <Bar dataKey="students" fill="var(--color-students)" radius={4} />
+                        </BarChart>
+                    </ChartContainer>
+                </CardContent>
+            </Card>
+        </div>
+      )}
 
 
       {/* Quick Actions */}
