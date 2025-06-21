@@ -1,7 +1,7 @@
 
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, ChangeEvent } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
@@ -41,11 +41,12 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Loader2, PlusCircle, CalendarIcon, AlertTriangle, Info, Edit, Trash2, Users, Save } from 'lucide-react';
+import { Loader2, PlusCircle, CalendarIcon, AlertTriangle, Info, Edit, Trash2, Users, Save, Paperclip, X } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { db } from '@/lib/firebase';
+import { db, storage } from '@/lib/firebase';
 import { collection, getDocs, query, where, addDoc, orderBy, serverTimestamp, Timestamp, doc, updateDoc, deleteDoc, writeBatch } from 'firebase/firestore';
-import type { Group, ClassroomItem as ClassroomItemType, ClassroomItemSubmission, EnrichedSubmission, User } from '@/types';
+import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
+import type { Group, ClassroomItem as ClassroomItemType, ClassroomItemSubmission, EnrichedSubmission, User, Attachment } from '@/types';
 import { useAuth } from '@/contexts/AuthContext';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -101,6 +102,7 @@ export default function ClassroomAssignmentsPage() {
   const [isLoadingSubmissions, setIsLoadingSubmissions] = useState(false);
   const [isSavingGrades, setIsSavingGrades] = useState(false);
 
+  const [filesToUpload, setFilesToUpload] = useState<FileList | null>(null);
 
   const form = useForm<ClassroomItemFormValues>({
     resolver: zodResolver(classroomItemFormSchema),
@@ -268,6 +270,7 @@ export default function ClassroomAssignmentsPage() {
       groupId: selectedGroupId || (manageableGroups.length > 0 ? manageableGroups[0].id : ''),
       status: 'published',
     });
+    setFilesToUpload(null);
     setIsFormOpen(true);
   };
 
@@ -281,7 +284,19 @@ export default function ClassroomAssignmentsPage() {
       groupId: item.groupId,
       status: item.status,
     });
+    setFilesToUpload(null);
     setIsFormOpen(true);
+  };
+
+  const uploadFiles = async (files: FileList, itemId: string): Promise<Attachment[]> => {
+    const attachmentPromises = Array.from(files).map(async (file) => {
+      const storagePath = `classroom-items/${itemId}/${file.name}`;
+      const storageRef = ref(storage, storagePath);
+      await uploadBytes(storageRef, file);
+      const url = await getDownloadURL(storageRef);
+      return { name: file.name, url, path: storagePath };
+    });
+    return Promise.all(attachmentPromises);
   };
 
   const handleFormSubmit = async (data: ClassroomItemFormValues) => {
@@ -296,43 +311,81 @@ export default function ClassroomAssignmentsPage() {
         dueDateISO = data.dueDate.toISOString();
     }
 
-    const itemDataPayload = {
-        groupId: data.groupId,
-        institutionId: firestoreUser.institutionId,
-        teacherId: firestoreUser.id, 
-        title: data.title,
-        description: data.description || '',
-        itemType: data.itemType,
-        dueDate: dueDateISO,
-        status: data.status,
-        updatedAt: serverTimestamp(),
-    };
-
     try {
       if (editingItem) {
         const itemRef = doc(db, 'classroomItems', editingItem.id);
-        await updateDoc(itemRef, itemDataPayload as any);
-        toast({ title: 'Success', description: `${data.itemType === 'assignment' ? 'Assignment' : 'Reminder'} "${data.title}" updated.` });
-      } else {
-        await addDoc(collection(db, 'classroomItems'), {
-           ...itemDataPayload,
-           createdAt: serverTimestamp(),
+        let newAttachments: Attachment[] = [];
+        if (filesToUpload && filesToUpload.length > 0) {
+          newAttachments = await uploadFiles(filesToUpload, editingItem.id);
+        }
+        const updatedAttachments = [...(editingItem.attachments || []), ...newAttachments];
+        
+        await updateDoc(itemRef, {
+            title: data.title,
+            description: data.description || '',
+            itemType: data.itemType,
+            dueDate: dueDateISO,
+            status: data.status,
+            updatedAt: serverTimestamp(),
+            attachments: updatedAttachments
         });
+        toast({ title: 'Success', description: `${data.itemType === 'assignment' ? 'Assignment' : 'Reminder'} "${data.title}" updated.` });
+
+      } else {
+        const itemDataPayload = {
+            groupId: data.groupId,
+            institutionId: firestoreUser.institutionId,
+            teacherId: firestoreUser.id, 
+            title: data.title,
+            description: data.description || '',
+            itemType: data.itemType,
+            dueDate: dueDateISO,
+            status: data.status,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+            attachments: [],
+        };
+        const docRef = await addDoc(collection(db, 'classroomItems'), itemDataPayload);
+        
+        if (filesToUpload && filesToUpload.length > 0) {
+          const attachments = await uploadFiles(filesToUpload, docRef.id);
+          await updateDoc(docRef, { attachments });
+        }
+        
         toast({ title: 'Success', description: `${data.itemType === 'assignment' ? 'Assignment' : 'Reminder'} "${data.title}" created.` });
       }
       fetchClassroomItemsForGroup(data.groupId); 
-      form.reset({
-        title: '', description: '', itemType: 'assignment', dueDate: null,
-        groupId: data.groupId, status: 'published',
-      });
       setIsFormOpen(false);
-      setEditingItem(null);
+      
     } catch (error) {
       console.error("Error saving classroom item:", error);
       toast({ title: 'Error', description: `Could not ${editingItem ? 'update' : 'create'} the item.`, variant: 'destructive' });
     }
     setIsSubmitting(false);
   };
+
+  const handleRemoveAttachment = async (item: ClassroomItemType, attachmentToRemove: Attachment) => {
+    if (!confirm(`Are you sure you want to remove the file "${attachmentToRemove.name}"?`)) return;
+    try {
+      const storageRef = ref(storage, attachmentToRemove.path);
+      await deleteObject(storageRef);
+
+      const updatedAttachments = item.attachments?.filter(att => att.path !== attachmentToRemove.path) || [];
+      const itemRef = doc(db, 'classroomItems', item.id);
+      await updateDoc(itemRef, { attachments: updatedAttachments });
+
+      toast({ title: 'Attachment Removed', description: `File "${attachmentToRemove.name}" has been removed.` });
+      fetchClassroomItemsForGroup(item.groupId);
+      // If the form is open for this item, update its state
+      if (editingItem && editingItem.id === item.id) {
+        setEditingItem(prev => prev ? {...prev, attachments: updatedAttachments} : null);
+      }
+    } catch (error) {
+      console.error("Error removing attachment:", error);
+      toast({ title: 'Error', description: 'Could not remove the attachment.', variant: 'destructive' });
+    }
+  };
+
 
   const openDeleteConfirmationDialog = (item: ClassroomItemType) => {
     setItemToDelete(item);
@@ -347,10 +400,19 @@ export default function ClassroomAssignmentsPage() {
     }
     setIsSubmitting(true);
     try {
+      // Delete attachments from storage first
+      if (itemToDelete.attachments && itemToDelete.attachments.length > 0) {
+        const deletePromises = itemToDelete.attachments.map(att => {
+          const storageRef = ref(storage, att.path);
+          return deleteObject(storageRef);
+        });
+        await Promise.all(deletePromises);
+      }
+
       const itemRef = doc(db, 'classroomItems', itemToDelete.id);
       await deleteDoc(itemRef);
       
-      toast({ title: 'Item Deleted', description: `"${itemToDelete.title}" has been removed.` });
+      toast({ title: 'Item Deleted', description: `"${itemToDelete.title}" and its attachments have been removed.` });
       fetchClassroomItemsForGroup(itemToDelete.groupId);
     } catch (error) {
       console.error('Error deleting classroom item:', error);
@@ -493,11 +555,14 @@ export default function ClassroomAssignmentsPage() {
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div>
               <CardTitle>Classroom Administration</CardTitle>
-              <CardDescription>Manage assignments and reminders for your groups.</CardDescription>
+              <CardDescription>Manage assignments and reminders for your groups. Attach files as needed.</CardDescription>
             </div>
             <Dialog open={isFormOpen} onOpenChange={(open) => {
               setIsFormOpen(open);
-              if (!open) setEditingItem(null);
+              if (!open) {
+                setEditingItem(null);
+                setFilesToUpload(null);
+              }
             }}>
               <DialogTrigger asChild>
                 <Button size="sm" className="gap-1.5 text-sm" onClick={openCreateFormDialog} disabled={manageableGroups.length === 0 || isLoadingGroups}>
@@ -566,6 +631,32 @@ export default function ClassroomAssignmentsPage() {
                         <FormMessage />
                       </FormItem>
                     )}/>
+                     <FormItem>
+                        <FormLabel>Attachments (Optional)</FormLabel>
+                        <FormControl>
+                          <Input type="file" multiple onChange={(e) => setFilesToUpload(e.target.files)} />
+                        </FormControl>
+                     </FormItem>
+
+                     {editingItem?.attachments && editingItem.attachments.length > 0 && (
+                        <div>
+                          <p className="text-sm font-medium text-muted-foreground">Current attachments:</p>
+                          <ul className="mt-2 space-y-1">
+                            {editingItem.attachments.map(att => (
+                              <li key={att.path} className="text-sm flex items-center justify-between bg-muted p-2 rounded-md">
+                                <a href={att.url} target="_blank" rel="noopener noreferrer" className="truncate hover:underline text-blue-600 dark:text-blue-400">
+                                  <Paperclip className="inline-block h-4 w-4 mr-1" />
+                                  {att.name}
+                                </a>
+                                <Button type="button" variant="ghost" size="icon" className="h-6 w-6 text-destructive" onClick={() => handleRemoveAttachment(editingItem, att)}>
+                                  <X className="h-4 w-4" />
+                                </Button>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
                      <FormField control={form.control} name="status" render={({ field }) => (
                       <FormItem><FormLabel>Status</FormLabel>
                         <Select onValueChange={field.onChange} value={field.value}>
@@ -682,12 +773,25 @@ export default function ClassroomAssignmentsPage() {
                     </CardHeader>
                     <CardContent>
                       <p className="text-sm whitespace-pre-wrap">{item.description || "No description."}</p>
+                       {item.attachments && item.attachments.length > 0 && (
+                        <div className="mt-4">
+                          <h4 className="text-sm font-medium text-muted-foreground mb-2">Attachments</h4>
+                          <div className="flex flex-wrap gap-2">
+                            {item.attachments.map(att => (
+                              <a key={att.path} href={att.url} target="_blank" rel="noopener noreferrer" className="text-sm flex items-center gap-1.5 bg-secondary/50 hover:bg-secondary/80 px-2 py-1 rounded-md text-secondary-foreground">
+                                <Paperclip className="h-4 w-4" />
+                                {att.name}
+                              </a>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </CardContent>
                     <CardFooter className="text-xs text-muted-foreground flex justify-between items-center">
                       <span>Created: {item.createdAt && isValid(parseISO(item.createdAt)) ? format(parseISO(item.createdAt), 'PPP p') : 'Not available'}</span>
                       <div className="flex items-center gap-1">
                         {item.itemType === 'assignment' && (
-                            <Button variant="outline" size="sm" onClick={() => handleViewSubmissions(item)} disabled={!item.submissionCount}>
+                            <Button variant="outline" size="sm" onClick={() => handleViewSubmissions(item)}>
                                 <Users className="h-3.5 w-3.5 mr-1.5" />
                                 Submissions ({item.submissionCount || 0})
                             </Button>
@@ -715,8 +819,7 @@ export default function ClassroomAssignmentsPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Are you sure?</AlertDialogTitle>
             <AlertDialogDescription>
-              This action cannot be undone. This will permanently delete the item
-              "{itemToDelete?.title}". Related student submissions will NOT be deleted by this action.
+              This action cannot be undone. This will permanently delete the item "{itemToDelete?.title}" and all its attachments. Student submissions for this item will NOT be deleted by this action.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -734,7 +837,7 @@ export default function ClassroomAssignmentsPage() {
             <DialogHeader>
                 <DialogTitle>Submissions for: {selectedItemForSubmissions?.title}</DialogTitle>
                 <DialogPrimitiveDescription>
-                    Review student submissions, provide grades, and leave feedback.
+                    Review student submissions, view attachments, provide grades, and leave feedback.
                 </DialogPrimitiveDescription>
             </DialogHeader>
             <div className="max-h-[60vh] overflow-y-auto">
@@ -748,7 +851,7 @@ export default function ClassroomAssignmentsPage() {
                             <TableRow>
                                 <TableHead>Student</TableHead>
                                 <TableHead>Submitted At</TableHead>
-                                <TableHead>Status</TableHead>
+                                <TableHead>Attachments</TableHead>
                                 <TableHead className="w-[100px]">Grade</TableHead>
                                 <TableHead>Feedback</TableHead>
                             </TableRow>
@@ -763,14 +866,26 @@ export default function ClassroomAssignmentsPage() {
                                         </Avatar>
                                         {sub.studentName}
                                     </TableCell>
-                                    <TableCell>{format(parseISO(sub.submittedAt), 'PPP p')}</TableCell>
                                     <TableCell>
-                                        <span className={cn(
-                                            "text-xs font-semibold px-2 py-1 rounded-full",
-                                            sub.status === 'late' ? "bg-orange-100 text-orange-700 dark:bg-orange-900/50 dark:text-orange-300" : "bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300"
-                                        )}>
-                                            {sub.status === 'late' ? 'Late' : 'On Time'}
-                                        </span>
+                                        <div className="flex flex-col">
+                                            <span>{format(parseISO(sub.submittedAt), 'PPP p')}</span>
+                                            <span className={cn("text-xs font-semibold", sub.status === 'late' ? "text-orange-600" : "text-green-600")}>
+                                              {sub.status === 'late' ? 'Late' : 'On Time'}
+                                            </span>
+                                        </div>
+                                    </TableCell>
+                                     <TableCell>
+                                        {sub.attachments && sub.attachments.length > 0 ? (
+                                            <div className="flex flex-col gap-1">
+                                                {sub.attachments.map(att => (
+                                                    <a key={att.path} href={att.url} target="_blank" rel="noopener noreferrer" className="text-xs hover:underline text-blue-600 flex items-center gap-1">
+                                                      <Paperclip className="h-3 w-3" /> {att.name}
+                                                    </a>
+                                                ))}
+                                            </div>
+                                        ) : (
+                                            <span className="text-xs text-muted-foreground">None</span>
+                                        )}
                                     </TableCell>
                                     <TableCell>
                                         <Input 

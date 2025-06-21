@@ -1,24 +1,25 @@
 
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, ChangeEvent } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
-import { Loader2, ClipboardList, Info, CheckCircle, AlertCircle, Award } from 'lucide-react';
+import { Loader2, ClipboardList, Info, CheckCircle, AlertCircle, Award, Paperclip } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { db } from '@/lib/firebase';
-import { collection, getDocs, query, where, Timestamp, orderBy, addDoc, serverTimestamp } from 'firebase/firestore';
-import type { Group, ClassroomItem as ClassroomItemType, ClassroomItemSubmission } from '@/types';
+import { db, storage } from '@/lib/firebase';
+import { collection, getDocs, query, where, Timestamp, addDoc } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import type { Group, ClassroomItem as ClassroomItemType, ClassroomItemSubmission, Attachment } from '@/types';
 import { useAuth } from '@/contexts/AuthContext';
 import { format, parseISO, isPast, isValid } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import {
   Accordion,
   AccordionContent,
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
-
 
 interface DisplayableClassroomItem extends ClassroomItemType {
   submission?: ClassroomItemSubmission | null;
@@ -32,6 +33,11 @@ export default function StudentMyTasksPage() {
   const [studentGroups, setStudentGroups] = useState<Group[]>([]);
   const [classroomItems, setClassroomItems] = useState<DisplayableClassroomItem[]>([]);
   const [isLoadingData, setIsLoadingData] = useState(true);
+  const [filesToSubmit, setFilesToSubmit] = useState<Record<string, FileList | null>>({});
+
+  const handleFileSelection = (itemId: string, files: FileList | null) => {
+    setFilesToSubmit(prev => ({ ...prev, [itemId]: files }));
+  };
 
   const fetchStudentDataAndSubmissions = useCallback(async () => {
     if (!firestoreUser?.id || !firestoreUser.institutionId) {
@@ -125,7 +131,7 @@ export default function StudentMyTasksPage() {
       const submissionTime = new Date();
       const isItemLate = item.dueDate && isValid(parseISO(item.dueDate)) ? isPast(parseISO(item.dueDate)) : false;
       
-      const newSubmission: Omit<ClassroomItemSubmission, 'id'> = {
+      const newSubmissionData: Omit<ClassroomItemSubmission, 'id'> = {
         itemId: item.id,
         studentId: firestoreUser.id,
         institutionId: firestoreUser.institutionId,
@@ -134,18 +140,44 @@ export default function StudentMyTasksPage() {
         status: isItemLate ? 'late' : 'submitted',
         grade: null,
         feedback: null,
+        attachments: [],
       };
 
-      const docRef = await addDoc(collection(db, 'classroomItemSubmissions'), newSubmission);
+      const submissionDocRef = await addDoc(collection(db, 'classroomItemSubmissions'), newSubmissionData);
       
+      const filesForThisItem = filesToSubmit[item.id];
+      let uploadedAttachments: Attachment[] = [];
+
+      if (filesForThisItem && filesForThisItem.length > 0) {
+        toast({ title: 'Submitting...', description: `Uploading ${filesForThisItem.length} file(s)...` });
+        const attachmentPromises = Array.from(filesForThisItem).map(async (file) => {
+          const storagePath = `submissions/${submissionDocRef.id}/${file.name}`;
+          const storageRef = ref(storage, storagePath);
+          await uploadBytes(storageRef, file);
+          const url = await getDownloadURL(storageRef);
+          return { name: file.name, url, path: storagePath };
+        });
+        uploadedAttachments = await Promise.all(attachmentPromises);
+        
+        // Update the submission document with the attachment details
+        await db.collection('classroomItemSubmissions').doc(submissionDocRef.id).update({
+          attachments: uploadedAttachments,
+        });
+      }
+
       setClassroomItems(prevItems => prevItems.map(i => 
-        i.id === item.id ? { ...i, submission: { ...newSubmission, id: docRef.id }, isSubmitting: false } : i
+        i.id === item.id ? { 
+          ...i, 
+          submission: { ...newSubmissionData, id: submissionDocRef.id, attachments: uploadedAttachments }, 
+          isSubmitting: false 
+        } : i
       ));
-      toast({ title: 'Success', description: `"${item.title}" marked as complete.` });
+      toast({ title: 'Success', description: `"${item.title}" submitted successfully.` });
+      setFilesToSubmit(prev => ({...prev, [item.id]: null}));
 
     } catch (error) {
-      console.error('Error marking item as complete:', error);
-      toast({ title: 'Error', description: 'Could not mark item as complete.', variant: 'destructive' });
+      console.error('Error submitting item:', error);
+      toast({ title: 'Error', description: 'Could not submit item.', variant: 'destructive' });
       setClassroomItems(prevItems => prevItems.map(i => i.id === item.id ? { ...i, isSubmitting: false } : i));
     }
   };
@@ -204,16 +236,44 @@ export default function StudentMyTasksPage() {
                 </CardHeader>
                 <CardContent>
                   <p className="text-sm whitespace-pre-wrap">{item.description || "No description provided."}</p>
-                   {hasGradeOrFeedback && (
+                   
+                   {item.attachments && item.attachments.length > 0 && (
+                      <div className="mt-4">
+                        <h4 className="text-sm font-medium text-muted-foreground mb-2">Teacher's Attachments</h4>
+                        <div className="flex flex-wrap gap-2">
+                          {item.attachments.map(att => (
+                            <a key={att.path} href={att.url} target="_blank" rel="noopener noreferrer" className="text-sm flex items-center gap-1.5 bg-secondary/50 hover:bg-secondary/80 px-2 py-1 rounded-md text-secondary-foreground">
+                              <Paperclip className="h-4 w-4" />
+                              {att.name}
+                            </a>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                   
+                   {(hasGradeOrFeedback || (item.submission && item.submission.attachments && item.submission.attachments.length > 0)) && (
                       <Accordion type="single" collapsible className="w-full mt-4">
-                        <AccordionItem value="grade-feedback">
+                        <AccordionItem value="submission-details">
                           <AccordionTrigger className="text-sm">
                              <div className="flex items-center gap-2">
                                 <Award className="h-4 w-4 text-primary"/>
-                                View Grade & Feedback
+                                View Submission Details
                              </div>
                           </AccordionTrigger>
-                          <AccordionContent className="pt-2 space-y-2">
+                          <AccordionContent className="pt-2 space-y-4">
+                             {item.submission?.attachments && item.submission.attachments.length > 0 && (
+                                <div>
+                                  <p className="font-semibold mb-2">Your Submitted Files:</p>
+                                  <div className="flex flex-wrap gap-2">
+                                    {item.submission.attachments.map(att => (
+                                       <a key={att.path} href={att.url} target="_blank" rel="noopener noreferrer" className="text-sm flex items-center gap-1.5 bg-muted hover:bg-muted/80 px-2 py-1 rounded-md text-foreground">
+                                        <Paperclip className="h-4 w-4" />
+                                        {att.name}
+                                      </a>
+                                    ))}
+                                  </div>
+                                </div>
+                             )}
                              {item.submission?.grade != null && (
                                 <p><strong>Grade: </strong> <span className="text-lg font-bold text-primary">{item.submission.grade}</span></p>
                               )}
@@ -231,25 +291,37 @@ export default function StudentMyTasksPage() {
                 <CardFooter className="text-xs text-muted-foreground flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
                   <span>Posted: {item.createdAt && isValid(parseISO(item.createdAt)) ? format(parseISO(item.createdAt), 'PPP p') : 'Not available'}</span>
                   {item.itemType === 'assignment' && (
-                    <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                    <div className="w-full sm:w-auto">
                       {item.submission ? (
-                        <span className={cn(
-                          "text-sm font-medium flex items-center",
-                          submittedLate ? "text-orange-600 dark:text-orange-400" : "text-green-600 dark:text-green-400"
-                        )}>
-                          {submittedLate ? <AlertCircle className="h-4 w-4 mr-1" /> : <CheckCircle className="h-4 w-4 mr-1" />}
-                          Submitted {submittedLate ? '(Late)' : '(On Time)'}
-                        </span>
+                        <div className="flex items-center justify-end gap-2">
+                          <span className={cn(
+                            "text-sm font-medium flex items-center",
+                            submittedLate ? "text-orange-600 dark:text-orange-400" : "text-green-600 dark:text-green-400"
+                          )}>
+                            {submittedLate ? <AlertCircle className="h-4 w-4 mr-1" /> : <CheckCircle className="h-4 w-4 mr-1" />}
+                            Submitted {submittedLate ? '(Late)' : '(On Time)'}
+                          </span>
+                        </div>
                       ) : (
-                        <Button 
-                          size="sm" 
-                          variant="outline" 
-                          onClick={() => handleMarkAsComplete(item)}
-                          disabled={item.isSubmitting || !!item.submission}
-                        >
-                          {item.isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                          Mark as Complete
-                        </Button>
+                        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:justify-end mt-2 sm:mt-0">
+                          <Input
+                            type="file"
+                            multiple
+                            className="h-9 text-xs file:mr-2 file:text-xs"
+                            onChange={(e: ChangeEvent<HTMLInputElement>) => handleFileSelection(item.id, e.target.files)}
+                            disabled={item.isSubmitting}
+                          />
+                          <Button 
+                            size="sm" 
+                            variant="outline" 
+                            onClick={() => handleMarkAsComplete(item)}
+                            disabled={item.isSubmitting || !!item.submission}
+                            className="w-full sm:w-auto"
+                          >
+                            {item.isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                            Submit
+                          </Button>
+                        </div>
                       )}
                     </div>
                   )}

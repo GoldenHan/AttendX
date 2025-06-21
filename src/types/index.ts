@@ -1,24 +1,30 @@
 
 
-export interface ScoreDetail { // Used in User.grades
+export interface Attachment {
+  name: string;
+  url: string;
+  path: string; // Full path in Storage, for deletion
+}
+
+export interface ScoreDetail { // Used in User.gradesByLevel
   name?: string | null;
   score?: number | null;
 }
 
-export interface ActivityScore { // Used directly in PartialScores form type, and User.grades
+export interface ActivityScore { // Used directly in PartialScores form type, and User.gradesByLevel
   id: string; // Unique ID for the activity within the partial (can be RHF generated or from DB)
   name?: string | null;
   score?: number | null;
 }
 
-export interface ExamScore { // Used directly in PartialScores form type, and User.grades
+export interface ExamScore { // Used directly in PartialScores form type, and User.gradesByLevel
   name?: string | null;
   score?: number | null;
 }
 
 // Represents the structure of how partial scores are stored in Firestore for a student.
 // Corresponds to what is saved from the GradeEntryFormValues.
-export interface PartialScores { // Stored in Firestore under student.grades.partialX
+export interface PartialScores { // Stored in Firestore under student.gradesByLevel.partialX
   accumulatedActivities: ActivityScore[]; // Array of specific activities with scores
   exam: ExamScore | null; // Single exam for the partial
 }
@@ -181,6 +187,7 @@ export interface ClassroomItem {
   createdAt: string; // ISO string
   updatedAt: string; // ISO string
   status: 'published' | 'draft';
+  attachments?: Attachment[];
 }
 
 // New type for Student Submissions to Classroom Items
@@ -194,6 +201,7 @@ export interface ClassroomItemSubmission {
   status: 'submitted' | 'late'; // Status of the submission
   grade?: number | null; // Optional grade given by the teacher
   feedback?: string | null; // Optional feedback from the teacher
+  attachments?: Attachment[];
 }
 
 // New type for displaying enriched submission data
