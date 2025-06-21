@@ -4,3 +4,4 @@ config();
 
 import '@/ai/flows/attendance-analysis.ts';
 // Removed user-admin-flow
+import '@/ai/flows/lesson-planner.ts';

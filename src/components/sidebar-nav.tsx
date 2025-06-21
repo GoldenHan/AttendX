@@ -25,7 +25,8 @@ import {
   ClipboardList,
   Award,
   Building,
-  ClipboardSignature, // Added for Classroom Admin
+  ClipboardSignature,
+  NotebookPen,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import type { User } from '@/types';
@@ -52,9 +53,12 @@ const navItems: NavItem[] = [
   // Student specific views
   { href: '/student-grades', label: 'My Grades', icon: ClipboardCheck, roles: ['student'] },
   
+  // AI Tools
+  { href: '/ai-analysis', label: 'AI Attendance Analysis', icon: Brain, roles: ['admin', 'teacher', 'supervisor'] },
+  { href: '/lesson-planner', label: 'AI Lesson Planner', icon: NotebookPen, roles: ['admin', 'teacher', 'supervisor'] },
+
   // Management (for Admin, Supervisor, Teacher)
   { href: '/student-grades', label: 'Student Grades View', icon: ClipboardCheck, roles: ['admin', 'teacher', 'supervisor'], excludeRoles: ['student'] },
-  { href: '/ai-analysis', label: 'AI Analysis', icon: Brain, roles: ['admin', 'teacher', 'supervisor'] },
   { href: '/student-management', label: 'Student Management', icon: GraduationCap, roles: ['admin', 'teacher', 'supervisor'] },
   { href: '/group-management', label: 'Group Management', icon: FolderKanban, roles: ['admin', 'teacher', 'supervisor'] },
   { href: '/grades-management', label: 'Grades Management', icon: ClipboardCheck, roles: ['admin', 'teacher', 'supervisor'] },
@@ -92,7 +96,8 @@ export function SidebarNav() {
 
   const visibleNavItems = filterNavItemsForRole(navItems);
 
-  const generalItems = visibleNavItems.filter(item => ['/dashboard', '/attendance-log', '/attendance-records', '/reports', '/student-grades', '/ai-analysis', '/classroom/assignments', '/classroom/my-tasks'].includes(item.href));
+  const generalItems = visibleNavItems.filter(item => ['/dashboard', '/attendance-log', '/attendance-records', '/reports', '/student-grades', '/classroom/assignments', '/classroom/my-tasks'].includes(item.href));
+  const aiItems = visibleNavItems.filter(item => ['/ai-analysis', '/lesson-planner'].includes(item.href));
   const managementItems = visibleNavItems.filter(item => ['/student-management', '/group-management', '/grades-management', '/partial-grades-report', '/certificate-management'].includes(item.href));
   const adminItems = visibleNavItems.filter(item => ['/user-management', '/sede-management', '/app-settings'].includes(item.href));
 
@@ -124,6 +129,13 @@ export function SidebarNav() {
           <SidebarGroup>
             <SidebarGroupLabel>Menu</SidebarGroupLabel>
             {generalItems.map(renderNavItem)}
+          </SidebarGroup>
+        )}
+        
+        {aiItems.length > 0 && (
+          <SidebarGroup>
+            <SidebarGroupLabel>AI Tools</SidebarGroupLabel>
+            {aiItems.map(renderNavItem)}
           </SidebarGroup>
         )}
 
