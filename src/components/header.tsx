@@ -1,7 +1,7 @@
 
 'use client';
 import Link from 'next/link';
-import { Sheet as SheetIcon, UserCircle, LogOut, Settings, Languages } from 'lucide-react';
+import { Sheet as SheetIcon, UserCircle, LogOut, Settings, Languages, User as UserProfileIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -101,6 +101,12 @@ export function Header({ appLogoUrl, appName }: { appLogoUrl?: string | null, ap
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuItem asChild>
+                <Link href="/profile">
+                  <UserProfileIcon className="mr-2 h-4 w-4" />
+                  My Profile
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
                 <Link href="/app-settings">
                   <Settings className="mr-2 h-4 w-4" />
                   Settings
@@ -118,4 +124,3 @@ export function Header({ appLogoUrl, appName }: { appLogoUrl?: string | null, ap
     </header>
   );
 }
-
