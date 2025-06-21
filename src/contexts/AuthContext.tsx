@@ -145,38 +145,61 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const signIn = async (identifier: string, pass: string) => {
     setLoading(true);
-    let emailToAuth = identifier;
 
     console.log(`[AuthContext] Attempting sign in for identifier: ${identifier}`);
     try {
-      if (!identifier.includes('@')) {
-        console.log(`[AuthContext] Identifier "${identifier}" is not an email. Searching for username in 'users' collection.`);
-        const usernameQuery = query(collection(db, 'users'), where('username', '==', identifier.trim()), limit(1));
-        const usernameSnapshot = await getDocs(usernameQuery);
-
-        if (!usernameSnapshot.empty) {
-          const userDoc = usernameSnapshot.docs[0].data() as FirestoreUserType;
-          console.log(`[AuthContext] Found user document for username "${identifier.trim()}" in 'users':`, userDoc);
-          if (userDoc.email) {
-            emailToAuth = userDoc.email;
-            console.log(`[AuthContext] Using email "${emailToAuth}" from 'users' for Firebase Auth.`);
-          } else {
-            console.error(`[AuthContext] User document from 'users' for username "${identifier.trim()}" is missing an email field.`);
-            throw new Error(userDoc.role === 'student' ? 'El usuario (estudiante) no tiene un correo electrónico asociado. Contacta al administrador.' : 'El usuario no tiene un correo electrónico asociado. Contacta al administrador.');
-          }
-        } else {
-          console.error(`[AuthContext] Username "${identifier.trim()}" not found in 'users' collection.`);
-          throw new Error('Nombre de usuario no encontrado.');
-        }
-      } else {
-         console.log(`[AuthContext] Identifier "${identifier}" is an email. Proceeding directly with Firebase Auth.`);
+      // If identifier contains '@', assume it's an email and attempt direct login.
+      if (identifier.includes('@')) {
+        console.log(`[AuthContext] Identifier is an email. Proceeding directly with Firebase Auth.`);
+        await signInWithEmailAndPassword(auth, identifier, pass);
+        console.log(`[AuthContext] Firebase Auth successful for email: ${identifier}`);
+        return; // Early return on success
       }
 
-      await signInWithEmailAndPassword(auth, emailToAuth, pass);
-      console.log(`[AuthContext] Firebase Auth successful for email: ${emailToAuth}`);
+      // If no '@', assume it's a username. Query for all users with that username.
+      console.log(`[AuthContext] Identifier is a username. Querying for matches.`);
+      const usernameQuery = query(collection(db, 'users'), where('username', '==', identifier.trim()));
+      const usernameSnapshot = await getDocs(usernameQuery);
+
+      if (!usernameSnapshot.empty) {
+        console.log(`[AuthContext] Found ${usernameSnapshot.size} user(s) with username "${identifier.trim()}".`);
+        // Iterate through each user and try to sign in. This handles multiple institutions having the same username.
+        for (const userDoc of usernameSnapshot.docs) {
+          const userData = userDoc.data() as FirestoreUserType;
+          if (userData.email) {
+            try {
+              console.log(`[AuthContext] Attempting login with associated email: ${userData.email}`);
+              await signInWithEmailAndPassword(auth, userData.email, pass);
+              // If we get here, login was successful.
+              console.log(`[AuthContext] Login successful for user ${userData.username} from institution ${userData.institutionId}.`);
+              return; // Exit function on first successful login.
+            } catch (error: any) {
+              // This is an expected failure if the password doesn't match this specific user account.
+              if (error.code === 'auth/invalid-credential') {
+                console.log(`[AuthContext] Password incorrect for ${userData.email}. Trying next match if available...`);
+                continue; // Continue to the next user with the same username.
+              } else {
+                 // For any other error (e.g., network, etc.), we should stop and re-throw it.
+                 throw error;
+              }
+            }
+          } else {
+            console.warn(`[AuthContext] User ${userData.username} found but has no email associated.`);
+          }
+        }
+        // If the loop completes without a successful login, it means the password was wrong for all matching usernames.
+        console.error(`[AuthContext] Password was incorrect for all users matching username "${identifier.trim()}".`);
+        throw new Error('Nombre de usuario o contraseña incorrectos.');
+      } else {
+        // If the username is not found at all, we can throw a specific error.
+        console.error(`[AuthContext] Username "${identifier.trim()}" not found in any institution.`);
+        throw new Error('Nombre de usuario o contraseña incorrectos.');
+      }
     } catch (error: any) {
-      console.error(`[AuthContext] signIn error:`, error.code, error.message, error);
+      console.error(`[AuthContext] signIn error:`, error.code, error.message);
       setLoading(false);
+      // Re-throw the original error or a more user-friendly one.
+      // Let the calling component handle the UI feedback.
       throw error;
     }
   };
@@ -385,4 +408,3 @@ export const useAuth = (): AuthContextType => {
   }
   return context;
 };
-

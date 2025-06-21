@@ -92,17 +92,15 @@ export default function AuthPage() {
       await signIn(data.identifier, data.password);
       toast({ title: 'Ingreso Exitoso', description: '¡Bienvenido/a de nuevo!' });
     } catch (error: any) {
-      let errorMessage = 'Fallo al ingresar. Verifica tus credenciales.';
-      if (error.code === 'auth/user-not-found' ||
-          error.code === 'auth/wrong-password' ||
-          error.code === 'auth/invalid-credential' ||
-          error.code === 'auth/invalid-email') {
+      // The signIn function now throws user-friendly error messages for most cases.
+      // We can display them directly.
+      let errorMessage = error.message || 'Fallo al ingresar. Verifica tus credenciales.';
+
+      // Fallback for generic firebase errors if the identifier was an email.
+      if (error.code === 'auth/invalid-credential' || error.code === 'auth/invalid-email') {
         errorMessage = 'Correo electrónico o contraseña incorrectos.';
-      } else if (error.message === 'El usuario no tiene un correo electrónico asociado. Contacta al administrador.' ||
-                 error.message === 'El usuario (estudiante) no tiene un correo electrónico asociado. Contacta al administrador.' ||
-                 error.message === 'Nombre de usuario no encontrado.') {
-        errorMessage = error.message;
       }
+      
       console.error("Login page error:", error);
       toast({ title: 'Fallo de Ingreso', description: errorMessage, variant: 'destructive' });
     } finally {
