@@ -186,32 +186,34 @@ export default function StudentManagementPage() {
 
   const filteredStudents = useMemo(() => {
     if (!firestoreUser) return [];
-    let studentsToDisplay = allStudents; // Already filtered by institution in fetchData
+    let studentsToDisplay = allStudents;
 
     if (firestoreUser.role === 'teacher') {
-      const teacherGroupIds = availableGroupsForAssignment.map(g => g.id);
-      studentsToDisplay = studentsToDisplay.filter(student => 
-        allGroups.some(group => group.teacherId === firestoreUser.id && Array.isArray(group.studentIds) && group.studentIds.includes(student.id))
-      );
+      const studentIdsInTeacherGroups = new Set<string>();
+      availableGroupsForAssignment.forEach(group => {
+          if (Array.isArray(group.studentIds)) {
+              group.studentIds.forEach(id => studentIdsInTeacherGroups.add(id));
+          }
+      });
+      studentsToDisplay = studentsToDisplay.filter(student => studentIdsInTeacherGroups.has(student.id));
     } else if (firestoreUser.role === 'supervisor') {
-        if(!firestoreUser.sedeId) return []; // Supervisor without Sede cannot see students unless explicitly through group filter.
-        // Filter by selected group (which are already Sede-specific) or by student's Sede ID
+        if(!firestoreUser.sedeId) return []; 
         if (selectedGroupIdForFilter !== 'all') {
             const group = allGroups.find(g => g.id === selectedGroupIdForFilter);
             if (group && Array.isArray(group.studentIds) && group.sedeId === firestoreUser.sedeId) {
                 studentsToDisplay = studentsToDisplay.filter(student => group.studentIds.includes(student.id));
             } else {
-                studentsToDisplay = []; // Group not found or not in supervisor's Sede
+                studentsToDisplay = [];
             }
-        } else { // Show all students in supervisor's Sede
+        } else { 
             studentsToDisplay = studentsToDisplay.filter(student => student.sedeId === firestoreUser.sedeId);
         }
-    } else { // Admin or Caja
+    } else { 
         if (selectedGroupIdForFilter !== 'all') {
             const group = allGroups.find(g => g.id === selectedGroupIdForFilter);
             if (group && Array.isArray(group.studentIds)) {
                 studentsToDisplay = studentsToDisplay.filter(student => group.studentIds.includes(student.id));
-            } else if (group) { // Group exists but no students or studentIds is not an array
+            } else if (group) {
                  studentsToDisplay = [];
             }
         }
@@ -666,7 +668,7 @@ export default function StudentManagementPage() {
                     )}/>
                      <FormField control={studentForm.control} name="assignedGroupId" render={({ field }) => (
                           <FormItem><FormLabel>Assign to Group (Optional)</FormLabel>
-                            <Select onValueChange={(value) => field.onChange(value === UNASSIGN_STUDENT_FROM_GROUP_KEY ? undefined : value)} value={field.value || UNASSIGN_STUDENT_FROM_GROUP_KEY}>
+                            <Select onValueChange={(value) => field.onChange(value === UNASSIGN_STUDENT_FROM_GROUP_KEY ? undefined : value)} value={field.value || undefined}>
                               <FormControl><SelectTrigger><SelectValue placeholder="Select a group or unassign" /></SelectTrigger></FormControl>
                               <SelectContent>
                                 <SelectItem value={UNASSIGN_STUDENT_FROM_GROUP_KEY}>Unassigned</SelectItem>

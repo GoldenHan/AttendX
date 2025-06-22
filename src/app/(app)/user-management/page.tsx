@@ -254,17 +254,18 @@ export default function StaffManagementPage() {
   }, [watchedEmailValue, isStaffFormDialogOpen, editingStaff, debouncedCheckEmail, resetEmailCheck]);
 
   const displayedStaffUsers = useMemo(() => {
-    if (!firestoreUser || !firestoreUser.institutionId) return []; 
-    let filtered = staffUsers.filter(staff => staff.institutionId === firestoreUser.institutionId);
-
+    if (!firestoreUser || !firestoreUser.institutionId) return [];
+    
     if (firestoreUser.role === 'supervisor') {
-        filtered = staffUsers.filter(staff => 
-            (staff.sedeId === firestoreUser.sedeId && staff.role === 'teacher') ||
-            staff.id === firestoreUser.id ||
-            (staff.institutionId === firestoreUser.institutionId && (staff.role === 'supervisor' || staff.role === 'admin' || staff.role === 'caja'))
-        );
+      // Supervisors only see teachers from their own Sede and themselves.
+      return staffUsers.filter(staff => 
+        (staff.role === 'teacher' && staff.sedeId === firestoreUser.sedeId) ||
+        staff.id === firestoreUser.id
+      );
     }
-    return filtered;
+    
+    // Admins see all staff in their institution.
+    return staffUsers.filter(staff => staff.institutionId === firestoreUser.institutionId);
   }, [staffUsers, firestoreUser]);
 
   const getSedeName = useCallback((sedeId?: string | null) => {
