@@ -257,8 +257,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         });
         console.log(`[AuthContext] Rollback complete.`);
       }
-      setLoading(false);
       throw error; // Re-throw the original error to be handled by the UI
+    } finally {
+      setLoading(false); // Ensure loading is always set to false
     }
   };
 

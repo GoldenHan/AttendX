@@ -14,7 +14,6 @@ export default function AppLayout({
   children: React.ReactNode;
 }) {
   const { authUser, firestoreUser, loading } = useAuth();
-  const router = useRouter();
   const pathname = usePathname(); 
   const [appLogoUrl, setAppLogoUrl] = useState<string | null>(null);
   const [appName, setAppName] = useState<string>(DEFAULT_APP_NAME_LAYOUT);
@@ -49,19 +48,6 @@ export default function AppLayout({
     };
   }, []);
 
-  useEffect(() => {
-    if (!loading) {
-      const isForcePasswordChangePage = pathname === '/force-password-change';
-      
-      if (!authUser && !isForcePasswordChangePage) { 
-        router.push('/login');
-      } else if (authUser && firestoreUser?.requiresPasswordChange && !isForcePasswordChangePage) {
-        router.push('/force-password-change');
-      } else if (authUser && !firestoreUser?.requiresPasswordChange && isForcePasswordChangePage) {
-        router.push('/dashboard');
-      }
-    }
-  }, [authUser, firestoreUser, loading, router, pathname]);
 
   useEffect(() => {
     const storedTheme = localStorage.getItem('theme');
@@ -86,4 +72,3 @@ export default function AppLayout({
 
   return <MainAppShell appLogoUrl={appLogoUrl} appName={appName}>{children}</MainAppShell>;
 }
-
