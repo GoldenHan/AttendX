@@ -2,6 +2,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   Card,
   CardContent,
@@ -15,12 +16,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, Award, Save, UserCircle, AlertTriangle } from 'lucide-react';
+import { Loader2, Award, Save, UserCircle, FileText } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { db } from '@/lib/firebase';
 import { collection, doc, getDocs, getDoc, updateDoc, query, where } from 'firebase/firestore';
-import type { User, Group, GradingConfiguration, StudentGradeStructure, PartialScores, ActivityScore } from '@/types';
-// DEFAULT_GRADING_CONFIG import removed
+import type { User, Group, GradingConfiguration, StudentGradeStructure, PartialScores } from '@/types';
 import { useAuth } from '@/contexts/AuthContext';
 
 interface StudentLevelRecord {
@@ -78,87 +78,90 @@ const calculateLevelFinalGrade = (levelGrades: StudentGradeStructure | undefined
 
 export default function CertificateManagementPage() {
   const { toast } = useToast();
-  const { firestoreUser, gradingConfig, loading: authLoading } = useAuth(); // Get gradingConfig and authLoading from AuthContext
+  const { firestoreUser, gradingConfig, loading: authLoading } = useAuth();
+  const router = useRouter();
 
   const [allStudents, setAllStudents] = useState<User[]>([]);
   const [allGroups, setAllGroups] = useState<Group[]>([]);
   const [allTeachers, setAllTeachers] = useState<User[]>([]);
-  // gradingConfig state removed
 
   const [selectedGroupId, setSelectedGroupId] = useState<string>('all');
   const [studentLevelRecords, setStudentLevelRecords] = useState<StudentLevelRecord[]>([]);
 
-  const [isLoadingData, setIsLoadingData] = useState(true); // Renamed from isLoading for clarity
+  const [isLoadingData, setIsLoadingData] = useState(true);
   const [isSavingCode, setIsSavingCode] = useState<{ [key: string]: boolean }>({});
 
   const [certificateTemplate, setCertificateTemplate] = useState(
-    "La academia SERVEX, hace constar que [Nombre del Estudiante], con base en los resultados de los exámenes correspondientes, ha aprobado satisfactoriamente el nivel [Nivel del Estudiante] del programa de [Tipo de Programa], impartido en el turno [Turno del Programa].\n\nFirman las autoridades correspondientes."
+    "La academia SERVEX, hace constar que [NOMBRE_ESTUDIANTE], con base en los resultados de los exámenes correspondientes, ha aprobado satisfactoriamente el nivel [NOMBRE_NIVEL] del programa de [TIPO_PROGRAMA], impartido en el turno [TURNO_PROGRAMA].\n\nFirman las autoridades correspondientes."
   );
 
-  const [selectedStudentForTemplate, setSelectedStudentForTemplate] = useState<StudentLevelRecord | null>(null);
-
-
   const fetchInitialData = useCallback(async () => {
-    if (authLoading || !firestoreUser?.institutionId) { // Wait for auth and institution ID
+    if (authLoading || !firestoreUser?.institutionId) {
         setIsLoadingData(false);
         return;
     }
     setIsLoadingData(true);
     try {
-      // Filter all queries by institutionId
-      const studentsQuery = query(collection(db, 'students'), where('institutionId', '==', firestoreUser.institutionId));
+      const studentsQuery = query(collection(db, 'users'), where('role', '==', 'student'), where('institutionId', '==', firestoreUser.institutionId));
       const groupsQuery = query(collection(db, 'groups'), where('institutionId', '==', firestoreUser.institutionId));
       const teachersQuery = query(collection(db, 'users'), where('role', '==', 'teacher'), where('institutionId', '==', firestoreUser.institutionId));
-      // Grading config is now from AuthContext, no need to fetch here
-      // const configSnapPromise = getDoc(doc(db, 'appConfiguration', 'currentGradingConfig')); removed
 
-      const [studentsSnap, groupsSnap, teachersSnap] = await Promise.all([ // configSnapPromise removed
+      const [studentsSnap, groupsSnap, teachersSnap] = await Promise.all([
         getDocs(studentsQuery),
-        getDocs(groupsSnap),
+        getDocs(groupsQuery),
         getDocs(teachersSnap),
       ]);
 
-      const students = studentsSnap.docs.map(d => ({ id: d.id, ...d.data() } as User));
-      setAllStudents(students);
+      setAllStudents(studentsSnap.docs.map(d => ({ id: d.id, ...d.data() } as User)));
       setAllGroups(groupsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Group)));
       setAllTeachers(teachersSnap.docs.map(d => ({ id: d.id, ...d.data() } as User)));
-
-      // gradingConfig is from AuthContext
 
     } catch (error) {
       console.error("Error fetching initial data:", error);
       toast({ title: 'Error', description: 'No se pudieron cargar los datos iniciales.', variant: 'destructive' });
     }
     setIsLoadingData(false);
-  }, [toast, firestoreUser, authLoading]); // Added authLoading dependency
+  }, [toast, firestoreUser, authLoading]);
 
   useEffect(() => {
     fetchInitialData();
   }, [fetchInitialData]);
 
   useEffect(() => {
-    if (isLoadingData || authLoading) return; // Check authLoading
+    // Save template to localStorage whenever it changes
+    localStorage.setItem('certificateTemplate', certificateTemplate);
+  }, [certificateTemplate]);
+
+  useEffect(() => {
+    // Load template from localStorage on initial render
+    const savedTemplate = localStorage.getItem('certificateTemplate');
+    if (savedTemplate) {
+      setCertificateTemplate(savedTemplate);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isLoadingData || authLoading) return;
 
     const records: StudentLevelRecord[] = [];
     const studentsToProcess = selectedGroupId === 'all'
       ? allStudents
       : allStudents.filter(s => {
           const group = allGroups.find(g => g.id === selectedGroupId);
-          // Ensure group belongs to current institution (already filtered, but good for safety)
           return group?.studentIds.includes(s.id) && group.institutionId === firestoreUser?.institutionId;
         });
 
     studentsToProcess.forEach(student => {
       if (student.gradesByLevel) {
         Object.entries(student.gradesByLevel).forEach(([levelName, levelData]) => {
-          const finalGrade = calculateLevelFinalGrade(levelData, gradingConfig); // Use gradingConfig from context
+          const finalGrade = calculateLevelFinalGrade(levelData, gradingConfig);
 
           let teacherName: string | null = null;
           let groupType: StudentLevelRecord['groupType'] = null;
 
           const currentGroupForStudent = allGroups.find(g => Array.isArray(g.studentIds) && g.studentIds.includes(student.id) && g.institutionId === firestoreUser?.institutionId);
           if (currentGroupForStudent) {
-            groupType = currentGroupForStudent.type;
+            groupType = currentGroupForStudent.type === 'Saturday' || currentGroupForStudent.type === 'Sunday' ? currentGroupForStudent.type : null;
             if (currentGroupForStudent.teacherId) {
               const teacher = allTeachers.find(t => t.id === currentGroupForStudent.teacherId && t.institutionId === firestoreUser?.institutionId);
               teacherName = teacher?.name || 'Desconocido';
@@ -178,7 +181,7 @@ export default function CertificateManagementPage() {
       }
     });
     setStudentLevelRecords(records.sort((a,b) => a.studentName.localeCompare(b.studentName) || a.levelName.localeCompare(b.levelName)));
-  }, [allStudents, allGroups, allTeachers, selectedGroupId, gradingConfig, isLoadingData, authLoading, firestoreUser?.institutionId]); // Added authLoading and firestoreUser
+  }, [allStudents, allGroups, allTeachers, selectedGroupId, gradingConfig, isLoadingData, authLoading, firestoreUser?.institutionId]);
 
   const handleCodeChange = (studentId: string, levelName: string, newCode: string) => {
     setStudentLevelRecords(prevRecords =>
@@ -204,18 +207,15 @@ export default function CertificateManagementPage() {
     setIsSavingCode(prev => ({ ...prev, [key]: true }));
 
     try {
-      const studentRef = doc(db, 'students', studentId); // 'students' collection may need to be 'users' if students are stored there
+      const studentRef = doc(db, 'users', studentId);
       const studentDoc = await getDoc(studentRef);
       if (studentDoc.exists() && studentDoc.data()?.institutionId === firestoreUser.institutionId) {
         const studentData = studentDoc.data() as User;
         const updatedGradesByLevel = { ...studentData.gradesByLevel };
 
         if (updatedGradesByLevel[levelName]) {
-          updatedGradesByLevel[levelName] = {
-            ...updatedGradesByLevel[levelName],
-            certificateCode: recordToSave.certificateCode,
-          };
-        } else { // Should not happen if levelData exists, but as a fallback
+          updatedGradesByLevel[levelName].certificateCode = recordToSave.certificateCode;
+        } else {
           updatedGradesByLevel[levelName] = { certificateCode: recordToSave.certificateCode };
         }
         await updateDoc(studentRef, { gradesByLevel: updatedGradesByLevel });
@@ -230,23 +230,12 @@ export default function CertificateManagementPage() {
       setIsSavingCode(prev => ({ ...prev, [key]: false }));
     }
   };
-
-  const getFormattedCertificateText = () => {
-    if (!selectedStudentForTemplate) return certificateTemplate;
-
-    let text = certificateTemplate;
-    text = text.replace(/\[Nombre del Estudiante]/g, selectedStudentForTemplate.studentName);
-    text = text.replace(/\[Nivel del Estudiante]/g, selectedStudentForTemplate.levelName);
-
-    const programType = selectedStudentForTemplate.groupType || "No especificado";
-    const programTurn = selectedStudentForTemplate.groupType || "No especificado";
-
-    text = text.replace(/\[Tipo de Programa]/g, programType);
-    text = text.replace(/\[Turno del Programa]/g, programTurn);
-    return text;
+  
+  const handleGenerateCertificate = (studentId: string, levelName: string) => {
+    router.push(`/certificate/${studentId}/${encodeURIComponent(levelName)}`);
   };
 
-  if (authLoading || isLoadingData) { // Check authLoading
+  if (authLoading || isLoadingData) {
     return (
       <Card>
         <CardHeader>
@@ -262,13 +251,12 @@ export default function CertificateManagementPage() {
   }
 
   return (
-    <>
+    <div className="space-y-6">
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2"><Award className="h-6 w-6 text-primary" /> Certificate Records</CardTitle>
           <CardDescription>
             View final grades per level for students. Filter by group and manage certificate codes.
-            The teacher displayed is based on the student's current group assignment.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -339,8 +327,9 @@ export default function CertificateManagementPage() {
                     </div>
                   </CardContent>
                    <CardFooter className="p-4 border-t bg-muted/10">
-                        <Button variant="link" size="sm" onClick={() => setSelectedStudentForTemplate(record)} className="p-0 h-auto">
-                            Usar para plantilla de acta
+                        <Button variant="link" size="sm" onClick={() => handleGenerateCertificate(record.studentId, record.levelName)} className="p-0 h-auto">
+                            <FileText className="mr-2 h-4 w-4" />
+                            Generar Acta/Certificado
                         </Button>
                     </CardFooter>
                 </Card>
@@ -354,38 +343,21 @@ export default function CertificateManagementPage() {
         <CardHeader>
           <CardTitle>Plantilla de Acta/Certificado</CardTitle>
           <CardDescription>
-            Edita la plantilla general a continuación. Si seleccionaste "Usar para plantilla de acta" para un estudiante y nivel, los placeholders se llenarán.
-            Copia el texto generado para usarlo externamente.
+            Edita la plantilla base aquí. Los placeholders como [NOMBRE_ESTUDIANTE] serán reemplazados al generar el certificado.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {selectedStudentForTemplate && (
-            <>
-              <AlertTriangle className="mb-2 h-4 w-4 text-amber-600 inline-block mr-1" />
-              <span className="text-sm text-amber-700 mb-3 block">
-                  Mostrando texto pre-llenado para: {selectedStudentForTemplate.studentName} - {selectedStudentForTemplate.levelName}.
-                  <Button variant="link" size="sm" onClick={() => setSelectedStudentForTemplate(null)} className="ml-2 p-0 h-auto text-amber-700">(Limpiar selección)</Button>
-              </span>
-            </>
-          )}
           <Textarea
-            value={getFormattedCertificateText()}
-            onChange={(e) => {
-              if (!selectedStudentForTemplate) {
-                 setCertificateTemplate(e.target.value);
-              }
-            }}
-            rows={10}
+            value={certificateTemplate}
+            onChange={(e) => setCertificateTemplate(e.target.value)}
+            rows={8}
             placeholder="Escribe o pega aquí el texto para el acta o certificado..."
-            readOnly={!!selectedStudentForTemplate}
           />
-          {selectedStudentForTemplate && (
-            <p className="text-xs text-muted-foreground mt-2">
-                La plantilla es de solo lectura mientras se previsualiza para un estudiante. Limpia la selección para editar la plantilla base.
+           <p className="text-xs text-muted-foreground mt-2">
+                Placeholders disponibles: [NOMBRE_ESTUDIANTE], [NOMBRE_NIVEL], [TIPO_PROGRAMA], [TURNO_PROGRAMA], [NOMBRE_MAESTRO]. La plantilla se guarda en tu navegador.
             </p>
-          )}
         </CardContent>
       </Card>
-    </>
+    </div>
   );
 }
