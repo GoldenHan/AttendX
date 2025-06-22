@@ -28,7 +28,8 @@ import {
   ClipboardSignature,
   NotebookPen,
   Banknote,
-  Receipt, // Added Receipt
+  Receipt,
+  ListChecks, // Added ListChecks
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import type { User } from '@/types';
@@ -72,6 +73,7 @@ const navItems: NavItem[] = [
 
   // Administration (for Admin, Supervisor)
   { href: '/user-management', label: 'Staff Management', icon: Briefcase, roles: ['admin', 'supervisor'] },
+  { href: '/staff-attendance-report', label: 'Staff Attendance Report', icon: ListChecks, roles: ['admin', 'supervisor'] },
   { href: '/sede-management', label: 'Sede Management', icon: Building, roles: ['admin'] },
   { href: '/app-settings', label: 'Settings', icon: Settings, roles: ['admin'] },
 ];
@@ -105,7 +107,7 @@ export function SidebarNav() {
   const aiItems = visibleNavItems.filter(item => ['/ai-analysis', '/lesson-planner'].includes(item.href));
   const managementItems = visibleNavItems.filter(item => ['/student-management', '/group-management', '/grades-management', '/partial-grades-report', '/certificate-management'].includes(item.href));
   const financialItems = visibleNavItems.filter(item => ['/payment-registration', '/payment-reports'].includes(item.href));
-  const adminItems = visibleNavItems.filter(item => ['/user-management', '/sede-management', '/app-settings'].includes(item.href));
+  const adminItems = visibleNavItems.filter(item => ['/user-management', '/staff-attendance-report', '/sede-management', '/app-settings'].includes(item.href));
 
 
   const renderNavItem = (item: NavItem) => (
