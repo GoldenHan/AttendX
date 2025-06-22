@@ -152,10 +152,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         await signInWithEmailAndPassword(auth, identifier, pass);
         console.log(`[AuthContext] Firebase Auth successful for email: ${identifier}`);
     } catch (error: any) {
-        console.error(`[AuthContext] signIn error:`, error.code, error.message);
-        if (error.code === 'auth/invalid-credential' || error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
+        // A failed login attempt is an expected user error, not a system error.
+        // We log it for debugging but don't use console.error to avoid scary overlays in dev.
+        console.log(`[AuthContext] signIn error code:`, error.code);
+        if (error.code === 'auth/invalid-credential') {
             throw new Error('El correo electrónico o la contraseña son incorrectos.');
         }
+        // Re-throw other unexpected errors
         throw error;
     }
   };
