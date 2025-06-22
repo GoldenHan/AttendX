@@ -148,10 +148,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     console.log(`[AuthContext] Attempting sign in for identifier: ${identifier}`);
     try {
         // The identifier must be an email address to proceed for unauthenticated users.
-        // This is a security measure to avoid querying the database before login.
         if (!identifier.includes('@')) {
             console.error(`[AuthContext] Login attempt with a non-email identifier ("${identifier}"). Login with email is required.`);
-            // Throw a user-friendly error that the login page can display.
             throw new Error('Please use your email address to log in. Usernames are not supported for login.');
         }
 
@@ -162,11 +160,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     } catch (error: any) {
         console.error(`[AuthContext] signIn error:`, error.code, error.message);
         setLoading(false);
-        // Provide a more generic but user-friendly message for common auth errors.
         if (error.code === 'auth/invalid-credential' || error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
             throw new Error('El correo electrónico o la contraseña son incorrectos.');
         }
-        // Re-throw other errors (like my custom one) or unexpected Firebase errors.
         throw error;
     }
   };
@@ -184,39 +180,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setLoading(true);
     let firebaseUser: FirebaseUser | null = null;
     try {
-      let effectiveInstitutionId = creatorContext?.institutionId;
-      
-      // For existing institutions, check for conflicts before creating the auth user.
-      if (effectiveInstitutionId) {
-        const usernameQuery = query(collection(db, 'users'),
-          where('username', '==', username.trim()),
-          where('institutionId', '==', effectiveInstitutionId),
-          limit(1)
-        );
-        const usernameSnapshot = await getDocs(usernameQuery);
-        if (!usernameSnapshot.empty) {
-            const error = new Error(`Username "${username.trim()}" already exists in this institution.`);
-            (error as any).code = "auth/username-already-exists";
-            throw error;
-        }
-        const emailQueryFirestore = query(collection(db, 'users'),
-            where('email', '==', email.trim()),
-            where('institutionId', '==', effectiveInstitutionId),
-            limit(1)
-        );
-        const emailSnapshotFirestore = await getDocs(emailQueryFirestore);
-        if (!emailSnapshotFirestore.empty) {
-            const error = new Error(`Email "${email.trim()}" is already registered to a user in this institution's records.`);
-            (error as any).code = "auth/email-already-linked-to-institution"; 
-            throw error;
-        }
-      }
-      
-      // Create the user in Firebase Auth FIRST.
+      // Step 1: Create the user in Firebase Auth. This handles global email uniqueness.
       const userCredential = await createUserWithEmailAndPassword(auth, email, initialPasswordAsUsername);
       firebaseUser = userCredential.user;
+      console.log(`[AuthContext] Step 1 complete: Firebase Auth user created for email ${email}`);
 
-      // If it's a new admin for a new institution, perform checks and writes AFTER auth user is created.
+      let effectiveInstitutionId = creatorContext?.institutionId;
+
+      // Step 2: If it's a new admin for a new institution, create the institution document.
       if (role === 'admin' && institutionName && !creatorContext?.institutionId) {
         const instNameQuery = query(collection(db, 'institutions'), where('name', '==', institutionName.trim()), limit(1));
         const instNameSnapshot = await getDocs(instNameQuery);
@@ -240,6 +211,21 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         throw new Error("Institution ID could not be determined. User creation has been rolled back.");
       }
 
+      // Step 3: Now that the user is authenticated and institution is known, check for institution-specific conflicts.
+      const usernameQuery = query(collection(db, 'users'),
+        where('username', '==', username.trim()),
+        where('institutionId', '==', effectiveInstitutionId),
+        limit(1)
+      );
+      const usernameSnapshot = await getDocs(usernameQuery);
+      if (!usernameSnapshot.empty) {
+          const error = new Error(`Username "${username.trim()}" already exists in this institution.`);
+          (error as any).code = "auth/username-already-exists";
+          throw error;
+      }
+      console.log(`[AuthContext] Step 2 complete: Username "${username}" is available in institution ${effectiveInstitutionId}.`);
+
+      // Step 4: If no conflicts, create the user document in Firestore.
       const currentGradingConfigForNewUser = await fetchGradingConfigForInstitution(effectiveInstitutionId);
 
       const newUserDocData: Omit<FirestoreUserType, 'id'> = {
@@ -267,17 +253,19 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       };
       
       await setDoc(doc(db, 'users', firebaseUser.uid), newUserDocData);
-      console.log(`[AuthContext] User document created in 'users' for UID: ${firebaseUser.uid} with Institution ID: ${newUserDocData.institutionId}`);
+      console.log(`[AuthContext] Step 3 complete: User document created in 'users' for UID: ${firebaseUser.uid} with Institution ID: ${newUserDocData.institutionId}`);
 
     } catch (error) {
+      // Rollback: If any step after auth user creation fails, delete the orphaned user.
       if (firebaseUser) {
-        // If user was created but subsequent Firestore operations failed, delete the orphaned auth user
+        console.warn(`[AuthContext] Rolling back Auth user creation for ${firebaseUser.email} due to an error.`);
         await firebaseUser.delete().catch(deleteError => {
-            console.error("[AuthContext] Failed to clean up orphaned Firebase Auth user:", deleteError);
+            console.error("[AuthContext] CRITICAL: Failed to clean up orphaned Firebase Auth user during rollback:", deleteError);
         });
+        console.log(`[AuthContext] Rollback complete.`);
       }
       setLoading(false);
-      throw error;
+      throw error; // Re-throw the original error to be handled by the UI
     }
   };
 
