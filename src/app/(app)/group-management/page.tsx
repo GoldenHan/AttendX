@@ -22,10 +22,11 @@ import {
   DialogTrigger,
   DialogClose,
 } from '@/components/ui/dialog';
-import { Loader2, PlusCircle, Users, Edit, Trash2, CalendarIcon, Search, UserCheck, UserCircle2, Building } from 'lucide-react';
+import { Loader2, PlusCircle, Users, Edit, Trash2, CalendarIcon, Search, UserCheck, UserCircle2, Building, ArrowRightLeft } from 'lucide-react';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
 import { db } from '@/lib/firebase';
-import { collection, addDoc, getDocs, doc, deleteDoc, updateDoc, query, where } from 'firebase/firestore';
+import { collection, addDoc, getDocs, doc, deleteDoc, updateDoc, query, where, writeBatch, arrayUnion, arrayRemove } from 'firebase/firestore';
 import type { Group, User, ClassScheduleConfiguration, Sede } from '@/types'; 
 import { DEFAULT_CLASS_SCHEDULE_CONFIG } from '@/types'; 
 import { useForm, Controller } from 'react-hook-form';
@@ -72,9 +73,11 @@ export default function GroupManagementPage() {
   const [isGroupFormDialogOpen, setIsGroupFormDialogOpen] = useState(false);
   const [editingGroup, setEditingGroup] = useState<Group | null>(null);
   
-  const [isViewStudentsDialogOpen, setIsViewStudentsDialogOpen] = useState(false);
-  const [selectedGroupForStudentViewing, setSelectedGroupForStudentViewing] = useState<Group | null>(null);
-  const [studentSearchTerm, setStudentSearchTerm] = useState('');
+  const [isManageStudentsDialogOpen, setIsManageStudentsDialogOpen] = useState(false);
+  const [selectedGroupForManagement, setSelectedGroupForManagement] = useState<Group | null>(null);
+  const [studentsToAssign, setStudentsToAssign] = useState<string[]>([]);
+  const [studentsToRemove, setStudentsToRemove] = useState<string[]>([]);
+
 
   const { toast } = useToast();
   const { firestoreUser } = useAuth();
@@ -105,7 +108,7 @@ export default function GroupManagementPage() {
       const teachersQuery = query(collection(db, 'users'), where('role', 'in', ['teacher', 'admin']), where('institutionId', '==', institutionId));
       const studentsQuery = query(collection(db, 'users'), where('role', '==', 'student'), where('institutionId', '==', institutionId));
       const sedesQuery = query(collection(db, 'sedes'), where('institutionId', '==', institutionId));
-      const scheduleConfigPromise = getDoc(doc(db, 'appConfiguration', 'currentClassScheduleConfig')); // Assuming global for now
+      const scheduleConfigPromise = getDoc(doc(db, 'institutionScheduleConfigs', institutionId)); 
 
       const [groupsSnapshot, teachersSnapshot, studentsSnapshot, sedesSnapshot, scheduleConfigSnap] = await Promise.all([
         getDocs(groupsQuery),
@@ -162,24 +165,21 @@ export default function GroupManagementPage() {
   const availableTeachersForAssignment = useMemo(() => {
     if (!firestoreUser || !allTeachers.length) return [];
     if (firestoreUser.role === 'admin') {
-      // Admin can assign any teacher from their institution.
-      // Could be further filtered if a Sede is selected for the group.
       const currentSedeId = form.getValues('sedeId');
       if (currentSedeId && currentSedeId !== NO_SEDE_ASSIGNED_VALUE) {
-        return allTeachers.filter(t => t.sedeId === currentSedeId || !t.sedeId); // Teachers in Sede or unassigned
+        return allTeachers.filter(t => t.sedeId === currentSedeId || !t.sedeId); 
       }
       return allTeachers;
     }
     if (firestoreUser.role === 'supervisor' && firestoreUser.sedeId) {
-      // Supervisor can assign teachers from their Sede.
       return allTeachers.filter(t => t.sedeId === firestoreUser.sedeId);
     }
-    return []; // Teachers cannot assign other teachers.
+    return [];
   }, [allTeachers, firestoreUser, form.watch('sedeId')]);
 
   const availableSedesForGroupAssignment = useMemo(() => {
     if (!firestoreUser || firestoreUser.role !== 'admin' || !allSedes.length) return [];
-    return allSedes; // Admins see all Sedes of their institution.
+    return allSedes; 
   }, [allSedes, firestoreUser]);
 
 
@@ -206,7 +206,7 @@ export default function GroupManagementPage() {
         toast({ title: "Sede Required", description: "Supervisors must be assigned to a Sede to manage groups.", variant: "destructive" });
         return;
       }
-      sedeIdToSave = firestoreUser.sedeId; // Force supervisor's Sede
+      sedeIdToSave = firestoreUser.sedeId; 
     }
 
     setIsSubmitting(true);
@@ -244,7 +244,7 @@ export default function GroupManagementPage() {
       });
       setEditingGroup(null);
       setIsGroupFormDialogOpen(false);
-      await fetchInitialData(); // Refresh data
+      await fetchInitialData(); 
     } catch (error) {
       console.error("Error saving group:", error);
       toast({ title: editingGroup ? 'Update Group Failed' : 'Create Group Failed', description: 'Could not save the group.', variant: 'destructive' });
@@ -287,7 +287,7 @@ export default function GroupManagementPage() {
         startDate: new Date(), 
         endDate: undefined, 
         teacherId: '',
-        sedeId: firestoreUser?.role === 'supervisor' ? (firestoreUser.sedeId || '') : '', // Pre-fill Sede for supervisor
+        sedeId: firestoreUser?.role === 'supervisor' ? (firestoreUser.sedeId || '') : '', 
     });
     setIsGroupFormDialogOpen(true);
   };
@@ -308,31 +308,86 @@ export default function GroupManagementPage() {
     try {
       await deleteDoc(doc(db, 'groups', groupId));
       toast({ title: 'Group Deleted', description: `Group "${groupName}" removed successfully.` });
-      await fetchInitialData(); // Refresh
+      await fetchInitialData();
     } catch (error)      {
       console.error("Error deleting group:", error);
       toast({ title: 'Delete Failed', description: 'Could not delete the group.', variant: 'destructive' });
     }
   };
-  
-  const openViewStudentsDialog = (group: Group) => {
-    setSelectedGroupForStudentViewing(group);
-    setStudentSearchTerm('');
-    setIsViewStudentsDialogOpen(true);
+
+  const openManageStudentsDialog = (group: Group) => {
+    if (firestoreUser?.role === 'teacher' && group.teacherId !== firestoreUser.id) {
+        toast({ title: 'Permission Denied', description: 'You can only manage students for your own groups.', variant: 'destructive' });
+        return;
+    }
+    if (firestoreUser?.role === 'supervisor' && group.sedeId !== firestoreUser.sedeId) {
+        toast({ title: 'Permission Denied', description: 'You can only manage students for groups in your Sede.', variant: 'destructive' });
+        return;
+    }
+    setSelectedGroupForManagement(group);
+    setStudentsToAssign([]);
+    setStudentsToRemove([]);
+    setIsManageStudentsDialogOpen(true);
   };
 
-  const studentsInSelectedGroup = useMemo(() => {
-    if (!selectedGroupForStudentViewing || !Array.isArray(selectedGroupForStudentViewing.studentIds)) return [];
-    return allStudents.filter(student => selectedGroupForStudentViewing.studentIds.includes(student.id));
-  }, [allStudents, selectedGroupForStudentViewing]);
+  const { studentsInCurrentGroup, availableStudents } = useMemo(() => {
+    if (!selectedGroupForManagement) return { studentsInCurrentGroup: [], availableStudents: [] };
 
-  const filteredStudentsForDialog = useMemo(() => {
-    if (!studentSearchTerm.trim()) return studentsInSelectedGroup;
-    return studentsInSelectedGroup.filter(student =>
-      student.name.toLowerCase().includes(studentSearchTerm.toLowerCase()) ||
-      (student.preferredShift && student.preferredShift.toLowerCase().includes(studentSearchTerm.toLowerCase()))
-    );
-  }, [studentsInSelectedGroup, studentSearchTerm]);
+    const studentIdsInAnyGroup = new Set(allGroups.flatMap(g => g.studentIds));
+    const studentsInGroup = allStudents.filter(s => selectedGroupForManagement.studentIds.includes(s.id));
+    
+    let potentialAvailable = allStudents.filter(s => !studentIdsInAnyGroup.has(s.id));
+    if (firestoreUser?.role === 'supervisor' && firestoreUser.sedeId) {
+        potentialAvailable = potentialAvailable.filter(s => s.sedeId === firestoreUser.sedeId || !s.sedeId);
+    }
+    
+    return { studentsInCurrentGroup: studentsInGroup, availableStudents: potentialAvailable };
+  }, [selectedGroupForManagement, allStudents, allGroups, firestoreUser]);
+
+  const handleUpdateGroupMembers = async () => {
+    if (!selectedGroupForManagement || !firestoreUser?.institutionId) return;
+    if (studentsToAssign.length === 0 && studentsToRemove.length === 0) {
+      toast({ title: 'No Changes', description: 'No students were selected to be added or removed.' });
+      return;
+    }
+    setIsSubmitting(true);
+    try {
+        const groupRef = doc(db, 'groups', selectedGroupForManagement.id);
+        const batch = writeBatch(db);
+
+        if (studentsToRemove.length > 0) {
+            batch.update(groupRef, { studentIds: arrayRemove(...studentsToRemove) });
+        }
+        if (studentsToAssign.length > 0) {
+            batch.update(groupRef, { studentIds: arrayUnion(...studentsToAssign) });
+            // If group has a Sede, assign that Sede to the new students
+            if (selectedGroupForManagement.sedeId) {
+                studentsToAssign.forEach(studentId => {
+                    const studentRef = doc(db, 'users', studentId);
+                    batch.update(studentRef, { sedeId: selectedGroupForManagement.sedeId });
+                });
+            }
+        }
+        
+        await batch.commit();
+        toast({ title: 'Group Updated', description: 'Student membership has been updated successfully.' });
+        
+        await fetchInitialData();
+        
+        // After fetching, find the updated group to keep the dialog fresh
+        const updatedGroup = allGroups.find(g => g.id === selectedGroupForManagement.id) || selectedGroupForManagement;
+        const newStudentIds = updatedGroup.studentIds.concat(studentsToAssign).filter(id => !studentsToRemove.includes(id));
+        setSelectedGroupForManagement({...updatedGroup, studentIds: newStudentIds});
+
+    } catch (error) {
+        console.error("Error updating group members:", error);
+        toast({ title: 'Update Failed', description: 'Could not update student membership.', variant: 'destructive' });
+    } finally {
+        setIsSubmitting(false);
+        setIsManageStudentsDialogOpen(false);
+    }
+  };
+
 
   const formatDateDisplay = (dateInput?: Date | string | null) => {
     if (!dateInput) return 'N/A';
@@ -393,7 +448,7 @@ export default function GroupManagementPage() {
             <CardTitle className="flex items-center gap-2"><Users className="h-6 w-6 text-primary" /> Group Management</CardTitle>
             <CardDescription>
               {canManageGroupsOverall 
-                ? "Create and manage student groups, assign teachers and sedes." 
+                ? "Create, manage groups, assign teachers and sedes, and add/remove students in bulk." 
                 : "View groups you are assigned to and their student enrollments."}
             </CardDescription>
           </div>
@@ -503,7 +558,7 @@ export default function GroupManagementPage() {
                     <TableCell>{getTeacherName(group.teacherId)}</TableCell>
                     <TableCell>{getValidatedStudentCount(group.id)}</TableCell>
                     <TableCell className="space-x-1">
-                      <Button variant="outline" size="sm" onClick={() => openViewStudentsDialog(group)} className="text-xs"><UserCheck className="mr-1 h-3.5 w-3.5" /> View Students</Button>
+                      <Button variant="outline" size="sm" onClick={() => openManageStudentsDialog(group)} className="text-xs"><ArrowRightLeft className="mr-1 h-3.5 w-3.5" /> Manage Students</Button>
                       {canManageGroupsOverall && (
                         <>
                           <Button variant="ghost" size="icon" onClick={() => openEditGroupDialog(group)} disabled={firestoreUser?.role === 'supervisor' && group.sedeId !== firestoreUser.sedeId}><Edit className="h-4 w-4" /><span className="sr-only">Edit Group</span></Button>
@@ -519,19 +574,65 @@ export default function GroupManagementPage() {
         </CardContent>
       </Card>
 
-      <Dialog open={isViewStudentsDialogOpen} onOpenChange={(isOpen) => { setIsViewStudentsDialogOpen(isOpen); if (!isOpen) { setSelectedGroupForStudentViewing(null); setStudentSearchTerm('');}}}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader><DialogTitle>Students in: {selectedGroupForStudentViewing?.name}</DialogTitle></DialogHeader>
-          <div className="py-2"><div className="relative"><Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" /><Input type="search" placeholder="Search student by name or shift..." value={studentSearchTerm} onChange={(e) => setStudentSearchTerm(e.target.value)} className="pl-8 w-full"/></div></div>
-          {isLoadingData && (!filteredStudentsForDialog || filteredStudentsForDialog.length === 0) && selectedGroupForStudentViewing ? ( 
-            <div className="flex items-center justify-center py-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /><p className="ml-2">Loading student data...</p></div>
-          ) : (
-            <div className="py-2 space-y-1 max-h-60 overflow-y-auto">
-              {filteredStudentsForDialog.length === 0 && (<p className="text-sm text-muted-foreground text-center py-4">{studentSearchTerm ? 'No students match your search in this group.' : (studentsInSelectedGroup.length === 0 ? 'This group currently has no students assigned.' : 'No students found.')}</p>)}
-              {filteredStudentsForDialog.map(student => (<div key={student.id} className="flex items-center space-x-2 p-2 hover:bg-muted/50 rounded-md"><UserCircle2 className="h-5 w-5 text-muted-foreground" /><span className="font-normal flex-1">{student.name} ({student.preferredShift || 'No shift'})</span></div>))}
+     <Dialog open={isManageStudentsDialogOpen} onOpenChange={(isOpen) => { setIsManageStudentsDialogOpen(isOpen); if (!isOpen) setSelectedGroupForManagement(null); }}>
+        <DialogContent className="sm:max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>Manage Students for: {selectedGroupForManagement?.name}</DialogTitle>
+            <DialogPrimitiveDescription>Add or remove students from this group. Only unassigned students can be added.</DialogPrimitiveDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-6 py-4">
+            <div className="space-y-2">
+              <h3 className="font-semibold">Students in Group ({studentsInCurrentGroup.length})</h3>
+              <div className="h-64 overflow-y-auto rounded-md border p-2">
+                {studentsInCurrentGroup.length > 0 ? (
+                  studentsInCurrentGroup.map(student => (
+                    <div key={student.id} className="flex items-center space-x-2 p-1">
+                      <Checkbox
+                        id={`remove-${student.id}`}
+                        onCheckedChange={(checked) => {
+                          setStudentsToRemove(prev => checked ? [...prev, student.id] : prev.filter(id => id !== student.id));
+                        }}
+                      />
+                      <label htmlFor={`remove-${student.id}`} className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+                        {student.name}
+                      </label>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-sm text-muted-foreground text-center p-4">No students in this group.</p>
+                )}
+              </div>
             </div>
-          )}
-          <DialogFooter className="pt-4"><DialogClose asChild><Button type="button" variant="outline">Close</Button></DialogClose></DialogFooter>
+            <div className="space-y-2">
+              <h3 className="font-semibold">Available Students ({availableStudents.length})</h3>
+              <div className="h-64 overflow-y-auto rounded-md border p-2">
+                {availableStudents.length > 0 ? (
+                  availableStudents.map(student => (
+                    <div key={student.id} className="flex items-center space-x-2 p-1">
+                      <Checkbox
+                        id={`add-${student.id}`}
+                        onCheckedChange={(checked) => {
+                          setStudentsToAssign(prev => checked ? [...prev, student.id] : prev.filter(id => id !== student.id));
+                        }}
+                      />
+                      <label htmlFor={`add-${student.id}`} className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+                        {student.name}
+                      </label>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-sm text-muted-foreground text-center p-4">No unassigned students available.</p>
+                )}
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <DialogClose asChild><Button type="button" variant="outline">Cancel</Button></DialogClose>
+            <Button onClick={handleUpdateGroupMembers} disabled={isSubmitting || (studentsToAssign.length === 0 && studentsToRemove.length === 0)}>
+                {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Save Changes
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </>
@@ -540,6 +641,3 @@ export default function GroupManagementPage() {
     
 
     
-
-    
-
