@@ -22,20 +22,11 @@ export default function RootPage() {
     }
   }, [authUser, firestoreUser, loading, router]);
 
-  if (loading) {
-    return (
-      <div className="flex h-screen w-screen items-center justify-center bg-background">
-        <Loader2 className="h-12 w-12 animate-spin text-primary" />
-        <p className="ml-2">Loading application...</p>
-      </div>
-    );
-  }
-
-  // Fallback content, though redirection should happen quickly.
-  // This ensures a valid React component is always returned.
+  // This component will show a loading spinner until the redirection logic in the useEffect completes.
   return (
     <div className="flex h-screen w-screen items-center justify-center bg-background">
-        <p>Redirecting...</p>
+      <Loader2 className="h-12 w-12 animate-spin text-primary" />
+      <p className="ml-2">Loading application...</p>
     </div>
   );
 }

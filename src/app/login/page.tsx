@@ -61,7 +61,7 @@ type ForgotPasswordFormValues = z.infer<typeof forgotPasswordSchema>;
 
 export default function AuthPage() {
   const [isSignUpActive, setIsSignUpActive] = useState(false);
-  const { signIn, signUp, loading: authLoading, authUser, firestoreUser } = useAuth();
+  const { signIn, signUp, loading: authLoading } = useAuth();
   const { toast } = useToast();
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -82,19 +82,6 @@ export default function AuthPage() {
     defaultValues: { email: '' },
   });
   
-  useEffect(() => {
-    // This effect handles redirection for users who are already logged in
-    // or have just successfully logged in.
-    if (!authLoading && authUser) {
-      if (firestoreUser?.requiresPasswordChange) {
-        router.replace('/force-password-change');
-      } else {
-        router.replace('/dashboard');
-      }
-    }
-  }, [authLoading, authUser, firestoreUser, router]);
-
-
   const currentLoadingState = authLoading || isSubmitting;
 
    useEffect(() => {
@@ -106,7 +93,7 @@ export default function AuthPage() {
     try {
       await signIn(data.identifier, data.password);
       toast({ title: 'Ingreso Exitoso', description: '¡Bienvenido/a de nuevo!' });
-      // Redirection will be handled by the useEffect hook watching auth state
+      router.replace('/'); // Redirect to the root gatekeeper page
     } catch (error: any) {
       console.error("Login page error:", error);
       toast({ title: 'Fallo de Ingreso', description: error.message, variant: 'destructive' });
