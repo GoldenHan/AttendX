@@ -221,6 +221,7 @@ export interface EnrichedSubmission extends ClassroomItemSubmission {
   studentPhotoUrl?: string | null;
 }
 
+
 // New type for Payments
 export interface Payment {
   id: string;

@@ -466,7 +466,7 @@ export default function ClassroomAssignmentsPage() {
 
         for (const chunk of chunks) {
             if (chunk.length > 0) {
-                const usersQuery = query(collection(db, 'users'), where('id', 'in', chunk));
+                const usersQuery = query(collection(db, 'users'), where('__name__', 'in', chunk));
                 const usersSnapshot = await getDocs(usersQuery);
                 usersSnapshot.forEach(userDoc => usersMap.set(userDoc.id, { id: userDoc.id, ...userDoc.data() } as User));
             }

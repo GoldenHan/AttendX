@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter }
 import { Loader2, ClipboardList, Info, CheckCircle, AlertCircle, Award, Paperclip } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { db, storage } from '@/lib/firebase';
-import { collection, getDocs, query, where, Timestamp, addDoc } from 'firebase/firestore';
+import { collection, getDocs, query, where, Timestamp, addDoc, updateDoc, doc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import type { Group, ClassroomItem as ClassroomItemType, ClassroomItemSubmission, Attachment } from '@/types';
 import { useAuth } from '@/contexts/AuthContext';
@@ -122,7 +122,7 @@ export default function StudentMyTasksPage() {
     }
   }, [authLoading, firestoreUser, fetchStudentDataAndSubmissions]);
 
-  const handleMarkAsComplete = async (item: DisplayableClassroomItem) => {
+  const handleSubmitAssignment = async (item: DisplayableClassroomItem) => {
     if (!firestoreUser || item.submission || item.isSubmitting) return;
 
     setClassroomItems(prevItems => prevItems.map(i => i.id === item.id ? { ...i, isSubmitting: true } : i));
@@ -160,7 +160,7 @@ export default function StudentMyTasksPage() {
         uploadedAttachments = await Promise.all(attachmentPromises);
         
         // Update the submission document with the attachment details
-        await db.collection('classroomItemSubmissions').doc(submissionDocRef.id).update({
+        await updateDoc(doc(db, 'classroomItemSubmissions', submissionDocRef.id), {
           attachments: uploadedAttachments,
         });
       }
@@ -328,7 +328,7 @@ export default function StudentMyTasksPage() {
                           <Button 
                             size="sm" 
                             variant="outline" 
-                            onClick={() => handleMarkAsComplete(item)}
+                            onClick={() => handleSubmitAssignment(item)}
                             disabled={item.isSubmitting || !!item.submission}
                             className="w-full sm:w-auto"
                           >
