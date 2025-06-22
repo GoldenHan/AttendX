@@ -31,6 +31,7 @@ import {
   DialogTrigger,
   DialogClose,
 } from "@/components/ui/dialog";
+import { useRouter } from 'next/navigation';
 
 const loginFormSchema = z.object({
   identifier: z.string().email({ message: "Por favor, ingresa un correo electrónico válido." }),
@@ -60,8 +61,9 @@ type ForgotPasswordFormValues = z.infer<typeof forgotPasswordSchema>;
 
 export default function AuthPage() {
   const [isSignUpActive, setIsSignUpActive] = useState(false);
-  const { signIn, signUp, loading: authLoading } = useAuth();
+  const { signIn, signUp, loading: authLoading, authUser, firestoreUser } = useAuth();
   const { toast } = useToast();
+  const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isForgotPasswordDialogOpen, setIsForgotPasswordDialogOpen] = useState(false);
 
@@ -79,6 +81,19 @@ export default function AuthPage() {
     resolver: zodResolver(forgotPasswordSchema),
     defaultValues: { email: '' },
   });
+  
+  useEffect(() => {
+    // This effect handles redirection for users who are already logged in
+    // or have just successfully logged in.
+    if (!authLoading && authUser) {
+      if (firestoreUser?.requiresPasswordChange) {
+        router.replace('/force-password-change');
+      } else {
+        router.replace('/dashboard');
+      }
+    }
+  }, [authLoading, authUser, firestoreUser, router]);
+
 
   const currentLoadingState = authLoading || isSubmitting;
 
@@ -91,8 +106,8 @@ export default function AuthPage() {
     try {
       await signIn(data.identifier, data.password);
       toast({ title: 'Ingreso Exitoso', description: '¡Bienvenido/a de nuevo!' });
+      // Redirection will be handled by the useEffect hook watching auth state
     } catch (error: any) {
-      // The signIn function now throws user-friendly error messages.
       console.error("Login page error:", error);
       toast({ title: 'Fallo de Ingreso', description: error.message, variant: 'destructive' });
     } finally {

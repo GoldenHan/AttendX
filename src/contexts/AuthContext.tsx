@@ -141,25 +141,18 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     });
 
     return () => unsubscribe();
-  }, [fetchGradingConfigForInstitution, fetchScheduleConfigForInstitution]); // Added fetchScheduleConfigForInstitution
+  }, [fetchGradingConfigForInstitution, fetchScheduleConfigForInstitution]);
 
   const signIn = async (identifier: string, pass: string) => {
-    setLoading(true);
     console.log(`[AuthContext] Attempting sign in for identifier: ${identifier}`);
     try {
-        // The identifier must be an email address to proceed for unauthenticated users.
         if (!identifier.includes('@')) {
-            console.error(`[AuthContext] Login attempt with a non-email identifier ("${identifier}"). Login with email is required.`);
             throw new Error('Please use your email address to log in. Usernames are not supported for login.');
         }
-
-        console.log(`[AuthContext] Identifier is an email. Proceeding with Firebase Auth.`);
         await signInWithEmailAndPassword(auth, identifier, pass);
         console.log(`[AuthContext] Firebase Auth successful for email: ${identifier}`);
-
     } catch (error: any) {
         console.error(`[AuthContext] signIn error:`, error.code, error.message);
-        setLoading(false);
         if (error.code === 'auth/invalid-credential' || error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
             throw new Error('El correo electrónico o la contraseña son incorrectos.');
         }
@@ -314,21 +307,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       throw error;
     }
   };
-
-  useEffect(() => {
-    if (!loading) {
-      const isAuthPage = pathname === '/login' || pathname === '/signup';
-      const isForcePasswordChangePage = pathname === '/force-password-change';
-
-      if (authUser && firestoreUser?.requiresPasswordChange && !isForcePasswordChangePage) {
-        router.push('/force-password-change');
-      } else if (authUser && !firestoreUser?.requiresPasswordChange && (isAuthPage || isForcePasswordChangePage)) {
-        router.push('/dashboard');
-      } else if (!authUser && !isAuthPage && !isForcePasswordChangePage) {
-        router.push('/login');
-      }
-    }
-  }, [authUser, firestoreUser, loading, pathname, router]);
 
   return (
     <AuthContext.Provider value={{
