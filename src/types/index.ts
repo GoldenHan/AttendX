@@ -174,6 +174,17 @@ export const getDefaultStudentGradeStructure = (config: GradingConfiguration): S
   return structure;
 };
 
+// New type for Notifications
+export interface Notification {
+  id: string;
+  userId: string;
+  institutionId: string;
+  message: string;
+  read: boolean;
+  createdAt: string; // ISO string
+  relatedUrl?: string; // e.g., /classroom/assignments?itemId=...
+}
+
 // New type for Classroom items
 export interface ClassroomItem {
   id: string;

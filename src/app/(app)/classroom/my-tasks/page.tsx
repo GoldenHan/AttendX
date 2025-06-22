@@ -175,6 +175,20 @@ export default function StudentMyTasksPage() {
       toast({ title: 'Success', description: `"${item.title}" submitted successfully.` });
       setFilesToSubmit(prev => ({...prev, [item.id]: null}));
 
+      const itemOwnerId = item.teacherId; // The user who created the item
+      if (itemOwnerId) {
+          const message = `${firestoreUser.name} has submitted the assignment "${item.title}".`;
+          const newNotification = {
+              userId: itemOwnerId,
+              institutionId: firestoreUser.institutionId,
+              message: message,
+              read: false,
+              createdAt: new Date().toISOString(),
+              relatedUrl: `/classroom/assignments`,
+          };
+          await addDoc(collection(db, 'notifications'), newNotification);
+      }
+
     } catch (error) {
       console.error('Error submitting item:', error);
       toast({ title: 'Error', description: 'Could not submit item.', variant: 'destructive' });

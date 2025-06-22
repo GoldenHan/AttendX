@@ -352,6 +352,25 @@ export default function ClassroomAssignmentsPage() {
           await updateDoc(docRef, { attachments });
         }
         
+        if (data.status === 'published') {
+            const group = manageableGroups.find(g => g.id === data.groupId);
+            if (group && group.studentIds.length > 0) {
+                const notificationPromises = group.studentIds.map(studentId => {
+                    const message = `A new ${data.itemType} "${data.title}" has been posted in your group: ${group.name}.`;
+                    const newNotification = {
+                        userId: studentId,
+                        institutionId: firestoreUser.institutionId,
+                        message: message,
+                        read: false,
+                        createdAt: new Date().toISOString(),
+                        relatedUrl: '/classroom/my-tasks',
+                    };
+                    return addDoc(collection(db, 'notifications'), newNotification);
+                });
+                await Promise.all(notificationPromises);
+            }
+        }
+        
         toast({ title: 'Success', description: `${data.itemType === 'assignment' ? 'Assignment' : 'Reminder'} "${data.title}" created.` });
       }
       fetchClassroomItemsForGroup(data.groupId); 
@@ -498,7 +517,7 @@ export default function ClassroomAssignmentsPage() {
   };
 
   const handleSaveGrades = async () => {
-    if (!selectedItemForSubmissions) return;
+    if (!selectedItemForSubmissions || !firestoreUser?.institutionId) return;
     setIsSavingGrades(true);
     const batch = writeBatch(db);
 
@@ -531,6 +550,30 @@ export default function ClassroomAssignmentsPage() {
     try {
         await batch.commit();
         toast({ title: "Success", description: "Grades and feedback have been saved." });
+
+        const notificationPromises: Promise<any>[] = [];
+        editableSubmissions.forEach(editableSub => {
+            const originalSub = submissions.find(s => s.id === editableSub.id);
+            if (!originalSub) return;
+            
+            const gradeChanged = editableSub.grade !== originalSub.grade && !(editableSub.grade == null && originalSub.grade == null);
+            const feedbackChanged = editableSub.feedback !== originalSub.feedback && !(editableSub.feedback == null && originalSub.feedback == null);
+        
+            if (gradeChanged || feedbackChanged) {
+                const message = `Your submission for "${selectedItemForSubmissions.title}" has been reviewed.`;
+                const newNotification = {
+                    userId: editableSub.studentId,
+                    institutionId: firestoreUser.institutionId,
+                    message: message,
+                    read: false,
+                    createdAt: new Date().toISOString(),
+                    relatedUrl: '/classroom/my-tasks',
+                };
+                notificationPromises.push(addDoc(collection(db, 'notifications'), newNotification));
+            }
+        });
+        await Promise.all(notificationPromises);
+
         // Refresh data in dialog
         setIsLoadingSubmissions(true);
         const newSubmissions = await fetchSubmissionsForItem(selectedItemForSubmissions.id);
