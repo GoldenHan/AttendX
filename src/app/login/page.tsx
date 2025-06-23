@@ -59,9 +59,20 @@ type LoginFormValues = z.infer<typeof loginFormSchema>;
 type NewAdminSignupFormValues = z.infer<typeof newAdminSignupFormSchema>;
 type ForgotPasswordFormValues = z.infer<typeof forgotPasswordSchema>;
 
+function GoogleIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg role="img" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" {...props}>
+      <path
+        d="M12.48 10.92v3.28h7.84c-.24 1.84-.85 3.18-1.73 4.1-1.02 1.02-2.3 1.62-3.99 1.62-3.33 0-6.03-2.71-6.03-6.03s2.7-6.03 6.03-6.03c1.9 0 3.13.79 3.84 1.48l2.84-2.78C18.44 2.14 15.47 1 12.48 1 7.02 1 3 5.02 3 10.48s4.02 9.48 9.48 9.48c2.82 0 5.12-1.07 6.84-2.73 1.79-1.7 2.6-4.15 2.6-6.74 0-.58-.05-1.15-.13-1.72H12.48z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
 export default function AuthPage() {
   const [isSignUpActive, setIsSignUpActive] = useState(false);
-  const { signIn, signUp, loading: authLoading } = useAuth();
+  const { signIn, signInWithGoogle, signUp, loading: authLoading } = useAuth();
   const { toast } = useToast();
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -93,10 +104,24 @@ export default function AuthPage() {
     try {
       await signIn(data.identifier, data.password);
       toast({ title: 'Ingreso Exitoso', description: '¡Bienvenido/a de nuevo!' });
-      router.replace('/'); // Redirect to the root gatekeeper page
+      router.replace('/'); 
     } catch (error: any) {
       console.error("Login page error:", error);
       toast({ title: 'Fallo de Ingreso', description: error.message, variant: 'destructive' });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleGoogleLogin = async () => {
+    setIsSubmitting(true);
+    try {
+      await signInWithGoogle();
+      toast({ title: 'Ingreso Exitoso', description: '¡Bienvenido/a de nuevo!' });
+      router.replace('/');
+    } catch (error: any) {
+      console.error("Google Login page error:", error);
+      toast({ title: 'Fallo de Ingreso con Google', description: error.message, variant: 'destructive' });
     } finally {
       setIsSubmitting(false);
     }
@@ -111,9 +136,9 @@ export default function AuthPage() {
         data.adminEmail,
         data.adminPassword,
         'admin',
-        undefined, // No studentDetails for admin
-        undefined, // No specific staffDetails for this initial admin signup
-        data.institutionName // Pass institutionName
+        undefined, 
+        undefined, 
+        data.institutionName 
       );
       toast({ title: 'Registro de Institución Exitoso', description: `Bienvenido/a, ${data.adminName}. Tu institución "${data.institutionName}" ha sido registrada. Serás redirigido/a para iniciar sesión.` });
       setIsSignUpActive(false);
@@ -282,7 +307,7 @@ export default function AuthPage() {
               onSubmit={loginForm.handleSubmit(handleLoginSubmit)}
               className="flex h-full flex-col items-center justify-center space-y-4 bg-card px-10 text-center text-card-foreground"
             >
-              <h1 className="text-3xl font-bold mb-6 text-primary">Iniciar Sesión</h1>
+              <h1 className="text-3xl font-bold mb-2 text-primary">Iniciar Sesión</h1>
                <FormField
                 control={loginForm.control}
                 name="identifier"
@@ -364,6 +389,22 @@ export default function AuthPage() {
               </div>
               <Button type="submit" variant="default" className="mt-4 rounded-full px-8 py-3 text-sm font-semibold uppercase tracking-wider" disabled={currentLoadingState}>
                 {currentLoadingState && !isSignUpActive ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Ingresar'}
+              </Button>
+              <div className="relative my-4 w-full">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t" />
+                </div>
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-card px-2 text-muted-foreground">O inicia sesión con</span>
+                </div>
+              </div>
+              <Button variant="outline" type="button" className="w-full" onClick={handleGoogleLogin} disabled={currentLoadingState}>
+                {currentLoadingState ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <GoogleIcon className="mr-2 h-4 w-4" />
+                )}
+                Google
               </Button>
             </form>
           </Form>

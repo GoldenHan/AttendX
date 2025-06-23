@@ -12,8 +12,10 @@ import {
   reauthenticateWithCredential,
   EmailAuthProvider,
   updatePassword as firebaseUpdatePassword,
+  GoogleAuthProvider,
+  signInWithPopup,
 } from 'firebase/auth';
-import { doc, getDoc, collection, query, where, getDocs, setDoc, limit, updateDoc, addDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, collection, query, where, getDocs, setDoc, limit, updateDoc, addDoc, serverTimestamp } from 'firestore';
 import type { User as FirestoreUserType, GradingConfiguration, ClassScheduleConfiguration, Sede, Institution, Group } from '@/types';
 import { DEFAULT_GRADING_CONFIG, DEFAULT_CLASS_SCHEDULE_CONFIG, getDefaultStudentGradeStructure } from '@/types';
 import { useRouter, usePathname } from 'next/navigation';
@@ -22,9 +24,10 @@ interface AuthContextType {
   authUser: FirebaseUser | null;
   firestoreUser: FirestoreUserType | null;
   gradingConfig: GradingConfiguration;
-  classScheduleConfig: ClassScheduleConfiguration; // Added
+  classScheduleConfig: ClassScheduleConfiguration; 
   loading: boolean;
   signIn: (identifier: string, pass: string) => Promise<void>;
+  signInWithGoogle: () => Promise<void>;
   signUp: (
     name: string,
     username: string,
@@ -40,7 +43,7 @@ interface AuthContextType {
   updateUserPassword: (currentPasswordFromUser: string, newPasswordFromUser: string) => Promise<void>;
   clearRequiresPasswordChangeFlag: () => Promise<void>;
   fetchGradingConfigForInstitution: (institutionId: string) => Promise<GradingConfiguration>;
-  fetchScheduleConfigForInstitution: (institutionId: string) => Promise<ClassScheduleConfiguration>; // Added
+  fetchScheduleConfigForInstitution: (institutionId: string) => Promise<ClassScheduleConfiguration>; 
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -50,7 +53,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [firestoreUser, setFirestoreUser] = useState<FirestoreUserType | null>(null);
   const [loading, setLoading] = useState(true);
   const [gradingConfig, setGradingConfig] = useState<GradingConfiguration>(DEFAULT_GRADING_CONFIG);
-  const [classScheduleConfig, setClassScheduleConfig] = useState<ClassScheduleConfiguration>(DEFAULT_CLASS_SCHEDULE_CONFIG); // Added
+  const [classScheduleConfig, setClassScheduleConfig] = useState<ClassScheduleConfiguration>(DEFAULT_CLASS_SCHEDULE_CONFIG); 
   const router = useRouter();
   const pathname = usePathname();
 
@@ -116,52 +119,81 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           if (userData.institutionId) {
             const specificGradingConfig = await fetchGradingConfigForInstitution(userData.institutionId);
             setGradingConfig(specificGradingConfig);
-            const specificScheduleConfig = await fetchScheduleConfigForInstitution(userData.institutionId); // Added
-            setClassScheduleConfig(specificScheduleConfig); // Added
+            const specificScheduleConfig = await fetchScheduleConfigForInstitution(userData.institutionId); 
+            setClassScheduleConfig(specificScheduleConfig); 
           } else {
             setGradingConfig(DEFAULT_GRADING_CONFIG);
-            setClassScheduleConfig(DEFAULT_CLASS_SCHEDULE_CONFIG); // Added
+            setClassScheduleConfig(DEFAULT_CLASS_SCHEDULE_CONFIG); 
           }
 
         } else {
-          console.warn(`[AuthContext] Firestore document not found in 'users' for authenticated user UID: ${user.uid}. Signing out.`);
-          await firebaseSignOut(auth); 
-          setAuthUser(null);
-          setFirestoreUser(null);
-          setGradingConfig(DEFAULT_GRADING_CONFIG);
-          setClassScheduleConfig(DEFAULT_CLASS_SCHEDULE_CONFIG); // Added
+          console.warn(`[AuthContext] Firestore document not found in 'users' for authenticated user UID: ${user.uid}. This may happen during a new sign-up flow. If not, it's an issue.`);
+          // During a Google sign-in for a new user, we might hit this case before the doc is created.
+          // The logic in signInWithGoogle should handle creating the doc.
+          // If a user is auth'd but has no doc, and it's not a new signup, sign them out.
+           if (pathname !== '/login') { // Avoid signout loop on login page
+                console.warn(`[AuthContext] Signing out user ${user.uid} due to missing Firestore record.`);
+                await firebaseSignOut(auth);
+                setAuthUser(null);
+                setFirestoreUser(null);
+            }
         }
       } else {
         setAuthUser(null);
         setFirestoreUser(null);
         setGradingConfig(DEFAULT_GRADING_CONFIG);
-        setClassScheduleConfig(DEFAULT_CLASS_SCHEDULE_CONFIG); // Added
+        setClassScheduleConfig(DEFAULT_CLASS_SCHEDULE_CONFIG); 
       }
       setLoading(false);
     });
 
     return () => unsubscribe();
-  }, [fetchGradingConfigForInstitution, fetchScheduleConfigForInstitution]);
+  }, [fetchGradingConfigForInstitution, fetchScheduleConfigForInstitution, pathname]);
 
   const signIn = async (identifier: string, pass: string) => {
     console.log(`[AuthContext] Attempting sign in for identifier: ${identifier}`);
     try {
         if (!identifier.includes('@')) {
-            throw new Error('Please use your email address to log in. Usernames are not supported for login.');
+            throw new Error('Por favor, usa tu correo electrónico para iniciar sesión. Los nombres de usuario no son compatibles para el inicio de sesión.');
         }
         await signInWithEmailAndPassword(auth, identifier, pass);
         console.log(`[AuthContext] Firebase Auth successful for email: ${identifier}`);
     } catch (error: any) {
-        // A failed login attempt is an expected user error, not a system error.
-        // We log it for debugging but don't use console.error to avoid scary overlays in dev.
         console.log(`[AuthContext] signIn error code:`, error.code);
-        if (error.code === 'auth/invalid-credential') {
+        if (error.code === 'auth/invalid-credential' || error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
             throw new Error('El correo electrónico o la contraseña son incorrectos.');
         }
-        // Re-throw other unexpected errors
         throw error;
     }
   };
+
+  const signInWithGoogle = async () => {
+    const provider = new GoogleAuthProvider();
+    try {
+      const result = await signInWithPopup(auth, provider);
+      const user = result.user;
+
+      // Check if user exists in our Firestore `users` collection
+      const usersRef = collection(db, 'users');
+      const q = query(usersRef, where("email", "==", user.email), limit(1));
+      const querySnapshot = await getDocs(q);
+
+      if (querySnapshot.empty) {
+        // If user does not exist in our database, they are not authorized.
+        // Sign them out from the temporary Firebase session and throw an error.
+        await firebaseSignOut(auth);
+        throw new Error("Tu cuenta de Google no está asociada con ningún usuario en el sistema. Contacta a un administrador.");
+      }
+      // If user exists, onAuthStateChanged will handle setting the user state and navigating.
+      console.log(`[AuthContext] Google sign-in successful for existing user: ${user.email}`);
+
+    } catch (error: any) {
+      console.error("Error during Google sign-in:", error);
+      // Let the UI handle displaying the error message
+      throw error;
+    }
+  };
+
 
   const signUp = async (
     name: string,
@@ -176,14 +208,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setLoading(true);
     let firebaseUser: FirebaseUser | null = null;
     try {
-      // Step 1: Create the user in Firebase Auth. This handles global email uniqueness.
       const userCredential = await createUserWithEmailAndPassword(auth, email, initialPasswordAsUsername);
       firebaseUser = userCredential.user;
       console.log(`[AuthContext] Step 1 complete: Firebase Auth user created for email ${email}`);
 
       let effectiveInstitutionId = creatorContext?.institutionId;
 
-      // Step 2: If it's a new admin for a new institution, create the institution document.
       if (role === 'admin' && institutionName && !creatorContext?.institutionId) {
         const instNameQuery = query(collection(db, 'institutions'), where('name', '==', institutionName.trim()), limit(1));
         const instNameSnapshot = await getDocs(instNameQuery);
@@ -207,7 +237,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         throw new Error("Institution ID could not be determined. User creation has been rolled back.");
       }
 
-      // Step 3: Now that the user is authenticated and institution is known, check for institution-specific conflicts.
       const usernameQuery = query(collection(db, 'users'),
         where('username', '==', username.trim()),
         where('institutionId', '==', effectiveInstitutionId),
@@ -221,7 +250,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       }
       console.log(`[AuthContext] Step 2 complete: Username "${username}" is available in institution ${effectiveInstitutionId}.`);
 
-      // Step 4: If no conflicts, create the user document in Firestore.
       const currentGradingConfigForNewUser = await fetchGradingConfigForInstitution(effectiveInstitutionId);
 
       const newUserDocData: Omit<FirestoreUserType, 'id'> = {
@@ -252,7 +280,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       console.log(`[AuthContext] Step 3 complete: User document created in 'users' for UID: ${firebaseUser.uid} with Institution ID: ${newUserDocData.institutionId}`);
 
     } catch (error) {
-      // Rollback: If any step after auth user creation fails, delete the orphaned user.
       if (firebaseUser) {
         console.warn(`[AuthContext] Rolling back Auth user creation for ${firebaseUser.email} due to an error.`);
         await firebaseUser.delete().catch(deleteError => {
@@ -260,9 +287,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         });
         console.log(`[AuthContext] Rollback complete.`);
       }
-      throw error; // Re-throw the original error to be handled by the UI
+      throw error; 
     } finally {
-      setLoading(false); // Ensure loading is always set to false
+      setLoading(false);
     }
   };
 
@@ -273,7 +300,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setAuthUser(null);
       setFirestoreUser(null);
       setGradingConfig(DEFAULT_GRADING_CONFIG);
-      setClassScheduleConfig(DEFAULT_CLASS_SCHEDULE_CONFIG); // Added
+      setClassScheduleConfig(DEFAULT_CLASS_SCHEDULE_CONFIG); 
       router.push('/login');
     } catch (error) {
       console.error('Sign out error', error);
@@ -317,16 +344,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       authUser,
       firestoreUser,
       gradingConfig,
-      classScheduleConfig, // Added
+      classScheduleConfig, 
       loading,
       signIn,
+      signInWithGoogle,
       signUp,
       signOut,
       reauthenticateCurrentUser,
       updateUserPassword,
       clearRequiresPasswordChangeFlag,
       fetchGradingConfigForInstitution,
-      fetchScheduleConfigForInstitution, // Added
+      fetchScheduleConfigForInstitution, 
     }}>
       {children}
     </AuthContext.Provider>
