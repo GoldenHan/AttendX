@@ -19,7 +19,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { useAuth } from '@/contexts/AuthContext';
 
-const DEFAULT_APP_NAME_SHELL = ""; // Changed from "AttendX"
+const DEFAULT_APP_NAME_SHELL = "AttendX";
 
 export function MainAppShell({ 
   children,
@@ -82,7 +82,7 @@ export function MainAppShell({
           <Button variant="ghost" className="w-full justify-start group-data-[collapsible=icon]:justify-center" onClick={handleLogout} disabled={authLoading}>
             {authLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin group-data-[collapsible=icon]:mr-0" />}
             {!authLoading && <LogOut className="mr-2 h-4 w-4 group-data-[collapsible=icon]:mr-0" />}
-            <span className="group-data-[collapsible=icon]:hidden">Logout</span>
+            <span className="group-data-[collapsible=icon]:hidden">Cerrar Sesión</span>
           </Button>
         </SidebarFooter>
       </Sidebar>
@@ -95,4 +95,3 @@ export function MainAppShell({
     </SidebarProvider>
   );
 }
-

@@ -291,15 +291,15 @@ export default function DashboardPage() {
   );
 
   const allQuickActions: QuickActionProps[] = [
-    { href: "/attendance-log", icon: ClipboardEdit, label: "Log Attendance", bgColorClass: "bg-blue-500", hoverBgColorClass: "hover:bg-blue-600", textColorClass: "text-white", roles: ['admin', 'teacher', 'caja', 'supervisor'] },
-    { href: "/attendance-records", icon: BookUser, label: "View Records", bgColorClass: "bg-green-500", hoverBgColorClass: "hover:bg-green-600", textColorClass: "text-white", roles: ['admin', 'teacher', 'caja', 'supervisor'] },
-    { href: "/student-management", icon: GraduationCap, label: "Students", bgColorClass: "bg-purple-500", hoverBgColorClass: "hover:bg-purple-600", textColorClass: "text-white", roles: ['admin', 'teacher', 'supervisor', 'caja'] },
-    { href: "/group-management", icon: FolderKanban, label: "Groups", bgColorClass: "bg-yellow-400", hoverBgColorClass: "hover:bg-yellow-500", textColorClass: "text-yellow-900", roles: ['admin', 'teacher', 'supervisor'] },
-    { href: "/grades-management", icon: ClipboardCheck, label: "Grades", bgColorClass: "bg-pink-500", hoverBgColorClass: "hover:bg-pink-600", textColorClass: "text-white", roles: ['admin', 'teacher', 'supervisor'] },
-    { href: "/reports", icon: BarChart3, label: "Reports", bgColorClass: "bg-teal-500", hoverBgColorClass: "hover:bg-teal-600", textColorClass: "text-white", roles: ['admin', 'teacher', 'caja', 'supervisor'] },
-    { href: "/student-grades", icon: ClipboardCheck, label: "My Grades", bgColorClass: "bg-blue-500", hoverBgColorClass: "hover:bg-blue-600", textColorClass: "text-white", roles: ['student'] },
-    { href: "/user-management", icon: Briefcase, label: "Staff", bgColorClass: "bg-indigo-500", hoverBgColorClass: "hover:bg-indigo-600", textColorClass: "text-white", roles: ['admin', 'supervisor'] },
-    { href: "/sede-management", icon: Building, label: "Sedes", bgColorClass: "bg-cyan-500", hoverBgColorClass: "hover:bg-cyan-600", textColorClass: "text-white", roles: ['admin'] },
+    { href: "/attendance-log", icon: ClipboardEdit, label: "Registrar Asistencia", bgColorClass: "bg-primary", hoverBgColorClass: "hover:bg-primary/90", textColorClass: "text-primary-foreground", roles: ['admin', 'teacher', 'caja', 'supervisor'] },
+    { href: "/attendance-records", icon: BookUser, label: "Ver Registros", bgColorClass: "bg-primary", hoverBgColorClass: "hover:bg-primary/90", textColorClass: "text-primary-foreground", roles: ['admin', 'teacher', 'caja', 'supervisor'] },
+    { href: "/student-management", icon: GraduationCap, label: "Estudiantes", bgColorClass: "bg-primary", hoverBgColorClass: "hover:bg-primary/90", textColorClass: "text-primary-foreground", roles: ['admin', 'teacher', 'supervisor', 'caja'] },
+    { href: "/group-management", icon: FolderKanban, label: "Grupos", bgColorClass: "bg-primary", hoverBgColorClass: "hover:bg-primary/90", textColorClass: "text-primary-foreground", roles: ['admin', 'teacher', 'supervisor'] },
+    { href: "/grades-management", icon: ClipboardCheck, label: "Calificaciones", bgColorClass: "bg-primary", hoverBgColorClass: "hover:bg-primary/90", textColorClass: "text-primary-foreground", roles: ['admin', 'teacher', 'supervisor'] },
+    { href: "/reports", icon: BarChart3, label: "Reportes", bgColorClass: "bg-primary", hoverBgColorClass: "hover:bg-primary/90", textColorClass: "text-primary-foreground", roles: ['admin', 'teacher', 'caja', 'supervisor'] },
+    { href: "/student-grades", icon: ClipboardCheck, label: "Mis Calificaciones", bgColorClass: "bg-primary", hoverBgColorClass: "hover:bg-primary/90", textColorClass: "text-primary-foreground", roles: ['student'] },
+    { href: "/user-management", icon: Briefcase, label: "Personal", bgColorClass: "bg-primary", hoverBgColorClass: "hover:bg-primary/90", textColorClass: "text-primary-foreground", roles: ['admin', 'supervisor'] },
+    { href: "/sede-management", icon: Building, label: "Sedes", bgColorClass: "bg-primary", hoverBgColorClass: "hover:bg-primary/90", textColorClass: "text-primary-foreground", roles: ['admin'] },
   ];
 
   const visibleQuickActions = useMemo(() => {
@@ -311,27 +311,27 @@ export default function DashboardPage() {
   
   const levelChartConfig = {
     value: {
-      label: "Students",
+      label: "Estudiantes",
       color: "hsl(var(--chart-1))",
     },
   } satisfies ChartConfig
 
   const groupChartConfig = {
     students: {
-      label: "Students",
+      label: "Estudiantes",
       color: "hsl(var(--chart-2))",
     },
   } satisfies ChartConfig
 
   return (
     <div className="flex flex-col gap-6">
-      <h1 className="text-3xl font-bold font-headline">Welcome to SERVEX</h1>
+      <h1 className="text-3xl font-bold font-headline">Bienvenido a AttendX</h1>
       {firestoreUser && (
         <p className="text-xs text-muted-foreground text-center bg-muted p-2 rounded-md">
-          Logged in as: {firestoreUser.email} (Role: {firestoreUser.role})
-          {firestoreUser.role === 'teacher' && teacherGroups.length > 0 && `, Managing ${teacherGroups.length} group(s)`}
-          {firestoreUser.role === 'supervisor' && supervisorSede && `, Supervising Sede: ${supervisorSede.name}`}
-          {firestoreUser.institutionId && ` (Institution ID: ${firestoreUser.institutionId.substring(0,6)}...)`}
+          Sesión iniciada como: {firestoreUser.email} (Rol: {firestoreUser.role})
+          {firestoreUser.role === 'teacher' && teacherGroups.length > 0 && `, gestionando ${teacherGroups.length} grupo(s)`}
+          {firestoreUser.role === 'supervisor' && supervisorSede && `, supervisando Sede: ${supervisorSede.name}`}
+          {firestoreUser.institutionId && ` (ID Institución: ${firestoreUser.institutionId.substring(0,6)}...)`}
         </p>
       )}
 
@@ -339,18 +339,18 @@ export default function DashboardPage() {
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         {firestoreUser?.role === 'admin' && (
           <>
-            {renderStatCard("Total Students", stats.students, Users, "Currently enrolled in your institution")}
-            {renderStatCard("Active Groups", stats.groups, FolderKanban, "Across all programs in your institution")}
-            {renderStatCard("Staff Members", stats.staff, Briefcase, "Total staff in your institution")}
+            {renderStatCard("Total de Estudiantes", stats.students, Users, "Actualmente inscritos en su institución")}
+            {renderStatCard("Grupos Activos", stats.groups, FolderKanban, "En todos los programas de su institución")}
+            {renderStatCard("Miembros del Personal", stats.staff, Briefcase, "Personal total en su institución")}
           </>
         )}
         {firestoreUser?.role === 'teacher' && (
           <>
-            {renderStatCard("My Students", stats.students, Users, "Across your assigned groups")}
-            {renderStatCard("My Groups", stats.groups, FolderKanban, "Currently assigned to you")}
+            {renderStatCard("Mis Estudiantes", stats.students, Users, "En todos sus grupos asignados")}
+            {renderStatCard("Mis Grupos", stats.groups, FolderKanban, "Actualmente asignados a usted")}
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Assignments to Grade</CardTitle>
+                <CardTitle className="text-sm font-medium">Tareas por Calificar</CardTitle>
                 <FilePenLine className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
@@ -363,11 +363,11 @@ export default function DashboardPage() {
                         </p>
                       ))}
                       <Button asChild variant="link" className="p-0 h-auto text-xs">
-                        <Link href="/classroom/assignments">View all...</Link>
+                        <Link href="/classroom/assignments">Ver todas...</Link>
                       </Button>
                     </div>
                   ) : (
-                    <p className="text-sm text-muted-foreground">No assignments pending review.</p>
+                    <p className="text-sm text-muted-foreground">No hay tareas pendientes de revisar.</p>
                   )
                 }
               </CardContent>
@@ -376,15 +376,15 @@ export default function DashboardPage() {
         )}
          {firestoreUser?.role === 'supervisor' && supervisorSede && (
           <>
-            {renderStatCard(`Teachers in ${supervisorSede.name}`, supervisorStats.teachers, Briefcase, "Staff in your Sede")}
-            {renderStatCard(`Students in ${supervisorSede.name}`, supervisorStats.students, Users, "Enrolled in your Sede")}
-            {renderStatCard(`Groups in ${supervisorSede.name}`, supervisorStats.groups, FolderKanban, "Active in your Sede")}
+            {renderStatCard(`Maestros en ${supervisorSede.name}`, supervisorStats.teachers, Briefcase, "Personal en su Sede")}
+            {renderStatCard(`Estudiantes en ${supervisorSede.name}`, supervisorStats.students, Users, "Inscritos en su Sede")}
+            {renderStatCard(`Grupos en ${supervisorSede.name}`, supervisorStats.groups, FolderKanban, "Activos en su Sede")}
           </>
         )}
          {firestoreUser?.role === 'student' && (
             <Card className="col-span-1 lg:col-span-3">
                 <CardHeader>
-                    <CardTitle className="flex items-center gap-2"><ListTodo className="h-5 w-5 text-primary"/>My Pending Tasks</CardTitle>
+                    <CardTitle className="flex items-center gap-2"><ListTodo className="h-5 w-5 text-primary"/>Mis Tareas Pendientes</CardTitle>
                 </CardHeader>
                 <CardContent>
                     {isLoading ? <Loader2 className="h-6 w-6 animate-spin" /> :
@@ -393,19 +393,19 @@ export default function DashboardPage() {
                             {pendingTasks.slice(0, 5).map(task => (
                                 <li key={task.id} className="text-sm flex justify-between items-center">
                                     <Link href="/classroom/my-tasks" className="hover:underline">{task.title}</Link>
-                                    {task.dueDate && <span className="text-xs text-muted-foreground">Due {formatDistanceToNow(parseISO(task.dueDate), { addSuffix: true })}</span>}
+                                    {task.dueDate && <span className="text-xs text-muted-foreground">Vence {formatDistanceToNow(parseISO(task.dueDate), { addSuffix: true })}</span>}
                                 </li>
                             ))}
                             {pendingTasks.length > 5 && (
                                 <li>
                                     <Button asChild variant="link" size="sm" className="p-0 h-auto">
-                                        <Link href="/classroom/my-tasks">...and {pendingTasks.length - 5} more</Link>
+                                        <Link href="/classroom/my-tasks">...y {pendingTasks.length - 5} más</Link>
                                     </Button>
                                 </li>
                             )}
                         </ul>
                      ) : (
-                        <p className="text-sm text-muted-foreground">You have no pending tasks. Great job!</p>
+                        <p className="text-sm text-muted-foreground">No tiene tareas pendientes. ¡Buen trabajo!</p>
                      )
                     }
                 </CardContent>
@@ -413,7 +413,7 @@ export default function DashboardPage() {
          )}
          {firestoreUser?.role === 'caja' && (
            <div className="grid gap-4 md:grid-cols-1 col-span-1 lg:col-span-3">
-              {renderStatCard("System Access", "Ready", Sheet, "Caja functions enabled")}
+              {renderStatCard("Acceso al Sistema", "Listo", Sheet, "Funciones de Caja activadas")}
            </div>
         )}
       </div>
@@ -423,9 +423,9 @@ export default function DashboardPage() {
         <div className="grid gap-4 md:grid-cols-1 lg:grid-cols-2">
             <Card>
                 <CardHeader>
-                    <CardTitle>Student Distribution by Level</CardTitle>
+                    <CardTitle>Distribución de Estudiantes por Nivel</CardTitle>
                     <CardDescription>
-                        {firestoreUser?.role === 'supervisor' ? `For Sede: ${supervisorSede?.name}` : 'For the entire institution'}
+                        {firestoreUser?.role === 'supervisor' ? `Para Sede: ${supervisorSede?.name}` : 'Para toda la institución'}
                     </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -448,9 +448,9 @@ export default function DashboardPage() {
             </Card>
             <Card>
                 <CardHeader>
-                    <CardTitle>Students per Group</CardTitle>
+                    <CardTitle>Estudiantes por Grupo</CardTitle>
                      <CardDescription>
-                        {firestoreUser?.role === 'supervisor' ? `For Sede: ${supervisorSede?.name}` : 'For the entire institution'}
+                        {firestoreUser?.role === 'supervisor' ? `Para Sede: ${supervisorSede?.name}` : 'Para toda la institución'}
                     </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -480,8 +480,8 @@ export default function DashboardPage() {
         <div className="grid gap-4 md:grid-cols-1">
           <Card>
             <CardHeader>
-              <CardTitle>Quick Actions</CardTitle>
-              <CardDescription>Easily access common tasks relevant to your role.</CardDescription>
+              <CardTitle>Acciones Rápidas</CardTitle>
+              <CardDescription>Acceda fácilmente a las tareas comunes relevantes para su rol.</CardDescription>
             </CardHeader>
             <CardContent className={`grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-${Math.min(visibleQuickActions.length, 6)} gap-4`}>
               {visibleQuickActions.map(action => (
@@ -499,9 +499,9 @@ export default function DashboardPage() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Clock className="h-5 w-5 text-primary" />
-                Staff Arrival Log
+                Registro de Llegada del Personal
               </CardTitle>
-              <CardDescription>Staff members enter their attendance code here upon arrival.</CardDescription>
+              <CardDescription>Los miembros del personal ingresan aquí su código de asistencia al llegar.</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-bold text-center mb-3 text-primary">
@@ -509,11 +509,11 @@ export default function DashboardPage() {
               </div>
               <form onSubmit={handleTeacherAttendanceSubmit} className="space-y-3">
                 <div>
-                  <Label htmlFor="teacherAttendanceCode" className="sr-only">Attendance Code</Label>
+                  <Label htmlFor="teacherAttendanceCode" className="sr-only">Código de Asistencia</Label>
                   <Input
                     id="teacherAttendanceCode"
                     type="password"
-                    placeholder="Enter attendance code"
+                    placeholder="Ingrese el código de asistencia"
                     value={teacherAttendanceCode}
                     onChange={(e) => setTeacherAttendanceCode(e.target.value)}
                     className="text-center"
@@ -526,12 +526,12 @@ export default function DashboardPage() {
                   ) : (
                     <LogIn className="mr-2 h-4 w-4" />
                   )}
-                  Register Arrival
+                  Registrar Llegada
                 </Button>
               </form>
                { authUser && firestoreUser && (
                   <p className="text-xs text-muted-foreground mt-3 text-center">
-                      Operating as: {firestoreUser.email} ({firestoreUser.name || 'Name not set'})
+                      Operando como: {firestoreUser.email} ({firestoreUser.name || 'Nombre no establecido'})
                   </p>
               )}
             </CardContent>
@@ -543,14 +543,14 @@ export default function DashboardPage() {
       {firestoreUser && !['student', 'caja'].includes(firestoreUser.role) && (
         <Card className="hidden md:flex md:flex-col">
           <CardHeader>
-            <CardTitle>Academy Overview</CardTitle>
-            <CardDescription>A glimpse into our learning environment.</CardDescription>
+            <CardTitle>Vista General de la Academia</CardTitle>
+            <CardDescription>Un vistazo a nuestro ambiente de aprendizaje.</CardDescription>
           </CardHeader>
           <CardContent className="flex-grow">
             <div className="aspect-video w-full overflow-hidden rounded-md">
               <Image
                 src="https://placehold.co/600x400.png"
-                alt="Academy classroom"
+                alt="Salón de clases de la academia"
                 width={600}
                 height={400}
                 className="object-cover w-full h-full"

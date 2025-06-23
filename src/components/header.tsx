@@ -21,7 +21,7 @@ import { collection, query, where, orderBy, limit, onSnapshot, doc, updateDoc } 
 import type { Notification } from '@/types';
 import { formatDistanceToNow } from 'date-fns';
 
-const DEFAULT_APP_NAME_HEADER = ""; // Changed from "AttendX"
+const DEFAULT_APP_NAME_HEADER = "AttendX";
 
 export function Header({ appLogoUrl, appName }: { appLogoUrl?: string | null, appName?: string }) {
   const { authUser, firestoreUser, signOut, loading } = useAuth();
@@ -139,7 +139,7 @@ export function Header({ appLogoUrl, appName }: { appLogoUrl?: string | null, ap
                 </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-80">
-                <DropdownMenuLabel>Notifications</DropdownMenuLabel>
+                <DropdownMenuLabel>Notificaciones</DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 {notifications.length > 0 ? (
                     notifications.map(notif => (
@@ -153,7 +153,7 @@ export function Header({ appLogoUrl, appName }: { appLogoUrl?: string | null, ap
                         </DropdownMenuItem>
                     ))
                 ) : (
-                    <DropdownMenuItem disabled>No new notifications</DropdownMenuItem>
+                    <DropdownMenuItem disabled>No hay notificaciones nuevas</DropdownMenuItem>
                 )}
             </DropdownMenuContent>
           </DropdownMenu>
@@ -177,25 +177,25 @@ export function Header({ appLogoUrl, appName }: { appLogoUrl?: string | null, ap
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuLabel>
-                {firestoreUser?.name || authUser.email || 'My Account'}
+                {firestoreUser?.name || authUser.email || 'Mi Cuenta'}
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuItem asChild>
                 <Link href="/profile">
                   <UserProfileIcon className="mr-2 h-4 w-4" />
-                  My Profile
+                  Mi Perfil
                 </Link>
               </DropdownMenuItem>
               <DropdownMenuItem asChild>
                 <Link href="/app-settings">
                   <Settings className="mr-2 h-4 w-4" />
-                  Settings
+                  Configuración
                 </Link>
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={handleLogout} disabled={loading}>
                 <LogOut className="mr-2 h-4 w-4" />
-                Logout
+                Cerrar Sesión
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

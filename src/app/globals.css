@@ -5,117 +5,116 @@
 
 @layer base {
   :root {
-    /* Light Mode - Azul y Amarillo (según la imagen de referencia del usuario) */
-    --background: 220 20% 97%; /* Un gris azulado muy claro, casi blanco */
-    --foreground: 220 25% 25%; /* Texto principal - azul oscuro grisáceo */
+    /* Light Mode - Based on PRD: Deep Blue, Amber, Light Blue-Gray */
+    --background: 210 17% 95%; /* #ECEFF1 */
+    --foreground: 231 48% 28%; /* Darker version of primary for text */
 
-    --card: 0 0% 100%; /* Fondo de tarjetas - blanco puro */
-    --card-foreground: 220 25% 25%; /* Texto en tarjetas */
+    --card: 0 0% 100%;
+    --card-foreground: 231 48% 28%;
 
-    --popover: 0 0% 100%; /* Fondo de popovers - blanco */
-    --popover-foreground: 220 25% 25%; /* Texto en popovers */
+    --popover: 0 0% 100%;
+    --popover-foreground: 231 48% 28%;
 
-    /* Azul Principal (para header, botones primarios) */
-    --primary: 217 75% 55%; /* Azul vibrante de la imagen */
-    --primary-foreground: 0 0% 100%; /* Texto blanco para contraste */
+    /* Primary: Deep Blue */
+    --primary: 231 48% 48%; /* #3F51B5 */
+    --primary-foreground: 0 0% 100%;
 
-    /* Amarillo para acentos (como item activo en sidebar) */
-    --secondary: 45 95% 55%; /* Amarillo brillante */
-    --secondary-foreground: 220 25% 25%; /* Texto oscuro sobre amarillo */
+    /* Secondary: Using Amber as the secondary for buttons/etc. */
+    --secondary: 45 100% 51%; /* #FFC107 */
+    --secondary-foreground: 231 48% 15%; /* Dark text on amber */
 
-    --muted: 220 15% 90%; /* Fondo atenuado - gris azulado claro */
-    --muted-foreground: 220 10% 45%; /* Texto atenuado */
+    --muted: 210 17% 88%;
+    --muted-foreground: 210 10% 45%;
 
-    /* Amarillo de acento */
-    --accent: 45 95% 55%;
-    --accent-foreground: 220 25% 25%;
-
-    --destructive: 0 84% 60%; /* Rojo para acciones destructivas */
-    --destructive-foreground: 0 0% 98%; /* Texto claro */
-
-    --border: 220 15% 85%; /* Bordes - gris azulado */
-    --input: 220 15% 94%; /* Campos de entrada - gris muy claro, ligeramente diferente del fondo principal */
-    --ring: 217 75% 55%; /* Anillo de enfoque azul primario */
-
-    --radius: 0.5rem; /* Radio de bordes */
-
-    /* Colores para panel de registro (verdecito/teal) */
-    --signup-panel-bg: 165 55% 30%; /* Teal oscuro para buen contraste con texto blanco */
-    --signup-panel-fg: 0 0% 100%;   /* Texto blanco puro */
-
-    /* Sidebar - Fondo blanco, texto oscuro, acento amarillo */
-    --sidebar-background: 0 0% 100%; /* Fondo blanco */
-    --sidebar-foreground: 220 25% 30%; /* Texto azul oscuro, ligeramente más oscuro que el general */
-    --sidebar-primary: 217 75% 55%;    /* Azul para logo o elementos destacados si es necesario */
-    --sidebar-primary-foreground: 0 0% 100%; /* Texto blanco */
-    --sidebar-accent: 45 95% 55%;      /* Amarillo para items activos */
-    --sidebar-accent-foreground: 220 25% 25%; /* Texto oscuro sobre amarillo */
-    --sidebar-border: 220 15% 90%;      /* Bordes de la sidebar, si los tuviera visibles */
-    --sidebar-ring: 45 95% 55%;        /* Anillo de enfoque amarillo */
-
-    /* Colores para gráficos - Usando la paleta principal */
-    --chart-1: 217 75% 55%; /* Azul principal */
-    --chart-2: 45 95% 55%;  /* Amarillo de acento */
-    --chart-3: 200 80% 65%;  /* Azul cielo (variación del primario) */
-    --chart-4: 35 90% 60%;   /* Naranja (variación del amarillo) */
-    --chart-5: 210 60% 75%;  /* Azul más suave */
-  }
-
-  .dark {
-    /* Dark Mode - Azul noche con toques dorados */
-    --background: 222 47% 11%; /* Azul muy oscuro */
-    --foreground: 210 40% 98%; /* Texto casi blanco */
-
-    --card: 222 47% 15%; /* Tarjetas azul oscuro */
-    --card-foreground: 210 40% 98%;
-
-    --popover: 222 47% 15%;
-    --popover-foreground: 210 40% 98%;
-
-    /* Azul eléctrico para modo oscuro */
-    --primary: 217 100% 70%;
-    --primary-foreground: 222 47% 11%; /* Texto azul oscuro */
-
-    /* Amarillo dorado más suave */
-    --secondary: 38 92% 50%;
-    --secondary-foreground: 0 0% 100%;
-
-    --muted: 222 47% 20%;
-    --muted-foreground: 215 20% 65%;
-
-    --accent: 45 93% 47%;
-    --accent-foreground: 45 15% 10%;
+    /* Accent: Amber */
+    --accent: 45 100% 51%;
+    --accent-foreground: 231 48% 15%;
 
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 98%;
 
-    --border: 222 47% 25%;
-    --input: 222 47% 20%;
-    --ring: 217 100% 70%;
+    --border: 210 17% 85%;
+    --input: 210 17% 98%;
+    --ring: 231 48% 48%;
 
-    /* Colores para panel de registro (verdecito/teal) en modo oscuro */
-    --signup-panel-bg: 165 50% 20%; /* Teal muy oscuro */
-    --signup-panel-fg: 210 30% 90%; /* Texto gris claro/azulado */
+    --radius: 0.5rem;
 
-    /* Sidebar modo oscuro - Azul noche */
-    --sidebar-background: 222 47% 13%;
-    --sidebar-foreground: 210 30% 90%;
-    --sidebar-primary: 217 100% 70%;
-    --sidebar-primary-foreground: 222 47% 11%;
-    --sidebar-accent: 45 93% 47%;
-    --sidebar-accent-foreground: 45 15% 10%;
-    --sidebar-border: 222 47% 20%;
-    --sidebar-ring: 45 93% 47%;
+    /* Signup Panel: Using a shade of primary blue for consistency */
+    --signup-panel-bg: 231 48% 30%;
+    --signup-panel-fg: 0 0% 100%;
 
-    /* Colores para gráficos en modo oscuro */
-    --chart-1: 217 100% 70%;
-    --chart-2: 45 93% 47%;
-    --chart-3: 190 90% 60%;
-    --chart-4: 201 96% 50%;
-    --chart-5: 38 92% 50%;
+    /* Sidebar - White background for clean look */
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 231 48% 28%;
+    --sidebar-primary: 231 48% 48%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 45 100% 51%;
+    --sidebar-accent-foreground: 231 48% 15%;
+    --sidebar-border: 210 17% 90%;
+    --sidebar-ring: 45 100% 51%;
+
+    /* Chart Colors */
+    --chart-1: 231 48% 48%; /* Deep Blue */
+    --chart-2: 45 100% 51%; /* Amber */
+    --chart-3: 210 80% 65%; /* Lighter Blue */
+    --chart-4: 35 90% 60%;  /* Orange-ish */
+    --chart-5: 231 30% 60%; /* Softer Blue */
   }
 
-  /* Otros estilos base */
+  .dark {
+    /* Dark Mode - Dark Blue scheme with Amber accent */
+    --background: 231 30% 12%;
+    --foreground: 210 20% 90%;
+
+    --card: 231 30% 16%;
+    --card-foreground: 210 20% 90%;
+
+    --popover: 231 30% 16%;
+    --popover-foreground: 210 20% 90%;
+
+    /* Primary: Lighter blue for contrast */
+    --primary: 231 50% 65%;
+    --primary-foreground: 231 30% 12%;
+
+    /* Secondary: Amber */
+    --secondary: 45 100% 51%;
+    --secondary-foreground: 231 48% 15%;
+
+    --muted: 231 30% 22%;
+    --muted-foreground: 210 20% 70%;
+
+    --accent: 45 100% 51%;
+    --accent-foreground: 231 48% 15%;
+
+    --destructive: 0 70% 55%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 231 30% 25%;
+    --input: 231 30% 22%;
+    --ring: 231 50% 65%;
+
+    --signup-panel-bg: 231 48% 25%;
+    --signup-panel-fg: 0 0% 100%;
+
+    /* Sidebar Dark */
+    --sidebar-background: 231 30% 14%;
+    --sidebar-foreground: 210 20% 90%;
+    --sidebar-primary: 231 50% 65%;
+    --sidebar-primary-foreground: 231 30% 12%;
+    --sidebar-accent: 45 100% 51%;
+    --sidebar-accent-foreground: 231 48% 15%;
+    --sidebar-border: 231 30% 22%;
+    --sidebar-ring: 45 100% 51%;
+
+    /* Chart Colors Dark */
+    --chart-1: 231 50% 65%;
+    --chart-2: 45 100% 51%;
+    --chart-3: 200 70% 60%;
+    --chart-4: 35 80% 55%;
+    --chart-5: 231 40% 75%;
+  }
+
+  /* Base styles */
   * {
     @apply border-border;
   }
@@ -124,91 +123,4 @@
     font-feature-settings: "rlig" 1, "calt" 1;
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   }
-
-  /* Mejoras de tipografía */
-  h1, h2, h3, h4, h5, h6 {
-    @apply font-bold tracking-tight;
-  }
-
-  h1 {
-    @apply text-4xl;
-  }
-
-  h2 {
-    @apply text-3xl;
-  }
-
-  h3 {
-    @apply text-2xl;
-  }
-
-  /* Efectos sutiles para interactividad */
-  a, button {
-    @apply transition-colors duration-200;
-  }
-
-  /* Mejora para inputs */
-  input, textarea, select {
-    @apply focus:ring-2 focus:ring-primary focus:ring-opacity-50 focus:outline-none;
-  }
-
-  /* Clase para resaltar elementos con el amarillo */
-  .highlight {
-    @apply bg-accent/10 text-accent-foreground border border-accent/20;
-  }
 }
-
-/*
-@layer utilities {
-  .clip-edge-left-gearish {
-    clip-path: polygon(
-      100% 0%, 5% 0%, 
-      0% 0%, 0% 6%, 5% 6%, 
-      5% 10%, 
-      0% 10%, 0% 16%, 5% 16%, 
-      5% 20%, 
-      0% 20%, 0% 26%, 5% 26%, 
-      5% 30%, 
-      0% 30%, 0% 36%, 5% 36%, 
-      5% 40%, 
-      0% 40%, 0% 46%, 5% 46%, 
-      5% 50%, 
-      0% 50%, 0% 56%, 5% 56%, 
-      5% 60%, 
-      0% 60%, 0% 66%, 5% 66%, 
-      5% 70%, 
-      0% 70%, 0% 76%, 5% 76%, 
-      5% 80%, 
-      0% 80%, 0% 86%, 5% 86%, 
-      5% 90%, 
-      0% 90%, 0% 96%, 5% 96%, 
-      5% 100%, 100% 100% 
-    );
-  }
-  .clip-edge-right-gearish {
-    clip-path: polygon(
-      0% 0%, 95% 0%, 
-      100% 0%, 100% 6%, 95% 6%, 
-      95% 10%, 
-      100% 10%, 100% 16%, 95% 16%, 
-      95% 20%, 
-      100% 20%, 100% 26%, 95% 26%, 
-      95% 30%, 
-      100% 30%, 100% 36%, 95% 36%, 
-      95% 40%, 
-      100% 40%, 100% 46%, 95% 46%, 
-      95% 50%, 
-      100% 50%, 100% 56%, 95% 56%, 
-      95% 60%, 
-      100% 60%, 100% 66%, 95% 66%, 
-      95% 70%, 
-      100% 70%, 100% 76%, 95% 76%, 
-      95% 80%, 
-      100% 80%, 100% 86%, 95% 86%, 
-      95% 90%, 
-      100% 90%, 100% 96%, 95% 96%, 
-      95% 100%, 0% 100% 
-    );
-  }
-}
-*/

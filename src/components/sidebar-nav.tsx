@@ -45,39 +45,39 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   // General & Core
-  { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['admin', 'teacher', 'caja', 'student', 'supervisor'] },
-  { href: '/attendance-log', label: 'Log Group Attendance', icon: ClipboardEdit, roles: ['admin', 'teacher', 'caja', 'supervisor'] },
-  { href: '/attendance-records', label: 'Attendance Records', icon: BookUser, roles: ['admin', 'teacher', 'caja', 'supervisor'] },
-  { href: '/reports', label: 'Attendance Reports', icon: BarChart3, roles: ['admin', 'teacher', 'caja', 'supervisor'] },
+  { href: '/dashboard', label: 'Tablero', icon: LayoutDashboard, roles: ['admin', 'teacher', 'caja', 'student', 'supervisor'] },
+  { href: '/attendance-log', label: 'Registrar Asistencia', icon: ClipboardEdit, roles: ['admin', 'teacher', 'caja', 'supervisor'] },
+  { href: '/attendance-records', label: 'Ver Registros', icon: BookUser, roles: ['admin', 'teacher', 'caja', 'supervisor'] },
+  { href: '/reports', label: 'Reportes de Asistencia', icon: BarChart3, roles: ['admin', 'teacher', 'caja', 'supervisor'] },
   
   // Classroom Section
-  { href: '/classroom/assignments', label: 'Classroom Admin', icon: ClipboardSignature, roles: ['teacher', 'admin', 'supervisor'] },
-  { href: '/classroom/my-tasks', label: 'My Classroom Tasks', icon: ClipboardList, roles: ['student'] },
+  { href: '/classroom/assignments', label: 'Admin. de Clase', icon: ClipboardSignature, roles: ['teacher', 'admin', 'supervisor'] },
+  { href: '/classroom/my-tasks', label: 'Mis Tareas', icon: ClipboardList, roles: ['student'] },
 
   // Student specific views
-  { href: '/student-grades', label: 'My Grades', icon: ClipboardCheck, roles: ['student'] },
+  { href: '/student-grades', label: 'Mis Calificaciones', icon: ClipboardCheck, roles: ['student'] },
   
   // AI Tools
-  { href: '/ai-analysis', label: 'AI Attendance Analysis', icon: Brain, roles: ['admin', 'teacher', 'supervisor'] },
-  { href: '/lesson-planner', label: 'AI Lesson Planner', icon: NotebookPen, roles: ['admin', 'teacher', 'supervisor'] },
-  { href: '/ai-performance-report', label: 'AI Performance Report', icon: FilePenLine, roles: ['admin', 'teacher', 'supervisor'] },
+  { href: '/ai-analysis', label: 'Análisis IA (Asistencia)', icon: Brain, roles: ['admin', 'teacher', 'supervisor'] },
+  { href: '/lesson-planner', label: 'Planificador IA (Lecciones)', icon: NotebookPen, roles: ['admin', 'teacher', 'supervisor'] },
+  { href: '/ai-performance-report', label: 'Reporte IA (Desempeño)', icon: FilePenLine, roles: ['admin', 'teacher', 'supervisor'] },
 
   // Management (for Admin, Supervisor, Teacher)
-  { href: '/student-management', label: 'Student Management', icon: GraduationCap, roles: ['admin', 'teacher', 'supervisor', 'caja'] },
-  { href: '/group-management', label: 'Group Management', icon: FolderKanban, roles: ['admin', 'teacher', 'supervisor'] },
-  { href: '/grades-management', label: 'Grades Management', icon: ClipboardCheck, roles: ['admin', 'teacher', 'supervisor'] },
-  { href: '/partial-grades-report', label: 'Partial Grades Report', icon: ClipboardList, roles: ['admin', 'teacher', 'supervisor'] },
-  { href: '/certificate-management', label: 'Certificate Records', icon: Award, roles: ['admin', 'teacher', 'supervisor'] },
+  { href: '/student-management', label: 'Gestión de Estudiantes', icon: GraduationCap, roles: ['admin', 'teacher', 'supervisor', 'caja'] },
+  { href: '/group-management', label: 'Gestión de Grupos', icon: FolderKanban, roles: ['admin', 'teacher', 'supervisor'] },
+  { href: '/grades-management', label: 'Gestión de Calificaciones', icon: ClipboardCheck, roles: ['admin', 'teacher', 'supervisor'] },
+  { href: '/partial-grades-report', label: 'Reporte de Parciales', icon: ClipboardList, roles: ['admin', 'teacher', 'supervisor'] },
+  { href: '/certificate-management', label: 'Registros de Certificados', icon: Award, roles: ['admin', 'teacher', 'supervisor'] },
 
   // Financial
-  { href: '/payment-registration', label: 'Register Payment', icon: Banknote, roles: ['admin', 'caja', 'supervisor'] },
-  { href: '/payment-reports', label: 'Payment Reports', icon: Receipt, roles: ['admin', 'caja', 'supervisor'] },
+  { href: '/payment-registration', label: 'Registrar Pago', icon: Banknote, roles: ['admin', 'caja', 'supervisor'] },
+  { href: '/payment-reports', label: 'Reportes de Pago', icon: Receipt, roles: ['admin', 'caja', 'supervisor'] },
 
   // Administration (for Admin, Supervisor)
-  { href: '/user-management', label: 'Staff Management', icon: Briefcase, roles: ['admin', 'supervisor'] },
-  { href: '/staff-attendance-report', label: 'Staff Attendance Report', icon: ListChecks, roles: ['admin', 'supervisor'] },
-  { href: '/sede-management', label: 'Sede Management', icon: Building, roles: ['admin'] },
-  { href: '/app-settings', label: 'Settings', icon: Settings, roles: ['admin'] },
+  { href: '/user-management', label: 'Gestión de Personal', icon: Briefcase, roles: ['admin', 'supervisor'] },
+  { href: '/staff-attendance-report', label: 'Reporte Asistencia (Personal)', icon: ListChecks, roles: ['admin', 'supervisor'] },
+  { href: '/sede-management', label: 'Gestión de Sedes', icon: Building, roles: ['admin'] },
+  { href: '/app-settings', label: 'Configuración', icon: Settings, roles: ['admin'] },
 ];
 
 
@@ -137,35 +137,35 @@ export function SidebarNav() {
       <SidebarMenu>
         {generalItems.length > 0 && (
           <SidebarGroup>
-            <SidebarGroupLabel>Menu</SidebarGroupLabel>
+            <SidebarGroupLabel>Menú</SidebarGroupLabel>
             {generalItems.map(renderNavItem)}
           </SidebarGroup>
         )}
         
         {managementItems.length > 0 && (
           <SidebarGroup>
-            <SidebarGroupLabel>Management</SidebarGroupLabel>
+            <SidebarGroupLabel>Gestión</SidebarGroupLabel>
             {managementItems.map(renderNavItem)}
           </SidebarGroup>
         )}
         
         {financialItems.length > 0 && (
           <SidebarGroup>
-            <SidebarGroupLabel>Financial</SidebarGroupLabel>
+            <SidebarGroupLabel>Finanzas</SidebarGroupLabel>
             {financialItems.map(renderNavItem)}
           </SidebarGroup>
         )}
         
         {aiItems.length > 0 && (
           <SidebarGroup>
-            <SidebarGroupLabel>AI Tools</SidebarGroupLabel>
+            <SidebarGroupLabel>Herramientas IA</SidebarGroupLabel>
             {aiItems.map(renderNavItem)}
           </SidebarGroup>
         )}
 
         {adminItems.length > 0 && (
           <SidebarGroup>
-            <SidebarGroupLabel>Administration</SidebarGroupLabel>
+            <SidebarGroupLabel>Administración</SidebarGroupLabel>
             {adminItems.map(renderNavItem)}
           </SidebarGroup>
         )}
