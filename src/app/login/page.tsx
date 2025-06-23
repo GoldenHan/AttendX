@@ -106,7 +106,6 @@ export default function AuthPage() {
       toast({ title: 'Ingreso Exitoso', description: '¡Bienvenido/a de nuevo!' });
       router.replace('/'); 
     } catch (error: any) {
-      console.error("Login page error:", error);
       toast({ title: 'Fallo de Ingreso', description: error.message, variant: 'destructive' });
     } finally {
       setIsSubmitting(false);
