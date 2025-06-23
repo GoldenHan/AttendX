@@ -167,7 +167,7 @@ export default function DashboardPage() {
             getDocs(sedeQuery),
             getDocs(teachersInSedeQuery),
             getDocs(groupsInSedeQuery),
-            getDocs(studentsInSedeSnapshot)
+            getDocs(studentsInSedeQuery)
           ]);
 
           if (!sedeDocSnapshot.empty) setSupervisorSede(sedeDocSnapshot.docs[0].data() as Sede);
