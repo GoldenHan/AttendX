@@ -11,10 +11,9 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import type { User, PartialScores, ActivityScore, ExamScore, Group, GradingConfiguration, StudentWithDetailedGrades } from '@/types';
-// DEFAULT_GRADING_CONFIG import removed
+import type { User, PartialScores, ActivityScore, ExamScore, Group, GradingConfiguration, StudentGradeStructure } from '@/types';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, query, doc, getDoc, where } from 'firebase/firestore'; // Added where
+import { collection, getDocs, query, doc, getDoc, where } from 'firebase/firestore'; 
 import { Loader2, ClipboardList, NotebookPen, AlertTriangle, Download, FileText } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Badge } from '@/components/ui/badge';
@@ -35,6 +34,15 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Label } from '@/components/ui/label';
 import { useAuth } from '@/contexts/AuthContext'; 
+
+interface StudentWithDetailedGrades extends User {
+  gradesByLevel?: Record<string, StudentGradeStructure & {
+      calculatedTotals?: {
+          [partialKey: string]: number | null;
+      };
+      calculatedFinalGrade?: number | null;
+  }>;
+}
 
 const MAX_ACCUMULATED_ACTIVITIES_DISPLAY = 5;
 
@@ -71,22 +79,18 @@ export default function PartialGradesReportPage() {
   const [selectedGroupId, setSelectedGroupId] = useState<string>('all');
   const [selectedStudentId, setSelectedStudentId] = useState<string>('all');
   
-  // gradingConfig state removed
-  // isLoadingGradingConfig state removed
   const [isLoadingStudents, setIsLoadingStudents] = useState(true);
   const [isLoadingGroups, setIsLoadingGroups] = useState(true);
 
   const { toast } = useToast();
   const router = useRouter();
-  const { firestoreUser, gradingConfig, loading: authLoading } = useAuth(); // Get gradingConfig and authLoading from AuthContext
+  const { firestoreUser, gradingConfig, loading: authLoading } = useAuth(); 
 
-  const isLoading = isLoadingStudents || isLoadingGroups || authLoading || !firestoreUser; // Updated loading check
-
-  // useEffect for fetching gradingConfig removed
+  const isLoading = isLoadingStudents || isLoadingGroups || authLoading || !firestoreUser;
 
   const fetchStudentAndGroupData = useCallback(async () => {
-    if (authLoading || !firestoreUser?.institutionId) { // Wait for auth and institution ID
-        setIsLoadingStudents(false); // Ensure loading states are cleared if check fails early
+    if (authLoading || !firestoreUser?.institutionId) {
+        setIsLoadingStudents(false);
         setIsLoadingGroups(false);
         return;
     }
@@ -94,41 +98,49 @@ export default function PartialGradesReportPage() {
     setIsLoadingStudents(true);
     setIsLoadingGroups(true);
     try {
-      // Query students for the current user's institution
-      const studentQuery = query(collection(db, 'students'), where('institutionId', '==', firestoreUser.institutionId));
+      const studentQuery = query(collection(db, 'users'), where('role', '==', 'student'), where('institutionId', '==', firestoreUser.institutionId));
       const studentsSnapshot = await getDocs(studentQuery);
       const studentData = studentsSnapshot.docs.map(docSnap => {
         const student = { id: docSnap.id, ...docSnap.data() } as User;
-        const studentCalculatedGrades: Partial<StudentWithDetailedGrades> = {};
-        const partialTotalsArray: (number | null)[] = [];
-
-        for (let i = 1; i <= gradingConfig.numberOfPartials; i++) { // Use gradingConfig from context
-          const partialKey = `partial${i}` as keyof NonNullable<User['grades']>;
-          const partialData = student.grades?.[partialKey];
-          const accTotalKey = `calculatedAccumulatedTotalP${i}` as keyof StudentWithDetailedGrades;
-          (studentCalculatedGrades as any)[accTotalKey] = calculateAccumulatedTotal(partialData?.accumulatedActivities, gradingConfig); // Use gradingConfig from context
-          const partialTotalKey = `calculatedPartial${i}Total` as keyof StudentWithDetailedGrades;
-          const currentPartialTotal = calculatePartialTotal(partialData, gradingConfig); // Use gradingConfig from context
-          (studentCalculatedGrades as any)[partialTotalKey] = currentPartialTotal;
-          if (typeof currentPartialTotal === 'number') {
-            partialTotalsArray.push(currentPartialTotal);
-          } else {
-             partialTotalsArray.push(null); 
-          }
-        }
         
-        const relevantPartialTotals = partialTotalsArray.slice(0, gradingConfig.numberOfPartials); // Use gradingConfig from context
-        if (relevantPartialTotals.length === gradingConfig.numberOfPartials && relevantPartialTotals.every(t => typeof t === 'number')) { // Use gradingConfig from context
-            studentCalculatedGrades.calculatedFinalGrade = (relevantPartialTotals.reduce((sum, current) => sum + (current as number), 0) / gradingConfig.numberOfPartials); // Use gradingConfig from context
-        } else {
-            studentCalculatedGrades.calculatedFinalGrade = null;
-        }
-        return { ...student, ...studentCalculatedGrades } as StudentWithDetailedGrades;
+        const processedData: StudentWithDetailedGrades = { ...student, gradesByLevel: {} };
+
+           if (student.gradesByLevel) {
+               for (const levelName in student.gradesByLevel) {
+                   const levelGrades = student.gradesByLevel[levelName];
+                   const calculatedTotals: { [key: string]: number | null } = {};
+                   let finalGradeSum = 0;
+                   let validPartialsCount = 0;
+                   let allPartialsAreNumeric = true;
+
+                   for (let i = 1; i <= gradingConfig.numberOfPartials; i++) {
+                       const partialKey = `partial${i}` as keyof StudentGradeStructure;
+                       const partialData = levelGrades[partialKey];
+                       const partialTotal = calculatePartialTotal(partialData, gradingConfig);
+                       calculatedTotals[partialKey] = partialTotal;
+                       
+                       if (typeof partialTotal === 'number') {
+                           finalGradeSum += partialTotal;
+                           validPartialsCount++;
+                       } else {
+                           allPartialsAreNumeric = false;
+                       }
+                   }
+                   
+                   processedData.gradesByLevel![levelName] = {
+                       ...levelGrades,
+                       calculatedTotals,
+                       calculatedFinalGrade: (validPartialsCount === gradingConfig.numberOfPartials && allPartialsAreNumeric) 
+                         ? (finalGradeSum / gradingConfig.numberOfPartials) 
+                         : null,
+                   };
+               }
+           }
+        return processedData;
       });
       setAllStudentsData(studentData);
       setIsLoadingStudents(false);
 
-      // Query groups for the current user's institution
       const groupsQuery = query(collection(db, 'groups'), where('institutionId', '==', firestoreUser.institutionId));
       const groupsSnapshot = await getDocs(groupsQuery);
       const fetchedGroups = groupsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as Group));
@@ -146,17 +158,17 @@ export default function PartialGradesReportPage() {
 
     } catch (error) {
       console.error("Error fetching student/group data:", error);
-      toast({ title: 'Error fetching data', description: 'Could not load student or group data.', variant: 'destructive' });
+      toast({ title: 'Error al Cargar Datos', description: 'No se pudieron cargar los datos de estudiantes o grupos.', variant: 'destructive' });
       setIsLoadingStudents(false);
       setIsLoadingGroups(false);
     }
-  }, [toast, gradingConfig, authLoading, firestoreUser]); // Added gradingConfig, authLoading
+  }, [toast, gradingConfig, authLoading, firestoreUser]);
 
   useEffect(() => {
-    if (!authLoading && firestoreUser) { // Check authLoading
+    if (!authLoading && firestoreUser) {
         fetchStudentAndGroupData();
     }
-  }, [fetchStudentAndGroupData, authLoading, firestoreUser]); // Added authLoading
+  }, [fetchStudentAndGroupData, authLoading, firestoreUser]);
 
   const availableGroupsForFilter = useMemo(() => {
     if (!firestoreUser) return [];
@@ -206,7 +218,7 @@ export default function PartialGradesReportPage() {
      if (firestoreUser?.role === 'teacher') {
         const isStudentInTheirGroup = studentsToDisplayInTable.some(s => s.id === studentId);
         if (!isStudentInTheirGroup) {
-            toast({ title: 'Access Denied', description: 'You can only manage grades for students in your assigned groups.', variant: 'destructive'});
+            toast({ title: 'Acceso Denegado', description: 'Solo puedes gestionar las calificaciones de los estudiantes de tus grupos asignados.', variant: 'destructive'});
             return;
         }
     }
@@ -230,7 +242,7 @@ export default function PartialGradesReportPage() {
     if (typeof scoreValue !== 'number') {
       badgeClassName += 'bg-gray-100 dark:bg-gray-700/50 text-gray-500 dark:text-gray-400 border-gray-300 dark:border-gray-600';
     } else if (isTotal || isFinalGrade) {
-      badgeClassName += scoreValue >= gradingConfig.passingGrade // Use gradingConfig from context
+      badgeClassName += scoreValue >= gradingConfig.passingGrade
         ? 'bg-green-100 dark:bg-green-900/70 text-green-700 dark:text-green-300 border-green-500/50' 
         : 'bg-red-100 dark:bg-red-900/70 text-red-700 dark:text-red-300 border-red-500/50';
     } else { 
@@ -288,7 +300,7 @@ export default function PartialGradesReportPage() {
 
   const handleExportToHTML = () => {
     if (isLoading || studentsToDisplayInTable.length === 0) {
-      toast({ title: "No data to export", description: "Please filter to display some students or wait for data to load.", variant: "default" });
+      toast({ title: "No hay datos para exportar", description: "Por favor, filtra para mostrar algunos estudiantes o espera a que se carguen los datos.", variant: "default" });
       return;
     }
 
@@ -343,20 +355,20 @@ export default function PartialGradesReportPage() {
 
     studentsToDisplayInTable.forEach(student => {
       htmlString += `<tr><td class="font-medium whitespace-nowrap sticky-col">${student.name}</td>`;
+      const studentLevel = student.level || 'Other';
       for (let i = 1; i <= numPartials; i++) {
-        const partialKey = `partial${i}` as keyof User['grades'];
-        const partialData = student.grades?.[partialKey];
+        const partialKey = `partial${i}` as keyof StudentGradeStructure;
+        const partialData = student.gradesByLevel?.[studentLevel]?.[partialKey];
         
         for (let j = 0; j < MAX_ACCUMULATED_ACTIVITIES_DISPLAY; j++) {
           const activity = partialData?.accumulatedActivities?.[j];
           htmlString += `<td style="${getScoreCellStyle(activity?.score)}">${getScoreForExport(activity?.score)}</td>`;
         }
         htmlString += `<td style="${getScoreCellStyle(partialData?.exam?.score)}">${getScoreForExport(partialData?.exam?.score)}</td>`;
-        const partialTotalKey = `calculatedPartial${i}Total` as keyof StudentWithDetailedGrades;
-        const studentPartialTotal = (student as any)[partialTotalKey];
-        htmlString += `<td style="${getScoreCellStyle(studentPartialTotal, true)}" class="font-bold">${getScoreForExport(studentPartialTotal, true)}</td>`;
+        const partialTotal = student.gradesByLevel?.[studentLevel]?.calculatedTotals?.[partialKey];
+        htmlString += `<td style="${getScoreCellStyle(partialTotal, true)}" class="font-bold">${getScoreForExport(partialTotal, true)}</td>`;
       }
-      htmlString += `<td style="${getScoreCellStyle(student.calculatedFinalGrade, false, true)}" class="font-bold">${getScoreForExport(student.calculatedFinalGrade, false, true)}</td></tr>`;
+      htmlString += `<td style="${getScoreCellStyle(student.gradesByLevel?.[studentLevel]?.calculatedFinalGrade, false, true)}" class="font-bold">${getScoreForExport(student.gradesByLevel?.[studentLevel]?.calculatedFinalGrade, false, true)}</td></tr>`;
     });
 
     htmlString += `</tbody></table></body></html>`;
@@ -380,13 +392,12 @@ export default function PartialGradesReportPage() {
 
   const handleExportToCSV = () => {
     if (isLoading || studentsToDisplayInTable.length === 0) {
-      toast({ title: "No data to export", description: "Please filter to display some students or wait for data to load.", variant: "default" });
+      toast({ title: "No hay datos para exportar", description: "Por favor, filtra para mostrar algunos estudiantes o espera a que se carguen los datos.", variant: "default" });
       return;
     }
     const numPartials = gradingConfig.numberOfPartials;
     
-    // Create headers
-    const headers = ['Student Name'];
+    const headers = ['Student Name', 'Level'];
     for (let pNum = 1; pNum <= numPartials; pNum++) {
       for (let i = 0; i < MAX_ACCUMULATED_ACTIVITIES_DISPLAY; i++) {
         headers.push(`P${pNum} Act ${i + 1}`);
@@ -396,14 +407,16 @@ export default function PartialGradesReportPage() {
     }
     headers.push('Final Grade');
     
-    // Create rows
     const csvRows = [
       headers.join(','),
       ...studentsToDisplayInTable.map(student => {
-        const row = [`"${student.name.replace(/"/g, '""')}"`];
+        const studentLevel = student.level || 'Other';
+        const row = [`"${student.name.replace(/"/g, '""')}"`, studentLevel];
+        const levelData = student.gradesByLevel?.[studentLevel];
+
         for (let pNum = 1; pNum <= numPartials; pNum++) {
-          const partialKey = `partial${pNum}` as keyof User['grades'];
-          const partialData = student.grades?.[partialKey];
+          const partialKey = `partial${pNum}` as keyof StudentGradeStructure;
+          const partialData = levelData?.[partialKey];
           
           for (let i = 0; i < MAX_ACCUMULATED_ACTIVITIES_DISPLAY; i++) {
             const activityScore = partialData?.accumulatedActivities?.[i]?.score;
@@ -413,12 +426,11 @@ export default function PartialGradesReportPage() {
           const examScore = partialData?.exam?.score;
           row.push(typeof examScore === 'number' ? String(examScore) : '');
           
-          const partialTotalKey = `calculatedPartial${pNum}Total` as keyof StudentWithDetailedGrades;
-          const studentPartialTotal = (student as any)[partialTotalKey];
-          row.push(typeof studentPartialTotal === 'number' ? studentPartialTotal.toFixed(2) : '');
+          const partialTotal = levelData?.calculatedTotals?.[partialKey];
+          row.push(typeof partialTotal === 'number' ? partialTotal.toFixed(2) : '');
         }
         
-        const finalGrade = student.calculatedFinalGrade;
+        const finalGrade = levelData?.calculatedFinalGrade;
         row.push(typeof finalGrade === 'number' ? finalGrade.toFixed(2) : '');
         
         return row.join(',');
@@ -431,31 +443,31 @@ export default function PartialGradesReportPage() {
     const url = URL.createObjectURL(blob);
     link.setAttribute('href', url);
     const today = new Date().toISOString().split('T')[0];
-    link.setAttribute('download', `Partial_Grades_Report_${today}.csv`);
+    link.setAttribute('download', `Reporte_Notas_Parciales_${today}.csv`);
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-    toast({ title: 'Export Successful', description: 'Partial grades report exported as CSV.' });
+    toast({ title: 'Exportación Exitosa', description: 'Reporte de notas parciales exportado como CSV.' });
   };
   
   if (isLoading) {
     return (
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2"><ClipboardList className="h-6 w-6 text-primary" /> Partial Grades Report</CardTitle>
-          <CardDescription>Loading report data and configuration...</CardDescription>
+          <CardTitle className="flex items-center gap-2"><ClipboardList className="h-6 w-6 text-primary" /> Reporte de Notas Parciales</CardTitle>
+          <CardDescription>Cargando reporte de datos y configuración...</CardDescription>
         </CardHeader>
         <CardContent className="flex items-center justify-center py-10">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
-          <p className="ml-2">Loading...</p>
+          <p className="ml-2">Cargando...</p>
         </CardContent>
       </Card>
     );
   }
 
-  const currentNumberOfPartials = Math.max(1, gradingConfig.numberOfPartials); // Use gradingConfig from context
+  const currentNumberOfPartials = Math.max(1, gradingConfig.numberOfPartials);
   const partialHeaders = [];
   for (let i = 1; i <= currentNumberOfPartials; i++) {
     partialHeaders.push(
@@ -469,7 +481,7 @@ export default function PartialGradesReportPage() {
           'bg-purple-100 dark:bg-purple-800/50 text-purple-800 dark:text-purple-200'
         }`}
       >
-        {i}{i === 1 ? 'st' : i === 2 ? 'nd' : i === 3 ? 'rd' : 'th'} Partial
+        Parcial {i}
       </TableHead>
     );
   }
@@ -492,7 +504,7 @@ export default function PartialGradesReportPage() {
           pNum % 4 === 2 ? 'bg-green-100 dark:bg-green-800/50 text-green-700 dark:text-green-300' :
           pNum % 4 === 3 ? 'bg-orange-100 dark:bg-orange-800/50 text-orange-700 dark:text-orange-300' :
           'bg-purple-100 dark:bg-purple-800/50 text-purple-700 dark:text-purple-300'
-        }`}>Exam</TableHead>
+        }`}>Examen</TableHead>
     );
     subPartialHeaders.push(
       <TableHead key={`p${pNum}-total`} className={`text-center font-bold text-xs whitespace-nowrap py-1 sticky top-0 z-20 ${
@@ -511,12 +523,12 @@ export default function PartialGradesReportPage() {
         <CardHeader>
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div>
-              <CardTitle className="flex items-center gap-2"><ClipboardList className="h-6 w-6 text-primary" /> Partial Grades Report</CardTitle>
+              <CardTitle className="flex items-center gap-2"><ClipboardList className="h-6 w-6 text-primary" /> Reporte de Notas Parciales</CardTitle>
               <CardDescription>
-                View partial grades for students.
-                {firestoreUser?.role === 'teacher' ? " Showing students from your assigned groups." : " Filter by group and/or individual student."}
+                Ver notas parciales para estudiantes.
+                {firestoreUser?.role === 'teacher' ? " Mostrando estudiantes de tus grupos asignados." : " Filtra por grupo y/o estudiante individual."}
                 <br/>
-                Institution Configuration: {currentNumberOfPartials} partials, passing with {gradingConfig.passingGrade}pts.
+                Configuración Institucional: {currentNumberOfPartials} parciales, aprobación con {gradingConfig.passingGrade}pts.
               </CardDescription>
             </div>
             <DropdownMenu>
@@ -528,30 +540,30 @@ export default function PartialGradesReportPage() {
                   className="gap-1.5 text-sm"
                 >
                   <Download className="size-3.5" />
-                  Export
+                  Exportar
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent>
                 <DropdownMenuItem onSelect={handleExportToHTML}>
                   <FileText className="mr-2 h-4 w-4" />
-                  Export to HTML
+                  Exportar a HTML
                 </DropdownMenuItem>
                 <DropdownMenuItem onSelect={handleExportToCSV}>
                   <FileText className="mr-2 h-4 w-4" />
-                  Export to CSV
+                  Exportar a CSV
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
-           {gradingConfig.numberOfPartials < 1 && ( // Use gradingConfig from context
+           {gradingConfig.numberOfPartials < 1 && (
             <div className="mt-2 p-3 border border-red-500/50 bg-red-50 dark:bg-red-900/30 rounded-md text-sm text-red-700 dark:text-red-300 flex items-start gap-2">
                 <AlertTriangle className="h-5 w-5 mt-0.5 shrink-0"/>
-                <p>Warning: Number of partials is configured to {gradingConfig.numberOfPartials}. Displaying 1 partial by default. Check "App Settings".</p>
+                <p>Advertencia: El número de parciales está configurado en {gradingConfig.numberOfPartials}. Mostrando 1 parcial por defecto. Verifica "Configuración de la Aplicación".</p>
             </div>
           )}
           <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <Label htmlFor="group-filter-report">Filter by Group</Label>
+              <Label htmlFor="group-filter-report">Filtrar por Grupo</Label>
               <Select
                 value={selectedGroupId}
                 onValueChange={(value) => {
@@ -561,12 +573,12 @@ export default function PartialGradesReportPage() {
                 disabled={isLoadingGroups || (firestoreUser?.role === 'teacher' && availableGroupsForFilter.length === 0)}
               >
                 <SelectTrigger id="group-filter-report">
-                  <SelectValue placeholder="Select a group" />
+                  <SelectValue placeholder="Seleccionar un grupo" />
                 </SelectTrigger>
                 <SelectContent>
-                  {firestoreUser?.role !== 'teacher' && <SelectItem value="all">All Groups</SelectItem>}
+                  {firestoreUser?.role !== 'teacher' && <SelectItem value="all">Todos los Grupos</SelectItem>}
                   {firestoreUser?.role === 'teacher' && availableGroupsForFilter.length === 0 && <SelectItem value="none" disabled>No tienes grupos asignados</SelectItem>}
-                  {firestoreUser?.role === 'teacher' && availableGroupsForFilter.length > 1 && <SelectItem value="all">All My Groups</SelectItem>}
+                  {firestoreUser?.role === 'teacher' && availableGroupsForFilter.length > 1 && <SelectItem value="all">Todos Mis Grupos</SelectItem>}
                   {availableGroupsForFilter.map((group) => (
                     <SelectItem key={group.id} value={group.id}>
                       {group.name}
@@ -576,21 +588,21 @@ export default function PartialGradesReportPage() {
               </Select>
             </div>
             <div>
-              <Label htmlFor="student-filter-report">Filter by Student</Label>
+              <Label htmlFor="student-filter-report">Filtrar por Estudiante</Label>
               <Select
                 value={selectedStudentId}
                 onValueChange={setSelectedStudentId}
                 disabled={isLoadingStudents || studentsForStudentFilterDropdown.length === 0}
               >
                 <SelectTrigger id="student-filter-report">
-                  <SelectValue placeholder="Select a student" />
+                  <SelectValue placeholder="Seleccionar un estudiante" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">
-                    {selectedGroupId === 'all' && firestoreUser?.role !== 'teacher' ? 'All Students (Global)' : 
-                     selectedGroupId === 'all' && firestoreUser?.role === 'teacher' ? 'All Students in My Groups' :
-                     selectedGroupId === 'none' && firestoreUser?.role === 'teacher' ? 'No Students (No Group)' :
-                     'All Students in Selected Group'}
+                    {selectedGroupId === 'all' && firestoreUser?.role !== 'teacher' ? 'Todos los Estudiantes (Global)' : 
+                     selectedGroupId === 'all' && firestoreUser?.role === 'teacher' ? 'Todos los Estudiantes en Mis Grupos' :
+                     selectedGroupId === 'none' && firestoreUser?.role === 'teacher' ? 'Sin Estudiantes (Sin Grupo)' :
+                     'Todos los Estudiantes en el Grupo Seleccionado'}
                   </SelectItem>
                   {studentsForStudentFilterDropdown.map((student) => (
                     <SelectItem key={student.id} value={student.id}>
@@ -606,57 +618,61 @@ export default function PartialGradesReportPage() {
           <Table>
             <TableHeader className="sticky top-0 bg-card z-20">
               <TableRow>
-                <TableHead rowSpan={2} className="align-bottom min-w-[150px] sticky left-0 bg-card z-30">Student Name</TableHead>
+                <TableHead rowSpan={2} className="align-bottom min-w-[150px] sticky left-0 bg-card z-30">Nombre del Estudiante</TableHead>
                 {partialHeaders}
-                <TableHead rowSpan={2} className={`text-center align-bottom min-w-[100px] bg-blue-100 dark:bg-blue-800/50 text-blue-800 dark:text-blue-200 sticky top-0 z-20`}>Final Grade</TableHead>
+                <TableHead rowSpan={2} className={`text-center align-bottom min-w-[100px] bg-blue-100 dark:bg-blue-800/50 text-blue-800 dark:text-blue-200 sticky top-0 z-20`}>Nota Final</TableHead>
               </TableRow>
               <TableRow>
                 {subPartialHeaders}
               </TableRow>
             </TableHeader>
             <TableBody>
-              {studentsToDisplayInTable.length > 0 ? studentsToDisplayInTable.map((student) => (
-                <TableRow key={student.id}>
-                  <TableCell className="font-medium sticky left-0 bg-card z-10 whitespace-nowrap">
-                     <div className="flex items-center gap-2">
-                        {student.name}
-                        <Tooltip>
-                            <TooltipTrigger asChild>
-                                <Button variant="ghost" size="icon" className="h-6 w-6 opacity-75 hover:opacity-100" onClick={() => handleOpenEditGrades(student.id)}>
-                                    <NotebookPen className="h-3.5 w-3.5" />
-                                    <span className="sr-only">Edit Grades for {student.name}</span>
-                                </Button>
-                            </TooltipTrigger>
-                            <TooltipContent side="right"><p>Edit Grades</p></TooltipContent>
-                        </Tooltip>
-                    </div>
-                  </TableCell>
-                  
-                  {Array.from({ length: currentNumberOfPartials }).map((_, index) => {
-                    const pNum = index + 1;
-                    const partialKeyFirestore = `partial${pNum}` as keyof NonNullable<User['grades']>;
-                    const partialData = student.grades?.[partialKeyFirestore];
-                    const calculatedPartialTotalKey = `calculatedPartial${pNum}Total` as keyof StudentWithDetailedGrades;
-                    const studentPartialTotal = (student as any)[calculatedPartialTotalKey];
+              {studentsToDisplayInTable.length > 0 ? studentsToDisplayInTable.map((student) => {
+                const studentLevel = student.level || 'Other';
+                const levelData = student.gradesByLevel?.[studentLevel];
+                
+                return (
+                  <TableRow key={student.id}>
+                    <TableCell className="font-medium sticky left-0 bg-card z-10 whitespace-nowrap">
+                       <div className="flex items-center gap-2">
+                          {student.name} ({studentLevel})
+                          <Tooltip>
+                              <TooltipTrigger asChild>
+                                  <Button variant="ghost" size="icon" className="h-6 w-6 opacity-75 hover:opacity-100" onClick={() => handleOpenEditGrades(student.id)}>
+                                      <NotebookPen className="h-3.5 w-3.5" />
+                                      <span className="sr-only">Editar Calificaciones para {student.name}</span>
+                                  </Button>
+                              </TooltipTrigger>
+                              <TooltipContent side="right"><p>Editar Calificaciones</p></TooltipContent>
+                          </Tooltip>
+                      </div>
+                    </TableCell>
+                    
+                    {Array.from({ length: currentNumberOfPartials }).map((_, index) => {
+                      const pNum = index + 1;
+                      const partialKey = `partial${pNum}` as keyof StudentGradeStructure;
+                      const partialData = levelData?.[partialKey];
+                      const studentPartialTotal = levelData?.calculatedTotals?.[partialKey];
 
-                    return (
-                      <React.Fragment key={`student-${student.id}-p${pNum}`}>
-                        {renderAccumulatedActivitiesScores(partialData?.accumulatedActivities, `p${pNum}`)}
-                        <TableCell className="text-center">
-                          {getScoreDisplay(partialData?.exam?.score, partialData?.exam?.name, "Exam")}
-                        </TableCell>
-                        <TableCell className="text-center font-semibold">
-                          {getScoreDisplay(studentPartialTotal, null, null, true)}
-                        </TableCell>
-                      </React.Fragment>
-                    );
-                  })}
-                  
-                  <TableCell className="text-center font-bold bg-blue-50 dark:bg-blue-900/30">
-                    {getScoreDisplay(student.calculatedFinalGrade, null, null, false, true)}
-                  </TableCell>
-                </TableRow>
-              )) : (
+                      return (
+                        <React.Fragment key={`student-${student.id}-p${pNum}`}>
+                          {renderAccumulatedActivitiesScores(partialData?.accumulatedActivities, `p${pNum}`)}
+                          <TableCell className="text-center">
+                            {getScoreDisplay(partialData?.exam?.score, partialData?.exam?.name, "Examen")}
+                          </TableCell>
+                          <TableCell className="text-center font-semibold">
+                            {getScoreDisplay(studentPartialTotal, null, null, true)}
+                          </TableCell>
+                        </React.Fragment>
+                      );
+                    })}
+                    
+                    <TableCell className="text-center font-bold bg-blue-50 dark:bg-blue-900/30">
+                      {getScoreDisplay(levelData?.calculatedFinalGrade, null, null, false, true)}
+                    </TableCell>
+                  </TableRow>
+                )
+              }) : (
                  <TableRow>
                     <TableCell colSpan={totalColumns} className="text-center h-24">
                        {firestoreUser?.role === 'teacher' && availableGroupsForFilter.length === 0 
@@ -673,4 +689,3 @@ export default function PartialGradesReportPage() {
     </TooltipProvider>
   );
 }
-    

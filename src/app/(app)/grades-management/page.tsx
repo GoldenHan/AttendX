@@ -11,9 +11,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Loader2, Save, UserCircle, ClipboardCheck, Search, Users, PlusCircle, Trash2, AlertTriangle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { db } from '@/lib/firebase';
-import { collection, doc, getDocs, getDoc, updateDoc, query } from 'firebase/firestore';
-import type { User, PartialScores as PartialScoresType, ActivityScore as ActivityScoreType, ExamScore as ExamScoreType, Group as GroupType, GradingConfiguration } from '@/types';
-// Removed DEFAULT_GRADING_CONFIG import as it will come from AuthContext
+import { collection, doc, getDocs, getDoc, updateDoc, query, where } from 'firebase/firestore';
+import type { User, PartialScores as PartialScoresType, ActivityScore as ActivityScoreType, ExamScore as ExamScoreType, Group as GroupType, GradingConfiguration, StudentGradeStructure } from '@/types';
 import { useForm, useFieldArray, Controller, UseFieldArrayReturn } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -100,10 +99,7 @@ const generateGradeEntryFormSchema = (config: GradingConfiguration) => {
 
 
 type GradeEntryFormValues = {
-  partial1: z.infer<ReturnType<typeof partialScoresObjectSchema>>;
-  partial2: z.infer<ReturnType<typeof partialScoresObjectSchema>>;
-  partial3: z.infer<ReturnType<typeof partialScoresObjectSchema>>;
-  partial4?: z.infer<ReturnType<typeof partialScoresObjectSchema>>;
+    [key in `partial${1 | 2 | 3 | 4}`]?: z.infer<ReturnType<typeof partialScoresObjectSchema>>;
 };
 
 
@@ -123,7 +119,6 @@ export default function GradesManagementPage() {
   const [allGroups, setAllGroups] = useState<GroupType[]>([]);
   const [selectedStudent, setSelectedStudent] = useState<User | null>(null);
 
-  // isLoadingGradingConfig removed, use authLoading or check if gradingConfig is default
   const [isLoadingData, setIsLoadingData] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -154,21 +149,19 @@ export default function GradesManagementPage() {
 
   const partialFieldArrays = [p1FieldArray, p2FieldArray, p3FieldArray, p4FieldArray];
 
-  // useEffect for fetching gradingConfig locally is removed. gradingConfig now comes from AuthContext.
-
   const fetchInitialData = useCallback(async () => {
-    if (authLoading || !firestoreUser?.institutionId) { // Wait for auth and institution ID
+    if (authLoading || !firestoreUser?.institutionId) {
         setIsLoadingData(false);
         return;
     }
     setIsLoadingData(true);
     try {
-      const studentQuery = query(collection(db, 'students'), where('institutionId', '==', firestoreUser.institutionId)); // Filter by institution
+      const studentQuery = query(collection(db, 'users'), where('role', '==', 'student'), where('institutionId', '==', firestoreUser.institutionId));
       const studentsSnapshot = await getDocs(studentQuery);
       const studentList = studentsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as User));
       setAllStudents(studentList);
 
-      const groupsQuery = query(collection(db, 'groups'), where('institutionId', '==', firestoreUser.institutionId)); // Filter by institution
+      const groupsQuery = query(collection(db, 'groups'), where('institutionId', '==', firestoreUser.institutionId));
       const groupsSnapshot = await getDocs(groupsQuery);
       const fetchedGroups = groupsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as GroupType));
       setAllGroups(fetchedGroups);
@@ -193,7 +186,7 @@ export default function GradesManagementPage() {
             if (isStudentInTeacherGroup) {
               setSelectedStudent(preselectedStudent);
             } else {
-              toast({ title: 'Access Denied', description: 'You can only manage grades for students in your assigned groups.', variant: 'destructive' });
+              toast({ title: 'Acceso Denegado', description: 'Solo puedes gestionar las calificaciones de los estudiantes de tus grupos asignados.', variant: 'destructive' });
               router.replace('/grades-management', { scroll: false });
             }
           } else { 
@@ -241,16 +234,22 @@ export default function GradesManagementPage() {
 
   const debouncedSave = useCallback(
     debounce(async (currentData: GradeEntryFormValues, studentId: string) => {
-      if (isSubmitting || authLoading) return; // Use authLoading
+      if (isSubmitting || authLoading) return;
       setAutoSaveStatus('saving');
       try {
-        const studentRef = doc(db, "students", studentId);
-        const gradesToSave: { [key: string]: PartialScoresType } = {};
-        for (let i = 1; i <= gradingConfig.numberOfPartials; i++) { // gradingConfig from context
-            const partialKey = `partial${i}` as keyof GradeEntryFormValues;
-            gradesToSave[partialKey] = mapPartialToSave(currentData[partialKey]);
+        const studentRef = doc(db, "users", studentId);
+        const gradesByLevel = selectedStudent?.gradesByLevel || {};
+        const currentLevel = selectedStudent?.level || 'Other'; 
+        
+        if (!gradesByLevel[currentLevel]) {
+          gradesByLevel[currentLevel] = {};
         }
-        await updateDoc(studentRef, { grades: gradesToSave });
+
+        for (let i = 1; i <= gradingConfig.numberOfPartials; i++) {
+            const partialKey = `partial${i}` as keyof GradeEntryFormValues;
+            gradesByLevel[currentLevel][partialKey] = mapPartialToSave(currentData[partialKey]);
+        }
+        await updateDoc(studentRef, { gradesByLevel: gradesByLevel });
         setAutoSaveStatus('saved');
         setTimeout(() => setAutoSaveStatus('idle'), 3000);
       } catch (error) {
@@ -260,21 +259,27 @@ export default function GradesManagementPage() {
         setTimeout(() => setAutoSaveStatus('idle'), 5000);
       }
     }, DEBOUNCE_DELAY),
-    [isSubmitting, toast, gradingConfig, authLoading, mapPartialToSave] // Use gradingConfig from context, authLoading
+    [isSubmitting, toast, gradingConfig, authLoading, mapPartialToSave, selectedStudent]
   );
 
   useEffect(() => {
     if (debouncedSave && typeof debouncedSave.cancel === 'function') {
         debouncedSave.cancel();
     }
-    if (selectedStudent && gradingConfig) { // gradingConfig from context
-      const studentGrades = selectedStudent.grades || {};
-      const defaultValuesForForm: GradeEntryFormValues = {
-        partial1: { ...getDefaultPartialData(), ...studentGrades.partial1, accumulatedActivities: mapActivities(studentGrades.partial1?.accumulatedActivities) },
-        partial2: { ...getDefaultPartialData(), ...studentGrades.partial2, accumulatedActivities: mapActivities(studentGrades.partial2?.accumulatedActivities) },
-        partial3: { ...getDefaultPartialData(), ...studentGrades.partial3, accumulatedActivities: mapActivities(studentGrades.partial3?.accumulatedActivities) },
-        partial4: { ...getDefaultPartialData(), ...studentGrades.partial4, accumulatedActivities: mapActivities(studentGrades.partial4?.accumulatedActivities) },
-      };
+    if (selectedStudent && gradingConfig) {
+      const studentLevel = selectedStudent.level || 'Other';
+      const studentGrades = selectedStudent.gradesByLevel?.[studentLevel] || {};
+      
+      const defaultValuesForForm: GradeEntryFormValues = {};
+      for (let i = 1; i <= 4; i++) {
+        const pKey = `partial${i}` as keyof GradeEntryFormValues;
+        const studentPartialData = studentGrades[pKey];
+        defaultValuesForForm[pKey] = {
+            ...getDefaultPartialData(),
+            ...studentPartialData,
+            accumulatedActivities: mapActivities(studentPartialData?.accumulatedActivities),
+        };
+      }
       reset(defaultValuesForForm);
     } else {
       reset({
@@ -284,7 +289,7 @@ export default function GradesManagementPage() {
         partial4: getDefaultPartialData(),
       });
     }
-  }, [selectedStudent, reset, gradingConfig, debouncedSave, mapActivities]); // Use gradingConfig from context
+  }, [selectedStudent, reset, gradingConfig, debouncedSave, mapActivities]);
 
   const availableGroupsForFilter = useMemo(() => {
     if (firestoreUser?.role === 'teacher') {
@@ -335,7 +340,7 @@ export default function GradesManagementPage() {
       const teacherGroups = allGroups.filter(g => g.teacherId === firestoreUser.id);
       const isStudentInTheirGroup = teacherGroups.some(g => Array.isArray(g.studentIds) && g.studentIds.includes(student.id));
       if (!isStudentInTheirGroup) {
-        toast({ title: 'Access Denied', description: 'You can only manage grades for students in your assigned groups.', variant: 'destructive' });
+        toast({ title: 'Acceso Denegado', description: 'Solo puedes gestionar las calificaciones de los estudiantes de tus grupos asignados.', variant: 'destructive' });
         return;
       }
     }
@@ -347,7 +352,7 @@ export default function GradesManagementPage() {
   const watchedFormValues = watch();
 
   useEffect(() => {
-    if (formState.isDirty && selectedStudent && !isSubmitting && !authLoading && debouncedSave) { // Use authLoading
+    if (formState.isDirty && selectedStudent && !isSubmitting && !authLoading && debouncedSave) {
       const currentValues = getValues();
       debouncedSave(currentValues, selectedStudent.id);
     }
@@ -356,11 +361,11 @@ export default function GradesManagementPage() {
         debouncedSave.cancel();
       }
     };
-  }, [watchedFormValues, selectedStudent, formState.isDirty, isSubmitting, debouncedSave, getValues, authLoading]); // Use authLoading
+  }, [watchedFormValues, selectedStudent, formState.isDirty, isSubmitting, debouncedSave, getValues, authLoading]);
 
 
   const onSubmitGrades = async (data: GradeEntryFormValues) => {
-    if (!selectedStudent || authLoading) { // Use authLoading
+    if (!selectedStudent || authLoading) {
       toast({ title: "Error", description: authLoading ? "Configuración de calificación aún cargando." : "Ningún estudiante seleccionado.", variant: "destructive" });
       return;
     }
@@ -368,7 +373,7 @@ export default function GradesManagementPage() {
       const teacherGroups = allGroups.filter(g => g.teacherId === firestoreUser.id);
       const isStudentInTheirGroup = teacherGroups.some(g => Array.isArray(g.studentIds) && g.studentIds.includes(selectedStudent.id));
       if (!isStudentInTheirGroup) {
-        toast({ title: 'Permission Denied', description: 'You can only save grades for students in your assigned groups.', variant: 'destructive' });
+        toast({ title: 'Acceso Denegado', description: 'Solo puedes guardar las calificaciones de los estudiantes de tus grupos asignados.', variant: 'destructive' });
         return;
       }
     }
@@ -379,14 +384,21 @@ export default function GradesManagementPage() {
     }
     setAutoSaveStatus('saving');
     try {
-      const studentRef = doc(db, "students", selectedStudent.id);
-      const gradesToSave: { [key: string]: PartialScoresType } = {};
-      for (let i = 1; i <= gradingConfig.numberOfPartials; i++) { // gradingConfig from context
-          const partialKey = `partial${i}` as keyof GradeEntryFormValues;
-          gradesToSave[partialKey] = mapPartialToSave(data[partialKey]);
+      const studentRef = doc(db, "users", selectedStudent.id);
+      
+      const gradesByLevel = selectedStudent.gradesByLevel || {};
+      const currentLevel = selectedStudent.level || 'Other';
+      
+      if (!gradesByLevel[currentLevel]) {
+          gradesByLevel[currentLevel] = {};
       }
 
-      await updateDoc(studentRef, { grades: gradesToSave });
+      for (let i = 1; i <= gradingConfig.numberOfPartials; i++) {
+          const partialKey = `partial${i}` as keyof GradeEntryFormValues;
+          gradesByLevel[currentLevel][partialKey] = mapPartialToSave(data[partialKey]);
+      }
+      
+      await updateDoc(studentRef, { gradesByLevel: gradesByLevel });
 
       toast({ title: "Calificaciones Actualizadas", description: `Calificaciones para ${selectedStudent.name} guardadas exitosamente.` });
       setAutoSaveStatus('saved');
@@ -421,8 +433,8 @@ export default function GradesManagementPage() {
     const currentExamScore = typeof examScoreValue === 'number' ? examScoreValue : 0;
     const currentPartialTotal = currentTotalAccumulated + currentExamScore;
 
-    const pointsRemainingForAccumulated = gradingConfig.maxTotalAccumulatedScore - currentTotalAccumulated; // gradingConfig from context
-    const fieldsDisabled = isSubmitting || !selectedStudent || authLoading; // Use authLoading
+    const pointsRemainingForAccumulated = gradingConfig.maxTotalAccumulatedScore - currentTotalAccumulated;
+    const fieldsDisabled = isSubmitting || !selectedStudent || authLoading;
 
     return (
       <div className="space-y-6 p-1">
@@ -535,12 +547,12 @@ export default function GradesManagementPage() {
     }
   };
 
-  if (authLoading || (isLoadingData && !allStudents.length && !allGroups.length)) { // Use authLoading
+  if (authLoading || (isLoadingData && !allStudents.length && !allGroups.length)) {
     return (
         <Card>
             <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                <ClipboardCheck className="h-6 w-6 text-primary" /> Grades Management
+                <ClipboardCheck className="h-6 w-6 text-primary" /> Gestión de Calificaciones
                 </CardTitle>
                  <CardDescription>
                     Cargando configuración y datos...
@@ -560,7 +572,7 @@ export default function GradesManagementPage() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <ClipboardCheck className="h-6 w-6 text-primary" />
-            Grades Management
+            Gestión de Calificaciones
           </CardTitle>
           <CardDescription>
             {firestoreUser?.role === 'teacher'
@@ -574,7 +586,7 @@ export default function GradesManagementPage() {
            {gradingConfig.numberOfPartials < 1 && (
             <div className="mt-2 p-3 border border-red-500/50 bg-red-50 dark:bg-red-900/30 rounded-md text-sm text-red-700 dark:text-red-300 flex items-start gap-2">
                 <AlertTriangle className="h-5 w-5 mt-0.5 shrink-0"/>
-                <p>La configuración de número de parciales es inválida ({gradingConfig.numberOfPartials}). Por favor, ajústala en "App Settings". Se usará 1 parcial por defecto para la UI.</p>
+                <p>La configuración de número de parciales es inválida ({gradingConfig.numberOfPartials}). Por favor, ajústala en "Configuración de la Aplicación". Se usará 1 parcial por defecto para la UI.</p>
             </div>
           )}
         </CardHeader>
@@ -683,11 +695,11 @@ export default function GradesManagementPage() {
         <Card>
           <CardHeader>
             <CardTitle>
-              {selectedStudent ? `Editando Calificaciones para: ${selectedStudent.name}` : 'Selecciona un Estudiante para Editar Calificaciones'}
+              {selectedStudent ? `Editando Calificaciones para: ${selectedStudent.name} (${selectedStudent.level || 'Nivel no especificado'})` : 'Selecciona un Estudiante para Editar Calificaciones'}
             </CardTitle>
              <CardDescription>
-              {selectedStudent && !authLoading // Use authLoading
-                ? `Configuración Institucional: ${gradingConfig.numberOfPartials} parciales. Acum. máx ${gradingConfig.maxTotalAccumulatedScore}pts, Examen máx ${gradingConfig.maxExamScore}pts. Aprobación ${gradingConfig.passingGrade}pts.`
+              {selectedStudent && !authLoading
+                ? `Estás editando las calificaciones para el nivel actual del estudiante.`
                 : authLoading ? 'Cargando configuración de calificación...' : 'Una vez que selecciones un estudiante, podrás editar sus calificaciones aquí.'
               }
             </CardDescription>
@@ -698,7 +710,7 @@ export default function GradesManagementPage() {
                 <TabsList className={`grid w-full grid-cols-${Math.max(1, gradingConfig.numberOfPartials)}`}>
                   {Array.from({ length: Math.max(1, gradingConfig.numberOfPartials) }, (_, i) => i + 1).map((pNum) => (
                     <TabsTrigger key={`tab-trigger-p${pNum}`} value={`partial${pNum}`} disabled={!selectedStudent || isSubmitting || authLoading}>
-                      {pNum}{pNum === 1 ? 'st' : pNum === 2 ? 'nd' : pNum === 3 ? 'rd' : 'th'} Partial
+                      Parcial {pNum}
                     </TabsTrigger>
                   ))}
                 </TabsList>
