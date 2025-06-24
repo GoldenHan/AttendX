@@ -5,7 +5,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { db } from '@/lib/firebase';
-import { doc, getDoc, collection, query, where, getDocs, orderBy } from 'firebase/firestore';
+import { doc, getDoc, collection, query, where, getDocs, orderBy, limit } from 'firebase/firestore';
 import type { User, Group, Sede, Payment, AttendanceRecord, ClassroomItemSubmission, StudentGradeStructure, GradingConfiguration, PartialScores, ActivityScore } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
@@ -165,9 +165,11 @@ export default function StudentProfilePage() {
               <div className="flex items-center gap-2 text-sm"><GroupIcon className="h-4 w-4" /><span>Group: {group?.name || 'Unassigned'}</span></div>
             </CardDescription>
           </div>
-          <Button onClick={() => router.push(`/grades-management?studentId=${student.id}`)}>
-             <NotebookPen className="mr-2 h-4 w-4" /> Manage Grades
-          </Button>
+           {firestoreUser?.role !== 'caja' && (
+              <Button onClick={() => router.push(`/grades-management?studentId=${student.id}`)}>
+                 <NotebookPen className="mr-2 h-4 w-4" /> Manage Grades
+              </Button>
+            )}
         </CardHeader>
       </Card>
       

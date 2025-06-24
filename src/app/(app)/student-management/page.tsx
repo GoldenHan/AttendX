@@ -171,7 +171,7 @@ export default function StudentManagementPage() {
     fetchData();
   }, [fetchData]);
 
-  const canManageStudents = firestoreUser?.role === 'admin' || firestoreUser?.role === 'supervisor' || firestoreUser?.role === 'teacher' || firestoreUser?.role === 'caja';
+  const canEditOrAddStudents = firestoreUser?.role === 'admin' || firestoreUser?.role === 'supervisor' || firestoreUser?.role === 'teacher';
 
   const availableGroupsForAssignment = useMemo(() => {
     if (!firestoreUser || !allGroups.length) return [];
@@ -592,7 +592,7 @@ export default function StudentManagementPage() {
                 <CardTitle className="flex items-center gap-2"><GraduationCap className="h-6 w-6 text-primary" /> Student Management</CardTitle>
                 <CardDescription>Manage student records for your institution. Assign username/email for login. Students will use username as initial password.</CardDescription>
             </div>
-            {canManageStudents && (
+            {canEditOrAddStudents && (
             <Dialog open={isStudentFormDialogOpen} onOpenChange={(isOpen) => {
                 setIsStudentFormDialogOpen(isOpen);
                 if (!isOpen) {
@@ -776,7 +776,7 @@ export default function StudentManagementPage() {
                 <TableCell className="space-x-1">
                   <Button variant="ghost" size="icon" onClick={() => handleNavigate(`/student/${student.id}`)} title="View Profile"><UserProfileIcon className="h-4 w-4" /><span className="sr-only">View Profile</span></Button>
                   <Button variant="ghost" size="icon" onClick={() => handleNavigate(`/grades-management?studentId=${student.id}`)} title="Manage Grades"><NotebookPen className="h-4 w-4" /><span className="sr-only">Manage Grades</span></Button>
-                  {canManageStudents && (
+                  {canEditOrAddStudents && (
                     <>
                     <Button variant="ghost" size="icon" onClick={() => handleOpenEditDialog(student)} title="Edit Student"><Pencil className="h-4 w-4" /><span className="sr-only">Edit Student</span></Button>
                     <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => handleOpenDeleteDialog(student)} title="Delete Student"><Trash2 className="h-4 w-4" /><span className="sr-only">Delete Student</span></Button>
@@ -789,7 +789,7 @@ export default function StudentManagementPage() {
                 <TableRow><TableCell colSpan={7} className="text-center py-10">
                     {allStudents.length === 0 && selectedGroupIdForFilter === 'all' && !searchTerm ? (
                       <div><p className="text-lg font-semibold">No student records found in your institution.</p><p className="text-muted-foreground mt-2">Add new student records to see them here.</p>
-                      {canManageStudents && 
+                      {canEditOrAddStudents && 
                         <Button className="mt-6" onClick={handleOpenAddDialog}><UserPlus className="mr-2 h-4 w-4" /> Add First Student Record</Button>
                       }
                       </div>
