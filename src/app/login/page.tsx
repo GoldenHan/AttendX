@@ -34,7 +34,7 @@ import {
 import { useRouter } from 'next/navigation';
 
 const loginFormSchema = z.object({
-  identifier: z.string().min(1, { message: "Por favor, ingresa tu correo electrónico o nombre de usuario." }),
+  email: z.string().email({ message: "Por favor, ingresa un correo electrónico válido." }),
   password: z.string().min(1, { message: "La contraseña es requerida." }),
 });
 
@@ -80,7 +80,7 @@ export default function AuthPage() {
 
   const loginForm = useForm<LoginFormValues>({
     resolver: zodResolver(loginFormSchema),
-    defaultValues: { identifier: '', password: '' },
+    defaultValues: { email: '', password: '' },
   });
 
   const newAdminSignupForm = useForm<NewAdminSignupFormValues>({
@@ -102,7 +102,7 @@ export default function AuthPage() {
   const handleLoginSubmit = async (data: LoginFormValues) => {
     setIsSubmitting(true);
     try {
-      await signIn(data.identifier, data.password);
+      await signIn(data.email, data.password);
       toast({ title: 'Ingreso Exitoso', description: '¡Bienvenido/a de nuevo!' });
       router.replace('/'); 
     } catch (error: any) {
@@ -141,7 +141,7 @@ export default function AuthPage() {
       );
       toast({ title: 'Registro de Institución Exitoso', description: `Bienvenido/a, ${data.adminName}. Tu institución "${data.institutionName}" ha sido registrada. Ahora puedes iniciar sesión.` });
       setIsRegisterDialogOpen(false);
-      loginForm.setValue('identifier', data.adminEmail);
+      loginForm.setValue('email', data.adminEmail);
     } catch (error: any) {
       let errorMessage = 'Fallo al registrar la nueva institución. Por favor, inténtalo de nuevo.';
       if (error.code === 'auth/email-already-in-use') errorMessage = 'Este correo electrónico ya está en uso.';
@@ -201,12 +201,12 @@ export default function AuthPage() {
         <CardContent className="space-y-4">
             <Form {...loginForm}>
                 <form onSubmit={loginForm.handleSubmit(handleLoginSubmit)} className="space-y-4">
-                    <FormField control={loginForm.control} name="identifier" render={({ field }) => (
+                    <FormField control={loginForm.control} name="email" render={({ field }) => (
                       <FormItem>
-                        <FormLabel className="sr-only">Email o Nombre de Usuario</FormLabel>
+                        <FormLabel className="sr-only">Correo Electrónico</FormLabel>
                          <div className="relative">
-                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><UserIcon className="h-5 w-5 text-muted-foreground" /></div>
-                            <FormControl><Input placeholder="Email o Nombre de Usuario" {...field} disabled={currentLoadingState} className="bg-input pl-10" /></FormControl>
+                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Mail className="h-5 w-5 text-muted-foreground" /></div>
+                            <FormControl><Input placeholder="Correo Electrónico" {...field} disabled={currentLoadingState} className="bg-input pl-10" /></FormControl>
                         </div>
                         <FormMessage className="text-xs text-left"/>
                       </FormItem>

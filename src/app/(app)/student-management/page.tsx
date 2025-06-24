@@ -445,12 +445,12 @@ export default function StudentManagementPage() {
             if (newAssignedGroupId) {
                 const groupRef = doc(db, 'groups', newAssignedGroupId);
                 await updateDoc(groupRef, { studentIds: arrayUnion(newStudentId) });
-                toast({ title: 'Student Added', description: `${data.name} added. Login with username as password. Assigned to group.` });
+                toast({ title: 'Student Added', description: `${data.name} added. Login with their email and username as the initial password. Assigned to group.` });
             } else {
-                 toast({ title: 'Student Added', description: `${data.name} added. Login with username as password.` });
+                 toast({ title: 'Student Added', description: `${data.name} added. Login with their email and username as the initial password.` });
             }
         } else {
-             toast({ title: 'Student Added', description: `${data.name} added. Login with username as password. Could not automatically assign to group, please do it manually.`, variant: 'default' });
+             toast({ title: 'Student Added', description: `${data.name} added. Login with their email and username as the initial password. Could not automatically assign to group, please do it manually.`, variant: 'default' });
         }
       }
       studentForm.reset();
@@ -590,7 +590,7 @@ export default function StudentManagementPage() {
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div>
                 <CardTitle className="flex items-center gap-2"><GraduationCap className="h-6 w-6 text-primary" /> Student Management</CardTitle>
-                <CardDescription>Manage student records for your institution. Assign username/email for login. Students will use username as initial password.</CardDescription>
+                <CardDescription>Manage student records. New students log in with their email and use their username as the initial password.</CardDescription>
             </div>
             {canEditOrAddStudents && (
             <Dialog open={isStudentFormDialogOpen} onOpenChange={(isOpen) => {
@@ -621,7 +621,7 @@ export default function StudentManagementPage() {
                     )}/>
                      <FormField control={studentForm.control} name="username" render={({ field }) => (
                         <FormItem>
-                          <FormLabel>Username (for login & initial password)*</FormLabel>
+                          <FormLabel>Username (for initial password)*</FormLabel>
                           <FormControl><Input placeholder="johndoe123" {...field} disabled={!!editingStudent} /></FormControl>
                           {!editingStudent && usernameCheckMessage && (
                             <p className={`text-xs mt-1 ${getFieldCheckMessageColor(usernameCheckStatus)}`}>

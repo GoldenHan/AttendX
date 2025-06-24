@@ -28,7 +28,7 @@ interface AuthContextType {
   gradingConfig: GradingConfiguration;
   classScheduleConfig: ClassScheduleConfiguration; 
   loading: boolean;
-  signIn: (identifier: string, pass: string) => Promise<void>;
+  signIn: (email: string, pass: string) => Promise<void>;
   signInWithGoogle: () => Promise<void>;
   signUp: (
     name: string,
@@ -178,40 +178,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     return () => unsubscribe();
   }, [fetchGradingConfigForInstitution, fetchScheduleConfigForInstitution, pathname]);
 
-  const signIn = async (identifier: string, pass: string) => {
+  const signIn = async (email: string, pass: string) => {
     try {
-      let emailToSignIn: string;
-
-      // If identifier is not an email, treat it as a username
-      if (!identifier.includes('@')) {
-        const usersRef = collection(db, 'users');
-        const q = query(usersRef, where("username", "==", identifier.trim()));
-        const querySnapshot = await getDocs(q);
-
-        if (querySnapshot.empty) {
-          throw new Error("El usuario o la contraseña son incorrectos.");
-        }
-        
-        if (querySnapshot.size > 1) {
-          throw new Error("Este nombre de usuario existe en múltiples instituciones. Por favor, inicia sesión con tu correo electrónico para desambiguar.");
-        }
-        
-        const userDoc = querySnapshot.docs[0].data();
-        if (!userDoc.email) {
-          throw new Error("La cuenta de usuario no tiene un correo electrónico asociado. Por favor, contacta al administrador.");
-        }
-        emailToSignIn = userDoc.email;
-      } else {
-        // If it looks like an email, use it directly
-        emailToSignIn = identifier.trim();
-      }
-
-      await signInWithEmailAndPassword(auth, emailToSignIn, pass);
+      await signInWithEmailAndPassword(auth, email.trim(), pass);
     } catch (error: any) {
         if (error.code === 'auth/invalid-credential' || error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
-            throw new Error('El usuario o la contraseña son incorrectos.');
+            throw new Error('El correo electrónico o la contraseña son incorrectos.');
         }
-        // Re-throw custom messages from our logic or Firebase errors
+        // Re-throw other Firebase errors
         throw error;
     }
   };

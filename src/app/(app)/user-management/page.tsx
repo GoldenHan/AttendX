@@ -655,8 +655,8 @@ export default function StaffManagementPage() {
           <CardTitle className="flex items-center gap-2"><Briefcase className="h-6 w-6 text-primary" /> Gestión de Personal</CardTitle>
           <CardDescription>
             {firestoreUser?.role === 'supervisor' 
-              ? "Gestionar maestros dentro de tu Sede. El personal nuevo usará su nombre de usuario como contraseña temporal."
-              : "Gestionar todas las cuentas de personal de tu institución. El personal nuevo usará su nombre de usuario como contraseña temporal."
+              ? "Gestionar maestros dentro de tu Sede. El personal nuevo usará su correo electrónico para iniciar sesión y su nombre de usuario como contraseña temporal."
+              : "Gestionar todas las cuentas de personal de tu institución. El personal nuevo usará su correo electrónico para iniciar sesión y su nombre de usuario como contraseña temporal."
             }
           </CardDescription>
         </div>
@@ -708,7 +708,7 @@ export default function StaffManagementPage() {
                       <FormItem><FormLabel>Nombre Completo*</FormLabel><FormControl><Input placeholder="Jane Doe" {...field} /></FormControl><FormMessage /></FormItem>
                   )}/>
                   <FormField control={form.control} name="username" render={({ field }) => (
-                      <FormItem><FormLabel>Nombre de Usuario (para login y contraseña inicial)*</FormLabel><FormControl><Input placeholder="janedoe_staff" {...field} disabled={!!editingStaff} /></FormControl>
+                      <FormItem><FormLabel>Nombre de Usuario (para contraseña inicial)*</FormLabel><FormControl><Input placeholder="janedoe_staff" {...field} disabled={!!editingStaff} /></FormControl>
                       {!editingStaff && usernameCheckMessage && (
                         <p className={`text-xs mt-1 ${getUsernameCheckMessageColor()}`}>
                             {usernameCheckStatus === 'checking' && <Loader2 className="inline h-3 w-3 mr-1 animate-spin" />}
