@@ -22,7 +22,7 @@ interface CertificateData {
 export default function CertificatePage() {
   const router = useRouter();
   const params = useParams();
-  const { firestoreUser } = useAuth();
+  const { firestoreUser, institution } = useAuth(); // Use institution from context
   const { studentId, levelName: encodedLevelName } = params;
   const levelName = decodeURIComponent(encodedLevelName as string);
 
@@ -30,8 +30,10 @@ export default function CertificatePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [certificateText, setCertificateText] = useState('');
-  const [appName, setAppName] = useState('');
-  const [appLogoUrl, setAppLogoUrl] = useState<string | null>(null);
+  
+  // App name and logo are now derived from the AuthContext
+  const appName = institution?.appName || institution?.name || 'AttendX';
+  const appLogoUrl = institution?.logoDataUrl || null;
 
 
   const fetchDataForCertificate = useCallback(async () => {
@@ -88,18 +90,15 @@ export default function CertificatePage() {
 
   useEffect(() => {
     fetchDataForCertificate();
+    // Load template from localStorage
     const savedTemplate = localStorage.getItem('certificateTemplate');
-    const savedAppName = localStorage.getItem('appName');
-    const savedLogoUrl = localStorage.getItem('appLogoDataUrl');
-    
     setCertificateText(savedTemplate || "La academia [NOMBRE_INSTITUCION] hace constar que [NOMBRE_ESTUDIANTE] ha completado el nivel [NOMBRE_NIVEL].");
-    setAppName(savedAppName || 'SERVEX');
-    setAppLogoUrl(savedLogoUrl);
   }, [fetchDataForCertificate]);
   
   const getFormattedCertificateText = () => {
     if (!data) return '';
     let text = certificateText;
+    text = text.replace(/\[NOMBRE_INSTITUCION]/g, appName.toUpperCase());
     text = text.replace(/\[NOMBRE_ESTUDIANTE]/g, data.student.name.toUpperCase());
     text = text.replace(/\[NOMBRE_NIVEL]/g, levelName.toUpperCase());
     text = text.replace(/\[TIPO_PROGRAMA]/g, data.group?.type.toUpperCase() || 'GENERAL');
@@ -182,8 +181,7 @@ export default function CertificatePage() {
             </div>
             <div>
                 <div className="w-4/5 h-px bg-gray-400 mx-auto mb-2"></div>
-                <p className="text-sm text-gray-600 dark:text-gray-300">Firma del Director/Supervisor</p>
-                 <p className="text-sm font-medium text-gray-800 dark:text-gray-200">____________________</p>
+                <p className="text-sm font-medium text-gray-800 dark:text-gray-200">Firma del Director/Supervisor</p>
             </div>
         </footer>
       </div>
