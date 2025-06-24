@@ -598,29 +598,6 @@ export default function DashboardPage() {
           </Card>
         </div>
       )}
-
-      {/* Academy Overview Image - Show for roles that are not 'student' or 'caja' */}
-      {firestoreUser && !['student', 'caja'].includes(firestoreUser.role) && (
-        <Card className="hidden md:flex md:flex-col">
-          <CardHeader>
-            <CardTitle>Vista General de la Academia</CardTitle>
-            <CardDescription>Un vistazo a nuestro ambiente de aprendizaje.</CardDescription>
-          </CardHeader>
-          <CardContent className="flex-grow">
-            <div className="aspect-video w-full overflow-hidden rounded-md">
-              <Image
-                src="https://placehold.co/600x400.png"
-                alt="Salón de clases de la academia"
-                width={600}
-                height={400}
-                className="object-cover w-full h-full"
-                data-ai-hint="classroom students"
-              />
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
     </div>
   );
 }
