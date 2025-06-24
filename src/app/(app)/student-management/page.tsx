@@ -13,8 +13,8 @@ import {
 } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Loader2, Pencil, Trash2, UserPlus, Search, GraduationCap, NotebookPen } from 'lucide-react';
-import type { User, Group, GradingConfiguration } from '@/types';
+import { Loader2, Pencil, Trash2, UserPlus, Search, GraduationCap, NotebookPen, User as UserProfileIcon } from 'lucide-react';
+import type { User, Group, GradingConfiguration, Sede } from '@/types';
 import { DEFAULT_GRADING_CONFIG, getDefaultStudentGradeStructure } from '@/types';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, deleteDoc, doc, updateDoc, query, where, writeBatch, arrayUnion, arrayRemove, limit } from 'firebase/firestore';
@@ -82,7 +82,8 @@ function debounce<F extends (...args: any[]) => any>(func: F, waitFor: number) {
 export default function StudentManagementPage() {
   const router = useRouter();
   const [allStudents, setAllStudents] = useState<User[]>([]);
-  const [allGroups, setAllGroups] = useState<Group[]>([]); // All groups for the current institution
+  const [allGroups, setAllGroups] = useState<Group[]>([]);
+  const [allSedes, setAllSedes] = useState<Sede[]>([]);
   const [gradingConfig, setGradingConfig] = useState<GradingConfiguration>(DEFAULT_GRADING_CONFIG);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -130,7 +131,7 @@ export default function StudentManagementPage() {
     }
     setIsLoading(true);
     try {
-      const configDocRef = doc(db, 'appConfiguration', 'currentGradingConfig'); // Assuming this might become institution-specific later
+      const configDocRef = doc(db, 'appConfiguration', 'currentGradingConfig');
       const configSnap = await getDoc(configDocRef);
       if (configSnap.exists()) {
         setGradingConfig(configSnap.data() as GradingConfiguration);
@@ -151,6 +152,10 @@ export default function StudentManagementPage() {
       );
       const groupsSnapshot = await getDocs(groupsQuery);
       setAllGroups(groupsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as Group)));
+      
+      const sedesQuery = query(collection(db, 'sedes'), where('institutionId', '==', firestoreUser.institutionId));
+      const sedesSnapshot = await getDocs(sedesQuery);
+      setAllSedes(sedesSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as Sede)));
 
     } catch (error) {
       console.error("Error fetching data for student management:", error);
@@ -289,7 +294,6 @@ export default function StudentManagementPage() {
     }
     setEmailCheckStatus('checking'); setEmailCheckMessage('Checking email...');
     try {
-      // Check within the same institution first for local records
       const qFirestore = query(collection(db, 'users'), 
         where('email', '==', email.trim()),
         where('institutionId', '==', firestoreUser.institutionId),
@@ -300,10 +304,6 @@ export default function StudentManagementPage() {
         setEmailCheckStatus('exists'); setEmailCheckMessage('Email already used for a user in this institution.');
         return;
       }
-      // If not in local institution records, check globally (as Firebase Auth emails are global)
-      // This requires a broader query or trusting Firebase Auth to handle it during actual signup
-      // For UI feedback, we can just say "Email appears available" if not in local institutional records.
-      // The real check for global Firebase Auth uniqueness happens in AuthContext.
       setEmailCheckStatus('not_found'); setEmailCheckMessage('Email appears available.');
 
     } catch (error) { setEmailCheckStatus('error'); setEmailCheckMessage('Error checking email.'); }
@@ -347,14 +347,13 @@ export default function StudentManagementPage() {
     }
     setIsSubmitting(true);
 
-    if (!editingStudent) { // Only check for new students
+    if (!editingStudent) { 
         if (usernameCheckStatus === 'exists') {
             toast({ title: 'Validation Error', description: 'Username already taken in this institution. Please choose another.', variant: 'destructive' });
             setIsSubmitting(false);
             return;
         }
-        // Firebase Auth will handle global email uniqueness check during actual signup
-        if (emailCheckStatus === 'exists') { // This checks if email is used in *this institution's* Firestore records
+        if (emailCheckStatus === 'exists') {
              toast({ title: 'Validation Error', description: 'This email is already associated with a user in this institution.', variant: 'destructive' });
              setIsSubmitting(false);
              return;
@@ -369,11 +368,10 @@ export default function StudentManagementPage() {
         studentSedeIdToSet = group?.sedeId || null;
     } else if (firestoreUser.role === 'supervisor' && firestoreUser.sedeId) {
         studentSedeIdToSet = firestoreUser.sedeId;
-    } else if (firestoreUser.role === 'teacher' && firestoreUser.sedeId) { // If teachers are directly associated with a Sede
+    } else if (firestoreUser.role === 'teacher' && firestoreUser.sedeId) {
         studentSedeIdToSet = firestoreUser.sedeId;
     }
     
-    // Supervisor/Teacher constraint checks
     if (firestoreUser.role === 'supervisor' && studentSedeIdToSet !== firestoreUser.sedeId && studentSedeIdToSet !== null ) {
         toast({ title: "Permission Denied", description: "Supervisors can only manage students within their own Sede.", variant: "destructive" });
         setIsSubmitting(false); return;
@@ -400,10 +398,9 @@ export default function StudentManagementPage() {
           age: data.age,
           gender: data.gender,
           preferredShift: data.preferredShift,
-          sedeId: studentSedeIdToSet, // Update Sede ID based on new assignment or context
-          institutionId: firestoreUser.institutionId, // Ensure institution ID remains
+          sedeId: studentSedeIdToSet,
+          institutionId: firestoreUser.institutionId,
         };
-        // Email and username are not changed for existing students here
         batch.update(studentRef, updateData);
 
         const previousGroup = allGroups.find(g => Array.isArray(g.studentIds) && g.studentIds.includes(editingStudent.id));
@@ -440,28 +437,20 @@ export default function StudentManagementPage() {
           creatorContextForAuth
         );
         
-        // After signUp, Firestore user might take a moment to be queryable.
-        // Re-fetch or optimistically update local state is better than direct query here.
-        // For now, we rely on fetchData() being called.
-        
-        if (newAssignedGroupId) {
-            // Need to find the new student's ID to add to group if signUp doesn't return it or update local state immediately
-            // This is a common challenge post-creation. AuthContext might need to return new user's ID.
-            // For now, we'll assume fetchData() will update groups correctly if student is added to user list first.
-            // Or, make adding to group a secondary step after student is confirmed in Firestore.
-            await fetchData(); // Re-fetch to get new student ID and then assign to group
-            const studentQuery = query(collection(db, 'users'), where('email', '==', data.email), where('institutionId', '==', firestoreUser.institutionId), limit(1));
-            const studentSnapshot = await getDocs(studentQuery);
-            if (!studentSnapshot.empty) {
-                const newStudentId = studentSnapshot.docs[0].id;
+        await fetchData(); 
+        const studentQuery = query(collection(db, 'users'), where('email', '==', data.email), where('institutionId', '==', firestoreUser.institutionId), limit(1));
+        const studentSnapshot = await getDocs(studentQuery);
+        if (!studentSnapshot.empty) {
+            const newStudentId = studentSnapshot.docs[0].id;
+            if (newAssignedGroupId) {
                 const groupRef = doc(db, 'groups', newAssignedGroupId);
                 await updateDoc(groupRef, { studentIds: arrayUnion(newStudentId) });
                 toast({ title: 'Student Added', description: `${data.name} added. Login with username as password. Assigned to group.` });
             } else {
-                 toast({ title: 'Student Added', description: `${data.name} added. Login with username as password. Could not automatically assign to group, please do it manually.`, variant: 'default' });
+                 toast({ title: 'Student Added', description: `${data.name} added. Login with username as password.` });
             }
         } else {
-            toast({ title: 'Student Added', description: `${data.name} added. Login with username as password.` });
+             toast({ title: 'Student Added', description: `${data.name} added. Login with username as password. Could not automatically assign to group, please do it manually.`, variant: 'default' });
         }
       }
       studentForm.reset();
@@ -474,7 +463,7 @@ export default function StudentManagementPage() {
       let userMessage = editingStudent ? 'Update Student Failed' : 'Add Student Failed';
        if (error.code === 'auth/email-already-in-use') {
         userMessage = 'This email is already associated with a Firebase Authentication account globally.';
-      } else if (error.code === 'auth/username-already-exists') { // Custom code from AuthContext
+      } else if (error.code === 'auth/username-already-exists') {
         userMessage = 'This username is already in use in this institution.';
       } else if (error.message) {
         userMessage += `: ${error.message}`;
@@ -494,8 +483,6 @@ export default function StudentManagementPage() {
       toast({ title: "Permission Denied", description: "Supervisors can only delete students from their own Sede.", variant: "destructive"});
       return;
     }
-    // Teachers might have stricter deletion rules based on group membership rather than direct Sede.
-    // For now, a teacher can delete if the student is in one of their groups.
     if (firestoreUser?.role === 'teacher') {
         const isStudentInTeacherGroup = allGroups.some(g => g.teacherId === firestoreUser.id && Array.isArray(g.studentIds) && g.studentIds.includes(student.id));
         if (!isStudentInTeacherGroup) {
@@ -555,9 +542,9 @@ export default function StudentManagementPage() {
       setIsSubmitting(false);
     }
   };
-
-  const handleGoToManageGrades = (studentId: string) => {
-    router.push(`/grades-management?studentId=${studentId}`);
+  
+  const handleNavigate = (path: string) => {
+    router.push(path);
   };
 
   const getStudentGroupName = (studentId: string): string => {
@@ -567,11 +554,8 @@ export default function StudentManagementPage() {
   
   const getStudentSedeName = (student: User): string => {
     if (!student.sedeId) return "N/A";
-    const sede = allGroups.find(g => g.sedeId === student.sedeId); // Simplistic, assumes student is in a group with that Sede
-    if (sede) return sede.name;
-    // Fallback if student has a sedeId but no group is found (e.g. direct assignment)
-    // This part requires fetching Sedes list if not already available. For now, this is a placeholder.
-    return `Sede ID: ${student.sedeId.substring(0, 5)}...`;
+    const sede = allSedes.find(s => s.id === student.sedeId);
+    return sede ? sede.name : `Sede ID: ${student.sedeId.substring(0, 5)}...`;
   }
 
   if (isLoading && allStudents.length === 0 && allGroups.length === 0) {
@@ -790,7 +774,8 @@ export default function StudentManagementPage() {
                 <TableCell><span className={`px-2 py-1 text-xs font-medium rounded-full ${getStudentGroupName(student.id) === "Unassigned" ? "bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300" : "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300"}`}>{getStudentGroupName(student.id)}</span></TableCell>
                 <TableCell>{getStudentSedeName(student)}</TableCell>
                 <TableCell className="space-x-1">
-                  <Button variant="ghost" size="icon" onClick={() => handleGoToManageGrades(student.id)} title="Manage Grades"><NotebookPen className="h-4 w-4" /><span className="sr-only">Manage Grades</span></Button>
+                  <Button variant="ghost" size="icon" onClick={() => handleNavigate(`/student/${student.id}`)} title="View Profile"><UserProfileIcon className="h-4 w-4" /><span className="sr-only">View Profile</span></Button>
+                  <Button variant="ghost" size="icon" onClick={() => handleNavigate(`/grades-management?studentId=${student.id}`)} title="Manage Grades"><NotebookPen className="h-4 w-4" /><span className="sr-only">Manage Grades</span></Button>
                   {canManageStudents && (
                     <>
                     <Button variant="ghost" size="icon" onClick={() => handleOpenEditDialog(student)} title="Edit Student"><Pencil className="h-4 w-4" /><span className="sr-only">Edit Student</span></Button>
@@ -836,5 +821,3 @@ export default function StudentManagementPage() {
     </>
   );
 }
-
-    
