@@ -31,20 +31,6 @@ export function Header({ appLogoUrl, appName }: { appLogoUrl?: string | null, ap
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
 
-  const [currentLanguage, setCurrentLanguage] = useState<'EN' | 'ES'>(() => {
-    if (typeof window !== 'undefined') {
-      const storedLang = localStorage.getItem('appLanguage') as 'EN' | 'ES';
-      return ['EN', 'ES'].includes(storedLang) ? storedLang : 'ES';
-    }
-    return 'ES'; 
-  });
-
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('appLanguage', currentLanguage);
-    }
-  }, [currentLanguage]);
-
   useEffect(() => {
     if (!firestoreUser?.id) return;
 
@@ -85,14 +71,6 @@ export function Header({ appLogoUrl, appName }: { appLogoUrl?: string | null, ap
     }
   };
 
-  const toggleLanguage = () => {
-    setCurrentLanguage((prevLang) => {
-      const newLang = prevLang === 'ES' ? 'EN' : 'ES';
-      console.log(`Language preference set to: ${newLang}`);
-      return newLang;
-    });
-  };
-
   return (
     <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b border-border bg-primary px-4 text-primary-foreground sm:static sm:h-auto sm:px-6 py-2">
       <SidebarTrigger className="text-primary-foreground md:hidden" />
@@ -113,17 +91,6 @@ export function Header({ appLogoUrl, appName }: { appLogoUrl?: string | null, ap
         </Link>
       </div>
       <div className="ml-auto flex items-center gap-2">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={toggleLanguage}
-          className="text-primary-foreground hover:bg-white/20 focus-visible:ring-primary-foreground px-2"
-          aria-label={`Switch language to ${currentLanguage === 'ES' ? 'English' : 'Español'}`}
-        >
-          <Languages className="h-4 w-4 mr-1 sm:mr-2" />
-          <span className="hidden sm:inline">{currentLanguage}</span>
-        </Button>
-
         {authUser && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>

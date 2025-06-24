@@ -46,14 +46,14 @@ import {
 import { Label } from "@/components/ui/label";
 
 const staffFormSchema = z.object({
-  name: z.string().min(2, { message: "Name must be at least 2 characters." }),
-  username: z.string().min(3, "Username must be at least 3 characters.").regex(/^[a-zA-Z0-9_.-]+$/, "Username can only contain letters, numbers, dots, underscores, or hyphens."),
-  email: z.string().email({ message: "Invalid email address." }),
+  name: z.string().min(2, { message: "El nombre debe tener al menos 2 caracteres." }),
+  username: z.string().min(3, "El nombre de usuario debe tener al menos 3 caracteres.").regex(/^[a-zA-Z0-9_.-]+$/, "El nombre de usuario solo puede contener letras, números, puntos, guiones bajos o guiones."),
+  email: z.string().email({ message: "Dirección de correo electrónico inválida." }),
   phoneNumber: z.string().optional().or(z.literal('')),
-  role: z.enum(['teacher', 'admin', 'caja', 'supervisor'], { required_error: "Role is required." }),
-  photoUrl: z.string().url({ message: "Please enter a valid URL for photo." }).optional().or(z.literal('')),
+  role: z.enum(['teacher', 'admin', 'caja', 'supervisor'], { required_error: "El rol es requerido." }),
+  photoUrl: z.string().url({ message: "Por favor, ingresa una URL válida para la foto." }).optional().or(z.literal('')),
   assignedGroupId: z.string().optional(), // For teachers
-  attendanceCode: z.string().min(4, "Code must be at least 4 characters.").max(20, "Code cannot exceed 20 characters.").optional().or(z.literal('')),
+  attendanceCode: z.string().min(4, "El código debe tener al menos 4 caracteres.").max(20, "El código no puede exceder los 20 caracteres.").optional().or(z.literal('')),
   sedeId: z.string().optional().or(z.literal('')), // For teachers, supervisors, admins
 });
 
@@ -112,7 +112,7 @@ export default function StaffManagementPage() {
   const fetchData = useCallback(async () => {
     if (!firestoreUser?.institutionId) {
         setIsLoading(false);
-        if(firestoreUser) toast({ title: "No Institution ID", description: "Cannot fetch staff data without an institution context.", variant: "destructive"});
+        if(firestoreUser) toast({ title: "Sin ID de Institución", description: "No se puede obtener datos del personal sin un contexto de institución.", variant: "destructive"});
         return;
     }
     setIsLoading(true);
@@ -143,7 +143,7 @@ export default function StaffManagementPage() {
 
     } catch (error) {
       console.error("Error fetching data:", error);
-      toast({ title: 'Error fetching data', description: 'Could not load staff users, groups, or sedes for your institution.', variant: 'destructive' });
+      toast({ title: 'Error al obtener datos', description: 'No se pudo cargar el personal, los grupos o las sedes de su institución.', variant: 'destructive' });
     } finally {
       setIsLoading(false);
     }
@@ -157,7 +157,7 @@ export default function StaffManagementPage() {
     if (editingStaff && editingStaff.username === username) {
       setUsernameCheckStatus('idle'); setUsernameCheckMessage(null); return;
     }
-    setUsernameCheckStatus('checking'); setUsernameCheckMessage('Checking username...');
+    setUsernameCheckStatus('checking'); setUsernameCheckMessage('Verificando nombre de usuario...');
     try {
       const q = query(collection(db, 'users'), 
         where('username', '==', username.trim()), 
@@ -166,18 +166,18 @@ export default function StaffManagementPage() {
       );
       const querySnapshot = await getDocs(q);
       if (!querySnapshot.empty) {
-        setUsernameCheckStatus('exists'); setUsernameCheckMessage('Username already taken in this institution.');
+        setUsernameCheckStatus('exists'); setUsernameCheckMessage('Este nombre de usuario ya está en uso en esta institución.');
       } else {
-        setUsernameCheckStatus('not_found'); setUsernameCheckMessage('Username available.');
+        setUsernameCheckStatus('not_found'); setUsernameCheckMessage('Nombre de usuario disponible.');
       }
-    } catch (error) { setUsernameCheckStatus('error'); setUsernameCheckMessage('Error checking username.'); }
+    } catch (error) { setUsernameCheckStatus('error'); setUsernameCheckMessage('Error al verificar el nombre de usuario.'); }
   }, [editingStaff, firestoreUser?.institutionId]);
 
   const checkEmailExistence = useCallback(async (email: string) => {
      if (editingStaff && editingStaff.email === email) {
       setEmailCheckStatus('idle'); setEmailCheckMessage(null); return;
     }
-    setEmailCheckStatus('checking'); setEmailCheckMessage(`Verifying email...`);
+    setEmailCheckStatus('checking'); setEmailCheckMessage(`Verificando email...`);
     try {
       const q = query(collection(db, 'users'), 
         where('email', '==', email.trim()),
@@ -186,25 +186,25 @@ export default function StaffManagementPage() {
       const querySnapshot = await getDocs(q);
       if (!querySnapshot.empty) {
         setEmailCheckStatus('exists');
-        setEmailCheckMessage(`An account with this email already exists in this institution's Firestore.`);
+        setEmailCheckMessage(`Una cuenta con este email ya existe en esta institución.`);
       } else {
         const globalEmailAuthQuery = query(collection(db, 'users'), where('email', '==', email.trim()), limit(1));
         const globalAuthSnapshot = await getDocs(globalEmailAuthQuery);
         if (!globalAuthSnapshot.empty && globalAuthSnapshot.docs[0].data().institutionId !== firestoreUser?.institutionId) {
             setEmailCheckStatus('exists');
-            setEmailCheckMessage(`This email is registered to another institution.`);
+            setEmailCheckMessage(`Este email está registrado en otra institución.`);
         } else if (!globalAuthSnapshot.empty && globalAuthSnapshot.docs[0].data().institutionId === firestoreUser?.institutionId) {
              setEmailCheckStatus('exists');
-             setEmailCheckMessage(`An account with this email already exists in this institution's Firestore.`);
+             setEmailCheckMessage(`Una cuenta con este email ya existe en esta institución.`);
         } else {
             setEmailCheckStatus('not_found');
-            setEmailCheckMessage(`Email available.`);
+            setEmailCheckMessage(`Email disponible.`);
         }
       }
     } catch (error) {
       console.error("Error checking email existence:", error);
       setEmailCheckStatus('error');
-      setEmailCheckMessage('Error verifying email. Please try again.');
+      setEmailCheckMessage('Error al verificar el email. Por favor, inténtalo de nuevo.');
     }
   }, [editingStaff, firestoreUser?.institutionId]);
 
@@ -232,7 +232,7 @@ export default function StaffManagementPage() {
   useEffect(() => {
     if (isStaffFormDialogOpen && watchedUsername && (!editingStaff || watchedUsername !== editingStaff.username)) {
         if (watchedUsername.length >= 3) debouncedCheckUsername(watchedUsername);
-        else { setUsernameCheckStatus('idle'); setUsernameCheckMessage('Username must be at least 3 characters.'); }
+        else { setUsernameCheckStatus('idle'); setUsernameCheckMessage('El nombre de usuario debe tener al menos 3 caracteres.'); }
     } else if (!watchedUsername && isStaffFormDialogOpen) {
       resetFieldChecks();
     }
@@ -249,7 +249,7 @@ export default function StaffManagementPage() {
       resetEmailCheck();
     } else if (watchedEmailValue && isStaffFormDialogOpen) {
       setEmailCheckStatus('idle');
-      setEmailCheckMessage('Please enter a valid email address.');
+      setEmailCheckMessage('Por favor, ingresa una dirección de email válida.');
     }
   }, [watchedEmailValue, isStaffFormDialogOpen, editingStaff, debouncedCheckEmail, resetEmailCheck]);
 
@@ -257,21 +257,19 @@ export default function StaffManagementPage() {
     if (!firestoreUser || !firestoreUser.institutionId) return [];
     
     if (firestoreUser.role === 'supervisor') {
-      // Supervisors only see teachers from their own Sede and themselves.
       return staffUsers.filter(staff => 
         (staff.role === 'teacher' && staff.sedeId === firestoreUser.sedeId) ||
         staff.id === firestoreUser.id
       );
     }
     
-    // Admins see all staff in their institution.
     return staffUsers.filter(staff => staff.institutionId === firestoreUser.institutionId);
   }, [staffUsers, firestoreUser]);
 
   const getSedeName = useCallback((sedeId?: string | null) => {
     if (!sedeId) return 'N/A';
     const sede = allSedes.find(s => s.id === sedeId);
-    return sede ? sede.name : 'Unknown Sede';
+    return sede ? sede.name : 'Sede Desconocida';
   }, [allSedes]);
   
   const availableSedesForAssignment = useMemo(() => {
@@ -294,12 +292,12 @@ export default function StaffManagementPage() {
     return (
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2"><Briefcase className="h-6 w-6 text-primary" /> Staff Management</CardTitle>
-          <CardDescription>Manage teacher, administrator, cashier, and supervisor accounts.</CardDescription>
+          <CardTitle className="flex items-center gap-2"><Briefcase className="h-6 w-6 text-primary" /> Gestión de Personal</CardTitle>
+          <CardDescription>Gestionar cuentas de maestros, administradores, cajeros y supervisores.</CardDescription>
         </CardHeader>
         <CardContent className="flex items-center justify-center py-10">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
-           <p className="ml-2">Loading staff, groups, and sedes...</p>
+           <p className="ml-2">Cargando personal, grupos y sedes...</p>
         </CardContent>
       </Card>
     );
@@ -309,10 +307,10 @@ export default function StaffManagementPage() {
     return (
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2"><Briefcase className="h-6 w-6 text-primary" /> Staff Management</CardTitle>
+          <CardTitle className="flex items-center gap-2"><Briefcase className="h-6 w-6 text-primary" /> Gestión de Personal</CardTitle>
         </CardHeader>
         <CardContent className="flex items-center justify-center py-10">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" /><p className="ml-2">Verifying user role...</p>
+          <Loader2 className="h-8 w-8 animate-spin text-primary" /><p className="ml-2">Verificando rol de usuario...</p>
         </CardContent>
       </Card>
     );
@@ -321,16 +319,16 @@ export default function StaffManagementPage() {
   if (firestoreUser.role !== 'admin' && firestoreUser.role !== 'supervisor') {
     return (
       <Card>
-        <CardHeader><CardTitle>Access Denied</CardTitle></CardHeader>
-        <CardContent><p>You do not have permission to manage Staff.</p></CardContent>
+        <CardHeader><CardTitle>Acceso Denegado</CardTitle></CardHeader>
+        <CardContent><p>No tienes permiso para gestionar el Personal.</p></CardContent>
       </Card>
     );
   }
   if (!firestoreUser.institutionId && !isLoading) {
     return (
       <Card>
-        <CardHeader><CardTitle>Institution Not Set</CardTitle></CardHeader>
-        <CardContent><p>Your account is not associated with an institution. Please contact platform support.</p></CardContent>
+        <CardHeader><CardTitle>Institución no establecida</CardTitle></CardHeader>
+        <CardContent><p>Tu cuenta no está asociada a una institución. Por favor, contacta a soporte.</p></CardContent>
       </Card>
     );
   }
@@ -370,32 +368,32 @@ export default function StaffManagementPage() {
   const handleStaffFormSubmit = async (data: StaffFormValues) => {
     setIsSubmitting(true);
     if (!firestoreUser?.institutionId) {
-        toast({ title: "Error", description: "Your account is not linked to an institution.", variant: "destructive"});
+        toast({ title: "Error", description: "Tu cuenta no está vinculada a una institución.", variant: "destructive"});
         setIsSubmitting(false); return;
     }
     if (!data.email || !data.username) {
-        toast({ title: 'Email and Username Required', description: 'Email and Username are required for all staff members.', variant: 'destructive' });
+        toast({ title: 'Email y Nombre de Usuario Requeridos', description: 'Email y Nombre de Usuario son requeridos para todo el personal.', variant: 'destructive' });
         setIsSubmitting(false); return;
     }
     
     if (!editingStaff) {
         if (usernameCheckStatus === 'exists') {
-            toast({ title: 'Validation Error', description: 'Username already taken in this institution. Please choose another.', variant: 'destructive' });
+            toast({ title: 'Error de Validación', description: 'El nombre de usuario ya está en uso en esta institución. Por favor, elige otro.', variant: 'destructive' });
             setIsSubmitting(false); return;
         }
         if (emailCheckStatus === 'exists') {
-            toast({ title: 'Email Exists', description: `An account with email ${data.email} already exists in this institution or globally.`, variant: 'destructive' });
+            toast({ title: 'Email ya existe', description: `Una cuenta con el email ${data.email} ya existe en esta institución o globalmente.`, variant: 'destructive' });
             setIsSubmitting(false); return;
         }
     }
     
     if (firestoreUser?.role === 'supervisor') {
         if (!editingStaff && data.role !== 'teacher') { 
-            toast({ title: "Action Denied", description: "Supervisors can only add users with the 'Teacher' role.", variant: "destructive" });
+            toast({ title: "Acción Denegada", description: "Los supervisores solo pueden agregar usuarios con el rol de 'Maestro'.", variant: "destructive" });
             setIsSubmitting(false); return;
         }
         if (data.sedeId !== firestoreUser.sedeId && (data.role === 'teacher' || data.role === 'supervisor')) {
-            toast({ title: "Action Denied", description: `Staff must be assigned to your Sede (${getSedeName(firestoreUser.sedeId)}).`, variant: "destructive" });
+            toast({ title: "Acción Denegada", description: `El personal debe ser asignado a tu Sede (${getSedeName(firestoreUser.sedeId)}).`, variant: "destructive" });
             setIsSubmitting(false); return;
         }
     }
@@ -421,7 +419,7 @@ export default function StaffManagementPage() {
         };
         await updateDoc(staffRef, updateData);
         staffMemberId = editingStaff.id;
-        toast({ title: 'Staff User Updated', description: `${data.name}'s Firestore record updated successfully.` });
+        toast({ title: 'Usuario del Personal Actualizado', description: `El registro de ${data.name} fue actualizado exitosamente.` });
 
       } else { 
         await signUpInAuthContext(
@@ -438,11 +436,11 @@ export default function StaffManagementPage() {
         if (!querySnapshot.empty) {
             staffMemberId = querySnapshot.docs[0].id;
         } else {
-             throw new Error("Could not retrieve newly created staff user from Firestore within the institution.");
+             throw new Error("No se pudo recuperar el nuevo usuario del personal desde Firestore dentro de la institución.");
         }
         toast({
-          title: 'Staff User Added',
-          description: `${data.name}'s record and Auth account created. They will be prompted to change password (which is their username) on first login.`
+          title: 'Usuario del Personal Agregado',
+          description: `El registro y la cuenta de Auth de ${data.name} fueron creados. Se le pedirá cambiar la contraseña (que es su nombre de usuario) en su primer inicio de sesión.`
         });
       }
 
@@ -462,8 +460,8 @@ export default function StaffManagementPage() {
             const groupDoc = allGroups.find(g => g.id === newlySelectedGroupId);
             if(groupDoc && groupDoc.teacherId && groupDoc.teacherId !== staffMemberId) {
                  toast({
-                    title: 'Group Reassignment',
-                    description: `Group ${groupDoc.name} was previously assigned to another teacher. It's now assigned to ${data.name}.`,
+                    title: 'Reasignación de Grupo',
+                    description: `El grupo ${groupDoc.name} estaba previamente asignado a otro maestro. Ahora está asignado a ${data.name}.`,
                     variant: 'default'
                 });
             }
@@ -507,13 +505,13 @@ export default function StaffManagementPage() {
       resetFieldChecks();
       await fetchData();
     } catch (error: any) {
-      let userMessage = editingStaff ? 'Update Failed' : 'Add Failed';
-      if (error.code === 'auth/email-already-in-use') userMessage = 'This email is already associated with a Firebase Authentication account globally.';
-      else if (error.code === 'auth/username-already-exists') userMessage = 'This username is already in use in this institution.';
-      else if (error.code === 'auth/weak-password') userMessage = 'Password is too weak (must be at least 6 characters for Firebase Auth).';
+      let userMessage = editingStaff ? 'Fallo al Actualizar' : 'Fallo al Agregar';
+      if (error.code === 'auth/email-already-in-use') userMessage = 'Este email ya está asociado a una cuenta de Firebase Authentication globalmente.';
+      else if (error.code === 'auth/username-already-exists') userMessage = 'Este nombre de usuario ya está en uso en esta institución.';
+      else if (error.code === 'auth/weak-password') userMessage = 'La contraseña es demasiado débil (debe tener al menos 6 caracteres para Firebase Auth).';
       else if (error.message) userMessage += `: ${error.message}`;
       
-      toast({ title: 'Operation Failed', description: userMessage, variant: 'destructive'});
+      toast({ title: 'Operación Fallida', description: userMessage, variant: 'destructive'});
       console.error("Form submission error:", error);
     } finally {
       setIsSubmitting(false);
@@ -522,11 +520,11 @@ export default function StaffManagementPage() {
 
   const handleOpenDeleteDialog = (staffMember: User) => {
     if (firestoreUser?.role === 'supervisor' && (staffMember.role !== 'teacher' || staffMember.sedeId !== firestoreUser.sedeId)) {
-        toast({ title: "Permission Denied", description: "Supervisors can only delete teachers within their own Sede.", variant: "destructive" });
+        toast({ title: "Acción Denegada", description: "Los supervisores solo pueden eliminar maestros dentro de su propia Sede.", variant: "destructive" });
         return;
     }
     if (staffMember.institutionId !== firestoreUser?.institutionId) {
-        toast({ title: "Permission Denied", description: "Cannot delete staff from another institution.", variant: "destructive" });
+        toast({ title: "Acción Denegada", description: "No se puede eliminar personal de otra institución.", variant: "destructive" });
         return;
     }
     setStaffToDelete(staffMember);
@@ -536,20 +534,20 @@ export default function StaffManagementPage() {
 
   const handleSendPasswordReset = async (staffEmail: string | null | undefined, staffName: string) => {
     if (!staffEmail) {
-      toast({ title: 'Cannot Reset Password', description: `User ${staffName} does not have an email address registered.`, variant: 'destructive'});
+      toast({ title: 'No se puede restablecer la contraseña', description: `El usuario ${staffName} no tiene una dirección de correo electrónico registrada.`, variant: 'destructive'});
       return;
     }
     setIsSendingResetEmail(staffEmail);
     try {
       await sendPasswordResetEmail(auth, staffEmail);
-      toast({ title: 'Password Reset Email Sent', description: `An email has been sent to ${staffEmail} to reset their password.`});
+      toast({ title: 'Email de Restablecimiento de Contraseña Enviado', description: `Se ha enviado un email a ${staffEmail} para restablecer su contraseña.`});
     } catch (error: any) {
       console.error("Password reset error:", error);
-      let errorMessage = "Failed to send password reset email.";
-      if (error.code === 'auth/user-not-found') errorMessage = `No Firebase Authentication account found for ${staffEmail}. They might need to be added first or there's a typo.`;
-      else if (error.code === 'auth/invalid-email') errorMessage = `The email address ${staffEmail} is not valid.`;
-      else errorMessage = `Error: ${error.message} (Code: ${error.code})`;
-      toast({ title: 'Password Reset Failed', description: errorMessage, variant: 'destructive'});
+      let errorMessage = "No se pudo enviar el correo de restablecimiento de contraseña.";
+      if (error.code === 'auth/user-not-found') errorMessage = `No se encontró una cuenta de Firebase Authentication para ${staffEmail}. Es posible que deba agregarse primero o haya un error tipográfico.`;
+      else if (error.code === 'auth/invalid-email') errorMessage = `La dirección de correo electrónico ${staffEmail} no es válida.`;
+      else errorMessage = `Error: ${error.message} (Código: ${error.code})`;
+      toast({ title: 'Fallo en el Restablecimiento de Contraseña', description: errorMessage, variant: 'destructive'});
     } finally {
       setIsSendingResetEmail(null);
     }
@@ -557,7 +555,7 @@ export default function StaffManagementPage() {
 
   const confirmDeleteStaffUser = async () => {
     if (!staffToDelete || !authUser || !firestoreUser || staffToDelete.institutionId !== firestoreUser.institutionId) {
-        toast({ title: "Error", description: "Cannot proceed with deletion due to permission or data mismatch.", variant: "destructive"});
+        toast({ title: "Error", description: "No se puede proceder con la eliminación debido a una discrepancia de permisos o datos.", variant: "destructive"});
         return;
     }
     
@@ -565,15 +563,15 @@ export default function StaffManagementPage() {
     const isSupervisorDeleting = firestoreUser.role === 'supervisor';
 
     if (isAdminDeleting && !deleteAdminPassword) {
-      toast({ title: 'Input Required', description: 'Admin password is required to delete.', variant: 'destructive' });
+      toast({ title: 'Entrada Requerida', description: 'Se requiere la contraseña de administrador para eliminar.', variant: 'destructive' });
       return;
     }
     if (isSupervisorDeleting && staffToDelete.role !== 'teacher') {
-        toast({ title: "Action Denied", description: "Supervisors can only delete teachers.", variant: "destructive" });
+        toast({ title: "Acción Denegada", description: "Los supervisores solo pueden eliminar maestros.", variant: "destructive" });
         return;
     }
     if (isSupervisorDeleting && staffToDelete.sedeId !== firestoreUser.sedeId) {
-        toast({ title: "Action Denied", description: "Supervisors can only delete teachers from their own Sede.", variant: "destructive" });
+        toast({ title: "Acción Denegada", description: "Los supervisores solo pueden eliminar maestros de su propia Sede.", variant: "destructive" });
         return;
     }
 
@@ -604,22 +602,22 @@ export default function StaffManagementPage() {
       
       await batch.commit();
 
-      toast({ title: 'Staff User Record Deleted', description: `${staffToDelete.name}'s Firestore record removed. Firebase Auth account (if any) is NOT deleted by this action.` });
+      toast({ title: 'Registro de Personal Eliminado', description: `Se eliminó el registro de Firestore de ${staffToDelete.name}. La cuenta de Firebase Auth (si existe) NO se elimina con esta acción.` });
 
       setStaffToDelete(null);
       setDeleteAdminPassword('');
       setIsDeleteStaffDialogOpen(false);
       await fetchData();
     } catch (error: any) {
-      let errorMessage = 'Failed to delete staff user record.';
+      let errorMessage = 'No se pudo eliminar el registro del usuario del personal.';
       const reAuthErrorCodes = ['auth/wrong-password', 'auth/invalid-credential', 'auth/user-mismatch', 'auth/requires-recent-login'];
 
       if (isAdminDeleting && reAuthErrorCodes.includes(error.code)) {
-        errorMessage = `Admin re-authentication failed: ${error.message}.`;
+        errorMessage = `La reautenticación del administrador falló: ${error.message}.`;
       } else if (error.message) {
         errorMessage = error.message;
       }
-      toast({ title: 'Delete Failed', description: errorMessage, variant: 'destructive' });
+      toast({ title: 'Fallo al Eliminar', description: errorMessage, variant: 'destructive' });
     } finally {
       setIsSubmitting(false);
     }
@@ -650,11 +648,11 @@ export default function StaffManagementPage() {
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
         <div>
-          <CardTitle className="flex items-center gap-2"><Briefcase className="h-6 w-6 text-primary" /> Staff Management</CardTitle>
+          <CardTitle className="flex items-center gap-2"><Briefcase className="h-6 w-6 text-primary" /> Gestión de Personal</CardTitle>
           <CardDescription>
             {firestoreUser?.role === 'supervisor' 
-              ? "Manage teachers within your Sede. New staff use username as temporary password and change it on first login."
-              : "Manage all staff accounts for your institution. New staff use username as temporary password and change it on first login."
+              ? "Gestionar maestros dentro de tu Sede. El personal nuevo usará su nombre de usuario como contraseña temporal."
+              : "Gestionar todas las cuentas de personal de tu institución. El personal nuevo usará su nombre de usuario como contraseña temporal."
             }
           </CardDescription>
         </div>
@@ -664,13 +662,13 @@ export default function StaffManagementPage() {
             <Button asChild size="sm" variant="outline" className="gap-1.5 text-sm">
                 <Link href="/group-management">
                 <FolderKanban className="size-3.5" />
-                Manage Groups
+                Gestionar Grupos
                 </Link>
             </Button>
             <Button asChild size="sm" variant="outline" className="gap-1.5 text-sm">
                 <Link href="/sede-management">
                 <Building className="size-3.5" />
-                Manage Sedes
+                Gestionar Sedes
                 </Link>
             </Button>
             </>
@@ -690,46 +688,46 @@ export default function StaffManagementPage() {
             <DialogTrigger asChild>
               <Button size="sm" className="gap-1.5 text-sm" onClick={handleOpenAddDialog}>
                 <UserPlus className="size-3.5" />
-                Add Staff Record
+                Agregar Personal
               </Button>
             </DialogTrigger>
             <DialogContent className="sm:max-w-md">
               <DialogHeader>
-                <DialogTitle>{editingStaff ? 'Edit Staff Record' : 'Add New Staff Record'}</DialogTitle>
+                <DialogTitle>{editingStaff ? 'Editar Registro de Personal' : 'Agregar Nuevo Registro de Personal'}</DialogTitle>
                 <DialogPrimitiveDescription>
-                  {editingStaff ? "Update staff details." : "Fill in staff details. Username will be the initial password. Staff will be prompted to change it on first login."}
+                  {editingStaff ? "Actualizar detalles del personal." : "Completar detalles del personal. El nombre de usuario será la contraseña inicial."}
                 </DialogPrimitiveDescription>
               </DialogHeader>
               <Form {...form}>
                 <form onSubmit={form.handleSubmit(handleStaffFormSubmit)} className="space-y-3 py-4 max-h-[70vh] overflow-y-auto pr-2">
                   <FormField control={form.control} name="name" render={({ field }) => (
-                      <FormItem><FormLabel>Full Name*</FormLabel><FormControl><Input placeholder="Jane Doe" {...field} /></FormControl><FormMessage /></FormItem>
+                      <FormItem><FormLabel>Nombre Completo*</FormLabel><FormControl><Input placeholder="Jane Doe" {...field} /></FormControl><FormMessage /></FormItem>
                   )}/>
                   <FormField control={form.control} name="username" render={({ field }) => (
-                      <FormItem><FormLabel>Username (for login & initial password)*</FormLabel><FormControl><Input placeholder="janedoe_staff" {...field} disabled={!!editingStaff} /></FormControl>
+                      <FormItem><FormLabel>Nombre de Usuario (para login y contraseña inicial)*</FormLabel><FormControl><Input placeholder="janedoe_staff" {...field} disabled={!!editingStaff} /></FormControl>
                       {!editingStaff && usernameCheckMessage && (
                         <p className={`text-xs mt-1 ${getUsernameCheckMessageColor()}`}>
                             {usernameCheckStatus === 'checking' && <Loader2 className="inline h-3 w-3 mr-1 animate-spin" />}
                             {usernameCheckMessage}
                         </p>
                       )}
-                      {!!editingStaff && <p className="text-xs text-muted-foreground mt-1">Username cannot be changed.</p>}
+                      {!!editingStaff && <p className="text-xs text-muted-foreground mt-1">El nombre de usuario no se puede cambiar.</p>}
                       <FormMessage />
                       </FormItem>
                   )}/>
                   <FormField control={form.control} name="email" render={({ field }) => (
-                      <FormItem><FormLabel>Email (for login & password resets)*</FormLabel>
+                      <FormItem><FormLabel>Email (para login y reseteo de contraseña)*</FormLabel>
                           <FormControl><Input type="email" placeholder="jane.doe@example.com" {...field} disabled={!!editingStaff} /></FormControl>
-                          {!!editingStaff && <p className="text-xs text-muted-foreground mt-1">Email cannot be changed.</p>}
+                          {!!editingStaff && <p className="text-xs text-muted-foreground mt-1">El email no se puede cambiar.</p>}
                           {!editingStaff && emailCheckMessage && (<p className={`text-xs mt-1 ${getEmailCheckMessageColor()}`}>{emailCheckStatus === 'checking' && <Loader2 className="inline h-3 w-3 mr-1 animate-spin" />}{emailCheckMessage}</p>)}
                           <FormMessage />
                       </FormItem>
                   )}/>
                   <FormField control={form.control} name="phoneNumber" render={({ field }) => (
-                      <FormItem><FormLabel>Phone Number (Optional)</FormLabel><FormControl><Input type="tel" placeholder="e.g., 123-456-7890" {...field} /></FormControl><FormMessage /></FormItem>
-                  )}/>
+                      <FormItem><FormLabel>Número de Teléfono (Opcional)</FormLabel><FormControl><Input type="tel" placeholder="e.g., 123-456-7890" {...field} /></FormControl><FormMessage /></FormItem>
+                   )}/>
                   <FormField control={form.control} name="role" render={({ field }) => (
-                      <FormItem><FormLabel>Role*</FormLabel>
+                      <FormItem><FormLabel>Rol*</FormLabel>
                         <Select 
                           onValueChange={field.onChange} 
                           value={field.value} 
@@ -739,57 +737,57 @@ export default function StaffManagementPage() {
                             (firestoreUser?.role === 'supervisor' && (!editingStaff || editingStaff.role !== 'teacher'))
                           }
                         >
-                          <FormControl><SelectTrigger><SelectValue placeholder="Select a role" /></SelectTrigger></FormControl>
+                          <FormControl><SelectTrigger><SelectValue placeholder="Seleccionar un rol" /></SelectTrigger></FormControl>
                           <SelectContent>
                             {firestoreUser?.role === 'admin' && (
                                 <>
-                                <SelectItem value="teacher">Teacher</SelectItem>
+                                <SelectItem value="teacher">Maestro</SelectItem>
                                 <SelectItem value="supervisor">Supervisor</SelectItem>
                                 <SelectItem value="admin">Admin</SelectItem>
                                 <SelectItem value="caja">Caja</SelectItem>
                                 </>
                             )}
                             {firestoreUser?.role === 'supervisor' && (
-                                <SelectItem value="teacher">Teacher</SelectItem>
+                                <SelectItem value="teacher">Maestro</SelectItem>
                             )}
                           </SelectContent>
                         </Select>
-                        {!!editingStaff && editingStaff.role === 'admin' && authUser?.uid === editingStaff.id && editingStaff.institutionId === firestoreUser?.institutionId && <p className="text-xs text-muted-foreground mt-1">Admins cannot change their own role.</p>}
-                        {firestoreUser?.role === 'supervisor' && <p className="text-xs text-muted-foreground mt-1">Supervisors can only manage 'Teacher' roles.</p>}
+                        {!!editingStaff && editingStaff.role === 'admin' && authUser?.uid === editingStaff.id && editingStaff.institutionId === firestoreUser?.institutionId && <p className="text-xs text-muted-foreground mt-1">Los administradores no pueden cambiar su propio rol.</p>}
+                        {firestoreUser?.role === 'supervisor' && <p className="text-xs text-muted-foreground mt-1">Los supervisores solo pueden gestionar roles de 'Maestro'.</p>}
                         <FormMessage />
                       </FormItem>
                   )}/>
                    {(watchedRole === 'teacher' || watchedRole === 'supervisor' || watchedRole === 'admin') && (
                      <FormField control={form.control} name="sedeId" render={({ field }) => (
-                          <FormItem><FormLabel>Assign to Sede</FormLabel>
+                          <FormItem><FormLabel>Asignar a Sede</FormLabel>
                             <Select 
                               onValueChange={(value) => field.onChange(value === UNASSIGN_VALUE_KEY ? '' : value)} 
                               value={field.value || UNASSIGN_VALUE_KEY}
                               disabled={firestoreUser?.role === 'supervisor'}
                             >
-                              <FormControl><SelectTrigger><SelectValue placeholder="Select a Sede or unassign" /></SelectTrigger></FormControl>
+                              <FormControl><SelectTrigger><SelectValue placeholder="Seleccionar una Sede o desasignar" /></SelectTrigger></FormControl>
                               <SelectContent>
-                                <SelectItem value={UNASSIGN_VALUE_KEY}>Unassigned from Sede</SelectItem>
+                                <SelectItem value={UNASSIGN_VALUE_KEY}>No Asignado a Sede</SelectItem>
                                 {availableSedesForAssignment.map((sede) => (<SelectItem key={sede.id} value={sede.id}>{sede.name}</SelectItem>))}
                               </SelectContent>
                             </Select>
-                            {firestoreUser?.role === 'supervisor' && <p className="text-xs text-muted-foreground mt-1">Sede is automatically set to your Sede: {getSedeName(firestoreUser.sedeId)}.</p>}
+                            {firestoreUser?.role === 'supervisor' && <p className="text-xs text-muted-foreground mt-1">La Sede se establece automáticamente en tu Sede: {getSedeName(firestoreUser.sedeId)}.</p>}
                             <FormMessage />
                           </FormItem>
                      )}/>
                    )}
                   {(watchedRole === 'teacher') && ( 
                     <FormField control={form.control} name="assignedGroupId" render={({ field }) => (
-                        <FormItem><FormLabel>Assign Teacher to Group (Optional)</FormLabel>
+                        <FormItem><FormLabel>Asignar Maestro a Grupo (Opcional)</FormLabel>
                           <Select onValueChange={(value) => { field.onChange(value === UNASSIGN_VALUE_KEY ? undefined : value);}} value={field.value || UNASSIGN_VALUE_KEY}>
-                            <FormControl><SelectTrigger><SelectValue placeholder="Select a group or unassign" /></SelectTrigger></FormControl>
+                            <FormControl><SelectTrigger><SelectValue placeholder="Seleccionar un grupo o desasignar" /></SelectTrigger></FormControl>
                             <SelectContent>
-                              <SelectItem value={UNASSIGN_VALUE_KEY}>Unassigned from Group</SelectItem>
+                              <SelectItem value={UNASSIGN_VALUE_KEY}>No Asignado a Grupo</SelectItem>
                               {availableGroupsForTeacherAssignment.map((group) => (
                                 <SelectItem key={group.id} value={group.id}>
                                     {group.name} 
-                                    ({group.studentIds?.length || 0} students)
-                                    {group.teacherId && group.teacherId !== editingStaff?.id ? ` (Currently: ${staffUsers.find(su => su.id === group.teacherId)?.name || 'Other'})` : (group.teacherId === editingStaff?.id ? ' (Current)' : '')}
+                                    ({group.studentIds?.length || 0} estudiantes)
+                                    {group.teacherId && group.teacherId !== editingStaff?.id ? ` (Actualmente: ${staffUsers.find(su => su.id === group.teacherId)?.name || 'Otro'})` : (group.teacherId === editingStaff?.id ? ' (Actual)' : '')}
                                 </SelectItem>
                               ))}
                             </SelectContent>
@@ -799,20 +797,20 @@ export default function StaffManagementPage() {
                   )}
                   {(watchedRole === 'teacher' || watchedRole === 'admin' || watchedRole === 'supervisor') && (
                     <FormField control={form.control} name="attendanceCode" render={({ field }) => (
-                        <FormItem><FormLabel>Attendance Code</FormLabel><FormControl><Input placeholder="e.g., TCH001" {...field} /></FormControl>
-                           {field.value && field.value.includes(' ') && (<p className="text-xs text-destructive mt-1"><AlertTriangle className="inline h-3 w-3 mr-1" />Attendance code should not contain spaces.</p>)}
+                        <FormItem><FormLabel>Código de Asistencia</FormLabel><FormControl><Input placeholder="e.g., TCH001" {...field} /></FormControl>
+                           {field.value && field.value.includes(' ') && (<p className="text-xs text-destructive mt-1"><AlertTriangle className="inline h-3 w-3 mr-1" />El código de asistencia no debe contener espacios.</p>)}
                            <FormMessage />
                         </FormItem>
                     )}/>
                   )}
                    <FormField control={form.control} name="photoUrl" render={({ field }) => (
-                      <FormItem><FormLabel>Photo URL (Optional)</FormLabel><FormControl><Input type="url" placeholder="https://placehold.co/100x100.png" {...field} /></FormControl><FormMessage /></FormItem>
+                      <FormItem><FormLabel>URL de Foto (Opcional)</FormLabel><FormControl><Input type="url" placeholder="https://placehold.co/100x100.png" {...field} /></FormControl><FormMessage /></FormItem>
                    )}/>
                   <DialogFooter className="pt-4">
-                    <DialogClose asChild><Button type="button" variant="outline" onClick={resetFieldChecks}>Cancel</Button></DialogClose>
+                    <DialogClose asChild><Button type="button" variant="outline" onClick={resetFieldChecks}>Cancelar</Button></DialogClose>
                     <Button type="submit" disabled={isSubmitting || (!editingStaff && (usernameCheckStatus === 'exists' || emailCheckStatus === 'exists')) }>
                       {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                      {editingStaff ? 'Save Changes' : 'Add Staff Record'}
+                      {editingStaff ? 'Guardar Cambios' : 'Agregar Personal'}
                     </Button>
                   </DialogFooter>
                 </form>
@@ -824,12 +822,12 @@ export default function StaffManagementPage() {
       </CardHeader>
       <CardContent>
         {isLoading && displayedStaffUsers.length === 0 && (
-             <div className="flex items-center justify-center py-4"><Loader2 className="h-6 w-6 animate-spin text-primary" /><p className="ml-2 text-sm text-muted-foreground">Loading staff users...</p></div>
+             <div className="flex items-center justify-center py-4"><Loader2 className="h-6 w-6 animate-spin text-primary" /><p className="ml-2 text-sm text-muted-foreground">Cargando personal...</p></div>
         )}
         <Table>
           <TableHeader><TableRow>
-              <TableHead>Name</TableHead><TableHead>Username</TableHead><TableHead>Email</TableHead><TableHead>Role</TableHead>
-              <TableHead>Assigned Group/Sede</TableHead><TableHead>Attendance Code</TableHead><TableHead>Actions</TableHead>
+              <TableHead>Nombre</TableHead><TableHead>Usuario</TableHead><TableHead>Email</TableHead><TableHead>Rol</TableHead>
+              <TableHead>Grupo/Sede Asignada</TableHead><TableHead>Código de Asistencia</TableHead><TableHead>Acciones</TableHead>
           </TableRow></TableHeader>
           <TableBody>
             {displayedStaffUsers.length > 0 ? displayedStaffUsers.map((staff) => {
@@ -837,11 +835,11 @@ export default function StaffManagementPage() {
               const staffSedeName = getSedeName(staff.sedeId);
               let assignmentDisplay = 'N/A';
               if (staff.role === 'teacher') {
-                  assignmentDisplay = assignedGroup ? `${assignedGroup.name} (Grupo)` : (staffSedeName !== 'N/A' ? `${staffSedeName} (Sede)` : 'Unassigned');
+                  assignmentDisplay = assignedGroup ? `${assignedGroup.name} (Grupo)` : (staffSedeName !== 'N/A' ? `${staffSedeName} (Sede)` : 'No asignado');
               } else if (staff.role === 'supervisor' || staff.role === 'admin') {
-                  assignmentDisplay = staffSedeName !== 'N/A' ? `${staffSedeName} (Sede)` : (staff.role === 'admin' ? 'Global Admin (No Sede Specific)' : 'Unassigned');
+                  assignmentDisplay = staffSedeName !== 'N/A' ? `${staffSedeName} (Sede)` : (staff.role === 'admin' ? 'Admin Global (Sin Sede)' : 'No asignado');
               } else if (staff.role === 'caja') {
-                  assignmentDisplay = staffSedeName !== 'N/A' ? `${staffSedeName} (Sede)` : 'N/A (No Sede Specific)';
+                  assignmentDisplay = staffSedeName !== 'N/A' ? `${staffSedeName} (Sede)` : 'N/A (Sin Sede)';
               }
               
               const canEditThisStaff = (firestoreUser?.role === 'admin' && staff.institutionId === firestoreUser.institutionId) || 
@@ -861,39 +859,39 @@ export default function StaffManagementPage() {
                     'bg-gray-500/20 text-gray-700 dark:text-gray-400'}`}>
                     {staff.role.charAt(0).toUpperCase() + staff.role.slice(1)}</span></TableCell>
                 <TableCell>{assignmentDisplay}</TableCell>
-                <TableCell>{(staff.role === 'teacher' || staff.role === 'admin' || staff.role === 'supervisor') ? (staff.attendanceCode || <span className="text-muted-foreground text-xs">Not set</span>) : 'N/A'}</TableCell>
+                <TableCell>{(staff.role === 'teacher' || staff.role === 'admin' || staff.role === 'supervisor') ? (staff.attendanceCode || <span className="text-muted-foreground text-xs">No establecido</span>) : 'N/A'}</TableCell>
                 <TableCell className="space-x-0.5">
-                  <Button variant="ghost" size="icon" className="mr-1" onClick={() => handleOpenEditDialog(staff)} title="Edit User"
+                  <Button variant="ghost" size="icon" className="mr-1" onClick={() => handleOpenEditDialog(staff)} title="Editar Usuario"
                     disabled={!canEditThisStaff}
-                  ><Pencil className="h-4 w-4" /><span className="sr-only">Edit</span></Button>
-                  <Button variant="ghost" size="icon" className="mr-1" onClick={() => handleSendPasswordReset(staff.email, staff.name)} disabled={!staff.email || isSendingResetEmail === staff.email} title={staff.email ? "Send Password Reset Email" : "Cannot reset (no email)"}><KeyRound className="h-4 w-4" /><span className="sr-only">Send Password Reset</span></Button>
-                  <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => handleOpenDeleteDialog(staff)} title="Delete User"
+                  ><Pencil className="h-4 w-4" /><span className="sr-only">Editar</span></Button>
+                  <Button variant="ghost" size="icon" className="mr-1" onClick={() => handleSendPasswordReset(staff.email, staff.name)} disabled={!staff.email || isSendingResetEmail === staff.email} title={staff.email ? "Enviar Email de Restablecimiento de Contraseña" : "No se puede restablecer (sin email)"}><KeyRound className="h-4 w-4" /><span className="sr-only">Enviar Email de Restablecimiento</span></Button>
+                  <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => handleOpenDeleteDialog(staff)} title="Eliminar Usuario"
                     disabled={!canDeleteThisStaff}
-                  ><Trash2 className="h-4 w-4" /><span className="sr-only">Delete</span></Button>
+                  ><Trash2 className="h-4 w-4" /><span className="sr-only">Eliminar</span></Button>
                 </TableCell>
               </TableRow>
             )}) : (!isLoading && (<TableRow><TableCell colSpan={7} className="text-center">
-                {firestoreUser?.role === 'supervisor' && displayedStaffUsers.length === 0 ? "No teachers found in your Sede." : "No staff users found for your institution." }
+                {firestoreUser?.role === 'supervisor' && displayedStaffUsers.length === 0 ? "No se encontraron maestros en tu Sede." : "No se encontraron usuarios de personal para tu institución." }
                 </TableCell></TableRow>))}
           </TableBody>
         </Table>
-         {isLoading && displayedStaffUsers.length === 0 && (<div className="text-center py-4 text-sm text-muted-foreground">Loading staff user data...</div>)}
+         {isLoading && displayedStaffUsers.length === 0 && (<div className="text-center py-4 text-sm text-muted-foreground">Cargando datos del personal...</div>)}
       </CardContent>
     </Card>
 
     <Dialog open={isDeleteStaffDialogOpen} onOpenChange={(isOpen) => { setIsDeleteStaffDialogOpen(isOpen); if (!isOpen) { setStaffToDelete(null); setDeleteAdminPassword('');}}}>
       <DialogContent className="sm:max-w-md">
-        <DialogHeader><DialogTitle>Delete Staff User Record</DialogTitle>
-          <DialogPrimitiveDescription>Are you sure you want to delete {staffToDelete?.name}? This only removes the Firestore record. Firebase Auth account (if any) is NOT deleted by this action.
-            {firestoreUser?.role === 'admin' && " Admin password required."}
+        <DialogHeader><DialogTitle>Eliminar Registro de Personal</DialogTitle>
+          <DialogPrimitiveDescription>¿Estás seguro de que quieres eliminar a {staffToDelete?.name}? Esto solo elimina el registro de Firestore. La cuenta de Firebase Auth (si existe) NO se elimina con esta acción.
+            {firestoreUser?.role === 'admin' && " Se requiere la contraseña de administrador."}
           </DialogPrimitiveDescription>
         </DialogHeader>
         <div className="space-y-4 py-4">
             {firestoreUser?.role === 'admin' && 
-                <div className="space-y-1.5"><Label htmlFor="deleteAdminPasswordStaff">Admin's Current Password</Label><Input id="deleteAdminPasswordStaff" type="password" placeholder="Enter admin password" value={deleteAdminPassword} onChange={(e) => setDeleteAdminPassword(e.target.value)}/></div>
+                <div className="space-y-1.5"><Label htmlFor="deleteAdminPasswordStaff">Contraseña Actual del Administrador</Label><Input id="deleteAdminPasswordStaff" type="password" placeholder="Ingresa la contraseña de administrador" value={deleteAdminPassword} onChange={(e) => setDeleteAdminPassword(e.target.value)}/></div>
             }
         </div>
-        <DialogFooter><DialogClose asChild><Button type="button" variant="outline">Cancel</Button></DialogClose><Button type="button" variant="destructive" onClick={confirmDeleteStaffUser} disabled={isSubmitting || (firestoreUser?.role === 'admin' && !deleteAdminPassword.trim())}>{isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Delete Staff Record</Button></DialogFooter>
+        <DialogFooter><DialogClose asChild><Button type="button" variant="outline">Cancelar</Button></DialogClose><Button type="button" variant="destructive" onClick={confirmDeleteStaffUser} disabled={isSubmitting || (firestoreUser?.role === 'admin' && !deleteAdminPassword.trim())}>{isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Eliminar Registro de Personal</Button></DialogFooter>
       </DialogContent>
     </Dialog>
     </>
