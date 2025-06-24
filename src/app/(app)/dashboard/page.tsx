@@ -38,6 +38,7 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from "@/components/ui/chart"
+import QRCode from 'qrcode.react';
 
 interface QuickActionProps {
   href: string;
@@ -76,8 +77,6 @@ export default function DashboardPage() {
   const [isLoading, setIsLoading] = useState(true);
 
   const [currentTime, setCurrentTime] = useState('');
-  const [teacherAttendanceCode, setTeacherAttendanceCode] = useState('');
-  const [isSubmittingTeacherAttendance, setIsSubmittingTeacherAttendance] = useState(false);
   const { toast } = useToast();
   const { authUser, firestoreUser } = useAuth();
 
@@ -223,60 +222,6 @@ export default function DashboardPage() {
     fetchDashboardData();
   }, [fetchDashboardData]);
 
-  const handleTeacherAttendanceSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!firestoreUser?.institutionId) {
-        toast({ title: 'Error', description: 'Institution context is missing for this action.', variant: 'destructive' });
-        return;
-    }
-    const canSubmitAttendance = firestoreUser?.role === 'admin' || firestoreUser?.role === 'teacher' || firestoreUser?.role === 'supervisor';
-    if (!canSubmitAttendance) {
-      toast({ title: 'Acción no Permitida', description: 'Solo administradores, supervisores o docentes pueden operar este registro.', variant: 'destructive' });
-      return;
-    }
-    if (!teacherAttendanceCode.trim()) {
-      toast({ title: 'Error', description: 'Por favor, ingrese el código de asistencia del docente.', variant: 'destructive' });
-      return;
-    }
-    setIsSubmittingTeacherAttendance(true);
-    try {
-      const usersWithCodeQuery = query(
-        collection(db, 'users'),
-        where('attendanceCode', '==', teacherAttendanceCode.trim()),
-        where('institutionId', '==', firestoreUser.institutionId)
-      );
-      const usersSnapshot = await getDocs(usersWithCodeQuery);
-
-      if (usersSnapshot.empty) {
-        toast({ title: 'Código Inválido', description: 'El código de asistencia no es válido o no pertenece a un usuario con código asignado en esta institución.', variant: 'destructive' });
-      } else {
-        const userDoc = usersSnapshot.docs[0];
-        const userData = userDoc.data() as User;
-
-        if (userData.role !== 'teacher' && userData.role !== 'admin' && userData.role !== 'supervisor') {
-            toast({ title: 'Código Inválido', description: 'Este código pertenece a un usuario que no es docente, supervisor ni administrador.', variant: 'destructive' });
-            setIsSubmittingTeacherAttendance(false);
-            return;
-        }
-        const newRecord: Omit<TeacherAttendanceRecord, 'id'> = {
-          teacherId: userDoc.id,
-          teacherName: userData.name,
-          timestamp: new Date().toISOString(),
-          attendanceCodeUsed: teacherAttendanceCode.trim(),
-          institutionId: userData.institutionId,
-        };
-        await addDoc(collection(db, 'teacherAttendanceRecords'), newRecord);
-        toast({ title: `¡Bienvenido, ${userData.name}!`, description: 'Tu asistencia ha sido registrada.' });
-        setTeacherAttendanceCode('');
-      }
-    } catch (error: any) {
-      console.error("Error registering teacher attendance:", error);
-      toast({ title: 'Error de Registro', description: `Ocurrió un error: ${error.message || 'Inténtalo de nuevo.'}`, variant: 'destructive' });
-    } finally {
-      setIsSubmittingTeacherAttendance(false);
-    }
-  };
-
   const renderStatCard = (title: string, value: number | string, Icon: React.ElementType, description: string) => (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -307,8 +252,18 @@ export default function DashboardPage() {
     return allQuickActions.filter(action => action.roles.includes(firestoreUser.role));
   }, [firestoreUser?.role]);
 
-  const showTeacherAttendancePanel = firestoreUser && ['admin', 'teacher', 'supervisor'].includes(firestoreUser.role);
+  const showStaffAttendancePanel = firestoreUser && ['admin', 'supervisor'].includes(firestoreUser.role);
   
+  const qrPayload = useMemo(() => {
+    if (!firestoreUser) return '';
+    return JSON.stringify({
+      type: "teacher-attendance",
+      institutionId: firestoreUser.institutionId,
+      sedeId: firestoreUser.role === 'supervisor' ? firestoreUser.sedeId : null,
+      date: new Date().toISOString().split('T')[0] // YYYY-MM-DD
+    });
+  }, [firestoreUser]);
+
   const levelChartConfig = {
     value: {
       label: "Estudiantes",
@@ -492,8 +447,8 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Teacher Attendance Panel */}
-      {showTeacherAttendancePanel && (
+      {/* Staff Attendance Panel */}
+      {showStaffAttendancePanel && (
         <div className="grid gap-4 md:grid-cols-1">
           <Card>
             <CardHeader>
@@ -501,39 +456,21 @@ export default function DashboardPage() {
                 <Clock className="h-5 w-5 text-primary" />
                 Registro de Llegada del Personal
               </CardTitle>
-              <CardDescription>Los miembros del personal ingresan aquí su código de asistencia al llegar.</CardDescription>
+              <CardDescription>Muestra este código QR para que el personal registre su llegada escaneándolo con su dispositivo.</CardDescription>
             </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold text-center mb-3 text-primary">
+            <CardContent className="flex flex-col items-center justify-center space-y-4">
+              <div className="text-3xl font-bold text-center text-primary">
                 {currentTime || <Loader2 className="h-7 w-7 animate-spin inline-block" />}
               </div>
-              <form onSubmit={handleTeacherAttendanceSubmit} className="space-y-3">
-                <div>
-                  <Label htmlFor="teacherAttendanceCode" className="sr-only">Código de Asistencia</Label>
-                  <Input
-                    id="teacherAttendanceCode"
-                    type="password"
-                    placeholder="Ingrese el código de asistencia"
-                    value={teacherAttendanceCode}
-                    onChange={(e) => setTeacherAttendanceCode(e.target.value)}
-                    className="text-center"
-                    disabled={isSubmittingTeacherAttendance}
-                  />
+              {isLoading ? <Loader2 className="h-10 w-10 animate-spin text-primary" /> : (
+                <div className="bg-white p-4 rounded-lg shadow-md">
+                    <QRCode value={qrPayload} size={256} />
                 </div>
-                <Button type="submit" className="w-full" disabled={isSubmittingTeacherAttendance || !teacherAttendanceCode.trim() || !firestoreUser || !['admin','teacher','supervisor'].includes(firestoreUser.role) }>
-                  {isSubmittingTeacherAttendance ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <LogIn className="mr-2 h-4 w-4" />
-                  )}
-                  Registrar Llegada
-                </Button>
-              </form>
-               { authUser && firestoreUser && (
-                  <p className="text-xs text-muted-foreground mt-3 text-center">
-                      Operando como: {firestoreUser.email} ({firestoreUser.name || 'Nombre no establecido'})
-                  </p>
               )}
+              <p className="text-xs text-muted-foreground mt-2 text-center">
+                Este código es para el {new Date().toLocaleDateString('es-MX')}
+                {firestoreUser.role === 'supervisor' && supervisorSede ? ` en la Sede ${supervisorSede.name}` : ''}.
+              </p>
             </CardContent>
           </Card>
         </div>
