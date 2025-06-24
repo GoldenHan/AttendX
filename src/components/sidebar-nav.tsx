@@ -105,7 +105,8 @@ export function SidebarNav() {
 
   const visibleNavItems = filterNavItemsForRole(navItems);
 
-  const generalItems = visibleNavItems.filter(item => ['/dashboard', '/attendance-log', '/attendance-records', '/reports', '/student-grades', '/classroom/assignments', '/classroom/my-tasks'].includes(item.href));
+  const generalItems = visibleNavItems.filter(item => ['/dashboard', '/attendance-log', '/attendance-records', '/reports', '/student-grades', '/classroom/my-tasks'].includes(item.href));
+  const classroomItems = visibleNavItems.filter(item => ['/classroom/assignments'].includes(item.href));
   const aiItems = visibleNavItems.filter(item => ['/ai-analysis', '/lesson-planner', '/ai-performance-report'].includes(item.href));
   const managementItems = visibleNavItems.filter(item => ['/student-management', '/group-management', '/grades-management', '/partial-grades-report', '/certificate-management'].includes(item.href));
   const financialItems = visibleNavItems.filter(item => ['/payment-registration', '/payment-reports'].includes(item.href));
@@ -142,6 +143,13 @@ export function SidebarNav() {
           </SidebarGroup>
         )}
         
+        {classroomItems.length > 0 && (
+          <SidebarGroup>
+            <SidebarGroupLabel>Classroom</SidebarGroupLabel>
+            {classroomItems.map(renderNavItem)}
+          </SidebarGroup>
+        )}
+
         {managementItems.length > 0 && (
           <SidebarGroup>
             <SidebarGroupLabel>Gestión</SidebarGroupLabel>
