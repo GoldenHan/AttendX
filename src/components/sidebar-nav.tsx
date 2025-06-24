@@ -33,6 +33,7 @@ import {
   FilePenLine,
   UserCheck,
   QrCode,
+  User as UserProfileIcon,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import type { User } from '@/types';
@@ -185,3 +186,5 @@ export function SidebarNav() {
     </div>
   );
 }
+
+    
