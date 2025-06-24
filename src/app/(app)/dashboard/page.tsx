@@ -19,7 +19,8 @@ import {
   Briefcase,
   Sheet,
   ListTodo,
-  FilePenLine
+  FilePenLine,
+  UserCheck2,
 } from 'lucide-react';
 import Image from 'next/image';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
@@ -39,6 +40,7 @@ import {
   ChartTooltipContent,
 } from "@/components/ui/chart"
 import QRCode from 'qrcode.react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 interface QuickActionProps {
   href: string;
@@ -68,6 +70,7 @@ export default function DashboardPage() {
   
   const [teacherGroups, setTeacherGroups] = useState<Group[]>([]);
   const [supervisorSede, setSupervisorSede] = useState<Sede | null>(null);
+  const [staffUsers, setStaffUsers] = useState<User[]>([]);
 
   const [studentLevelDistribution, setStudentLevelDistribution] = useState<{ name: string; value: number }[]>([]);
   const [groupStudentCount, setGroupStudentCount] = useState<{ name: string; students: number }[]>([]);
@@ -79,6 +82,9 @@ export default function DashboardPage() {
   const [currentTime, setCurrentTime] = useState('');
   const { toast } = useToast();
   const { authUser, firestoreUser } = useAuth();
+  
+  const [selectedStaffForManualCheckIn, setSelectedStaffForManualCheckIn] = useState('');
+  const [isCheckingInManually, setIsCheckingInManually] = useState(false);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -124,7 +130,7 @@ export default function DashboardPage() {
             name: (doc.data() as Group).name,
             students: (doc.data() as Group).studentIds?.length || 0,
         })));
-
+        setStaffUsers(staffSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as User)));
 
       } else if (firestoreUser.role === 'teacher') {
         const groupsQuery = query(collection(db, 'groups'), where('teacherId', '==', firestoreUser.id), where('institutionId', '==', institutionId));
@@ -188,6 +194,9 @@ export default function DashboardPage() {
               name: (doc.data() as Group).name,
               students: (doc.data() as Group).studentIds?.length || 0,
           })));
+
+          const fetchedTeachers = teachersSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as User));
+          setStaffUsers([firestoreUser, ...fetchedTeachers]);
 
       } else if (firestoreUser.role === 'student') {
         const studentGroupsQuery = query(collection(db, 'groups'), where('studentIds', 'array-contains', firestoreUser.id), where('institutionId', '==', institutionId));
@@ -263,6 +272,92 @@ export default function DashboardPage() {
       date: new Date().toISOString().split('T')[0] // YYYY-MM-DD
     });
   }, [firestoreUser]);
+
+  useEffect(() => {
+    const registerSupervisorAttendance = async () => {
+      if (firestoreUser?.role === 'supervisor' && qrPayload) {
+        const todayStr = new Date().toISOString().split('T')[0];
+        const attendanceRef = collection(db, 'teacherAttendanceRecords');
+        const q = query(
+          attendanceRef,
+          where('teacherId', '==', firestoreUser.id),
+          where('date', '==', todayStr),
+          where('institutionId', '==', firestoreUser.institutionId)
+        );
+        const snapshot = await getDocs(q);
+        if (snapshot.empty) {
+          const newRecord: Omit<TeacherAttendanceRecord, 'id'> = {
+            teacherId: firestoreUser.id,
+            teacherName: firestoreUser.name,
+            timestamp: new Date().toISOString(),
+            date: todayStr,
+            attendanceCodeUsed: 'QR_GENERATION_AUTO',
+            institutionId: firestoreUser.institutionId,
+          };
+          await addDoc(attendanceRef, newRecord);
+          toast({
+            title: 'Tu Asistencia ha sido Registrada',
+            description: 'Se registró tu llegada automáticamente al generar el código QR.',
+          });
+        }
+      }
+    };
+
+    if (showStaffAttendancePanel) {
+      registerSupervisorAttendance();
+    }
+  }, [qrPayload, firestoreUser, showStaffAttendancePanel, toast]);
+
+  const handleManualCheckIn = async () => {
+    if (!selectedStaffForManualCheckIn) {
+        toast({ title: 'Selecciona un miembro del personal', variant: 'destructive'});
+        return;
+    }
+    if (!firestoreUser) return;
+    setIsCheckingInManually(true);
+    
+    const staffMember = staffUsers.find(s => s.id === selectedStaffForManualCheckIn);
+    if (!staffMember) {
+        toast({ title: 'Miembro del personal no encontrado', variant: 'destructive'});
+        setIsCheckingInManually(false);
+        return;
+    }
+    
+    const todayStr = new Date().toISOString().split('T')[0];
+    const attendanceRef = collection(db, 'teacherAttendanceRecords');
+    const q = query(
+        attendanceRef, 
+        where('teacherId', '==', staffMember.id),
+        where('date', '==', todayStr),
+        where('institutionId', '==', firestoreUser.institutionId)
+    );
+    const snapshot = await getDocs(q);
+
+    if (!snapshot.empty) {
+        toast({ title: 'Asistencia ya registrada', description: `${staffMember.name} ya ha registrado su asistencia hoy.`, variant: 'default'});
+        setIsCheckingInManually(false);
+        return;
+    }
+
+    try {
+        const newRecord: Omit<TeacherAttendanceRecord, 'id'> = {
+            teacherId: staffMember.id,
+            teacherName: staffMember.name,
+            timestamp: new Date().toISOString(),
+            date: todayStr,
+            attendanceCodeUsed: `MANUAL_BY_${firestoreUser.username}`,
+            institutionId: firestoreUser.institutionId,
+        };
+        await addDoc(collection(db, 'teacherAttendanceRecords'), newRecord);
+        toast({ title: 'Asistencia Registrada', description: `Se registró la llegada de ${staffMember.name} manualmente.` });
+        setSelectedStaffForManualCheckIn('');
+    } catch(error) {
+        toast({ title: 'Error', description: 'No se pudo registrar la asistencia manual.', variant: 'destructive'});
+    }
+    
+    setIsCheckingInManually(false);
+  };
+
 
   const levelChartConfig = {
     value: {
@@ -449,12 +544,12 @@ export default function DashboardPage() {
 
       {/* Staff Attendance Panel */}
       {showStaffAttendancePanel && (
-        <div className="grid gap-4 md:grid-cols-1">
+        <div className="grid gap-6 md:grid-cols-2">
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Clock className="h-5 w-5 text-primary" />
-                Registro de Llegada del Personal
+                Registro de Llegada del Personal (QR)
               </CardTitle>
               <CardDescription>Muestra este código QR para que el personal registre su llegada escaneándolo con su dispositivo.</CardDescription>
             </CardHeader>
@@ -471,6 +566,34 @@ export default function DashboardPage() {
                 Este código es para el {new Date().toLocaleDateString('es-MX')}
                 {firestoreUser.role === 'supervisor' && supervisorSede ? ` en la Sede ${supervisorSede.name}` : ''}.
               </p>
+            </CardContent>
+          </Card>
+
+           <Card>
+            <CardHeader>
+                <CardTitle className="flex items-center gap-2"><UserCheck2 className="h-5 w-5 text-primary" />Registro Manual de Personal</CardTitle>
+                <CardDescription>Si un miembro del personal no puede escanear, regístralo aquí.</CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col space-y-4">
+                <div className="flex w-full items-center space-x-2">
+                    <Select value={selectedStaffForManualCheckIn} onValueChange={setSelectedStaffForManualCheckIn} disabled={staffUsers.length === 0}>
+                        <SelectTrigger><SelectValue placeholder="Seleccionar miembro del personal..." /></SelectTrigger>
+                        <SelectContent>
+                            {staffUsers.map(staff => (
+                                <SelectItem key={staff.id} value={staff.id}>{staff.name} ({staff.role})</SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                    <Button onClick={handleManualCheckIn} disabled={isCheckingInManually || !selectedStaffForManualCheckIn}>
+                        {isCheckingInManually && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                        Registrar
+                    </Button>
+                </div>
+                 {staffUsers.length === 0 && !isLoading && (
+                    <p className="text-xs text-muted-foreground">
+                        {firestoreUser?.role === 'supervisor' ? "No hay maestros en tu Sede para registrar." : "No hay personal para registrar."}
+                    </p>
+                 )}
             </CardContent>
           </Card>
         </div>
@@ -501,3 +624,4 @@ export default function DashboardPage() {
     </div>
   );
 }
+

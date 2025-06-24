@@ -55,6 +55,7 @@ export default function StaffQrCheckInPage() {
             teacherId: firestoreUser.id,
             teacherName: firestoreUser.name,
             timestamp: new Date().toISOString(),
+            date: new Date().toISOString().split('T')[0],
             attendanceCodeUsed: 'QR_SCAN',
             institutionId: firestoreUser.institutionId,
         };

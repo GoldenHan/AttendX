@@ -94,14 +94,11 @@ export default function StaffAttendanceReportPage() {
     }
 
     if (dateRange?.from) {
-        const fromDate = dateRange.from;
-        const toDate = dateRange.to || fromDate;
-        fromDate.setHours(0, 0, 0, 0);
-        toDate.setHours(23, 59, 59, 999);
+        const fromDateStr = format(dateRange.from, 'yyyy-MM-dd');
+        const toDateStr = format(dateRange.to || dateRange.from, 'yyyy-MM-dd');
         
-        result = result.filter(p => {
-            const recordDate = parseISO(p.timestamp);
-            return recordDate >= fromDate && recordDate <= toDate;
+        result = result.filter(r => {
+            return r.date >= fromDateStr && r.date <= toDateStr;
         });
     }
 

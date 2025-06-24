@@ -81,7 +81,8 @@ export interface TeacherAttendanceRecord {
   id: string;
   teacherId: string;
   teacherName: string;
-  timestamp: string;
+  timestamp: string; // ISO string
+  date: string; // YYYY-MM-DD format
   attendanceCodeUsed: string;
   institutionId: string;
 }
