@@ -14,8 +14,9 @@ import {
   updatePassword as firebaseUpdatePassword,
   GoogleAuthProvider,
   signInWithPopup,
+  deleteUser,
 } from 'firebase/auth';
-import { doc, getDoc, collection, query, where, getDocs, setDoc, limit, updateDoc, addDoc } from 'firebase/firestore';
+import { doc, getDoc, collection, query, where, getDocs, setDoc, limit, updateDoc, addDoc, deleteDoc } from 'firebase/firestore';
 import type { User as FirestoreUserType, GradingConfiguration, ClassScheduleConfiguration, Institution } from '@/types';
 import { DEFAULT_GRADING_CONFIG, DEFAULT_CLASS_SCHEDULE_CONFIG, getDefaultStudentGradeStructure } from '@/types';
 import { useRouter, usePathname } from 'next/navigation';
@@ -33,7 +34,7 @@ interface AuthContextType {
     name: string,
     username: string,
     email: string,
-    initialPasswordAsUsername: string,
+    password: string,
     role: FirestoreUserType['role'],
     studentSpecifics?: { level: FirestoreUserType['level']; sedeId?: string | null },
     creatorContext?: { institutionId: string; creatorSedeId?: string | null; attendanceCode?: string },
@@ -237,12 +238,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-
   const signUp = async (
     name: string,
     username: string,
     email: string,
-    initialPasswordAsUsername: string,
+    password: string,
     role: FirestoreUserType['role'],
     studentSpecifics?: { level: FirestoreUserType['level']; sedeId?: string | null },
     creatorContext?: { institutionId: string; creatorSedeId?: string | null; attendanceCode?: string },
@@ -250,90 +250,90 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   ) => {
     setLoading(true);
     let firebaseUser: FirebaseUser | null = null;
+    let userDocRefPath: string | null = null;
+
     try {
-      const userCredential = await createUserWithEmailAndPassword(auth, email, initialPasswordAsUsername);
+      // Step 1: Create the Firebase Auth user.
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       firebaseUser = userCredential.user;
-      console.log(`[AuthContext] Step 1 complete: Firebase Auth user created for email ${email}`);
+      userDocRefPath = `users/${firebaseUser.uid}`;
+      console.log(`[AuthContext] Step 1: Auth user created for ${email}.`);
 
-      let effectiveInstitutionId = creatorContext?.institutionId;
+      let effectiveInstitutionId: string | undefined;
 
-      if (role === 'admin' && institutionName && !creatorContext?.institutionId) {
+      // Special flow for creating a new institution and its first admin.
+      if (role === 'admin' && institutionName) {
+        // Step 1.5: Create a "pending" user document. This allows security rules to pass for institution creation.
+        const pendingUserDocData = {
+          uid: firebaseUser.uid,
+          name,
+          username: username.trim(),
+          email: firebaseUser.email || email.trim(),
+          role: 'admin',
+          requiresPasswordChange: true,
+          institutionId: null, // Temporarily null
+        };
+        await setDoc(doc(db, userDocRefPath), pendingUserDocData);
+        console.log(`[AuthContext] Step 1.5: Created pending user document.`);
+
+        // Step 2: Create the institution document.
         const instNameQuery = query(collection(db, 'institutions'), where('name', '==', institutionName.trim()), limit(1));
         const instNameSnapshot = await getDocs(instNameQuery);
-        if (!instNameSnapshot.empty) {
-          throw new Error(`An institution named "${institutionName}" already exists.`);
-        }
-        
+        if (!instNameSnapshot.empty) throw new Error(`An institution named "${institutionName}" already exists.`);
+
         const newInstitutionData: Omit<Institution, 'id'> = {
-          name: institutionName,
-          appName: institutionName, // Default app name to institution name
-          logoDataUrl: null,
-          adminUids: [firebaseUser.uid],
-          createdAt: new Date().toISOString(),
+          name: institutionName, appName: institutionName, logoDataUrl: null,
+          adminUids: [firebaseUser.uid], createdAt: new Date().toISOString(),
         };
         const institutionRef = await addDoc(collection(db, 'institutions'), newInstitutionData);
         effectiveInstitutionId = institutionRef.id;
-        console.log(`[AuthContext] New institution document created with ID: ${effectiveInstitutionId}`);
-        
+        console.log(`[AuthContext] Step 2: Created institution doc with ID: ${effectiveInstitutionId}`);
+
+        // Step 3: Update the user document with the new institution ID.
+        await updateDoc(doc(db, userDocRefPath), { institutionId: effectiveInstitutionId });
+        console.log(`[AuthContext] Step 3: Updated user doc with institution ID.`);
+
+        // Step 4: Create configuration documents for the new institution.
         await setDoc(doc(db, 'institutionGradingConfigs', effectiveInstitutionId), DEFAULT_GRADING_CONFIG);
         await setDoc(doc(db, 'institutionScheduleConfigs', effectiveInstitutionId), DEFAULT_CLASS_SCHEDULE_CONFIG);
+        console.log(`[AuthContext] Step 4: Created config documents.`);
+
+      } else { // Standard flow for adding a user to an existing institution.
+        effectiveInstitutionId = creatorContext?.institutionId;
+        if (!effectiveInstitutionId) throw new Error("An Institution ID is required to add a new user.");
+
+        const usernameQuery = query(collection(db, 'users'), where('username', '==', username.trim()), where('institutionId', '==', effectiveInstitutionId), limit(1));
+        if (!(await getDocs(usernameQuery)).empty) throw new Error(`Username "${username.trim()}" already exists in this institution.`);
+
+        const gradingConfigForNewUser = await fetchGradingConfigForInstitution(effectiveInstitutionId);
+        const newUserDocData: Omit<FirestoreUserType, 'id'> = {
+            uid: firebaseUser.uid, name, username: username.trim(), email: firebaseUser.email || email.trim(),
+            role, requiresPasswordChange: true, institutionId: effectiveInstitutionId, phoneNumber: null,
+            photoUrl: null, attendanceCode: null, sedeId: null,
+            ...(role === 'student' && studentSpecifics && {
+                level: studentSpecifics.level,
+                gradesByLevel: studentSpecifics.level ? { [studentSpecifics.level]: getDefaultStudentGradeStructure(gradingConfigForNewUser) } : {},
+                sedeId: studentSpecifics.sedeId || null,
+            }),
+            ...(role !== 'student' && creatorContext && {
+                sedeId: creatorContext.creatorSedeId || null,
+                attendanceCode: creatorContext.attendanceCode || null,
+            })
+        };
+        await setDoc(doc(db, userDocRefPath), newUserDocData);
+        console.log(`[AuthContext] User document created for UID: ${firebaseUser.uid}`);
       }
-      
-      if (!effectiveInstitutionId) {
-        throw new Error("Institution ID could not be determined. User creation has been rolled back.");
-      }
-
-      const usernameQuery = query(collection(db, 'users'),
-        where('username', '==', username.trim()),
-        where('institutionId', '==', effectiveInstitutionId),
-        limit(1)
-      );
-      const usernameSnapshot = await getDocs(usernameQuery);
-      if (!usernameSnapshot.empty) {
-          const error = new Error(`Username "${username.trim()}" already exists in this institution.`);
-          (error as any).code = "auth/username-already-exists";
-          throw error;
-      }
-      console.log(`[AuthContext] Step 2 complete: Username "${username}" is available in institution ${effectiveInstitutionId}.`);
-
-      const currentGradingConfigForNewUser = await fetchGradingConfigForInstitution(effectiveInstitutionId);
-
-      const newUserDocData: Omit<FirestoreUserType, 'id'> = {
-        uid: firebaseUser.uid,
-        name: name,
-        username: username.trim(),
-        email: firebaseUser.email || email.trim(),
-        role: role,
-        requiresPasswordChange: true,
-        institutionId: effectiveInstitutionId,
-        phoneNumber: null,
-        photoUrl: null,
-        attendanceCode: null,
-        sedeId: null,
-        ...(role === 'student' && studentSpecifics && {
-          level: studentSpecifics.level,
-          gradesByLevel: studentSpecifics.level ? { [studentSpecifics.level]: getDefaultStudentGradeStructure(currentGradingConfigForNewUser) } : {},
-          sedeId: studentSpecifics.sedeId || null,
-          notes: undefined, age: undefined, gender: undefined, preferredShift: undefined,
-        }),
-        ...( (role === 'teacher' || role === 'supervisor' || role === 'admin' || role === 'caja') && creatorContext && {
-            sedeId: creatorContext.creatorSedeId || null,
-            attendanceCode: creatorContext.attendanceCode || null,
-        })
-      };
-      
-      await setDoc(doc(db, 'users', firebaseUser.uid), newUserDocData);
-      console.log(`[AuthContext] Step 3 complete: User document created in 'users' for UID: ${firebaseUser.uid} with Institution ID: ${newUserDocData.institutionId}`);
-
     } catch (error) {
+      // Robust Rollback
       if (firebaseUser) {
-        console.warn(`[AuthContext] Rolling back Auth user creation for ${firebaseUser.email} due to an error.`);
-        await firebaseUser.delete().catch(deleteError => {
-            console.error("[AuthContext] CRITICAL: Failed to clean up orphaned Firebase Auth user during rollback:", deleteError);
-        });
-        console.log(`[AuthContext] Rollback complete.`);
+        console.warn(`[AuthContext] Rolling back creation for ${firebaseUser.email} due to error.`);
+        if (userDocRefPath) {
+          await deleteDoc(doc(db, userDocRefPath)).catch(e => console.error("Failed to delete orphaned user doc:", e));
+        }
+        await deleteUser(firebaseUser).catch(e => console.error("CRITICAL: Failed to delete orphaned Auth user:", e));
+        console.log("[AuthContext] Rollback complete.");
       }
-      throw error; 
+      throw error;
     } finally {
       setLoading(false);
     }
