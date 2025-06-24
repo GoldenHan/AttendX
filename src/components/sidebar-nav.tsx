@@ -48,7 +48,6 @@ interface NavItem {
 const navItems: NavItem[] = [
   // General & Core
   { href: '/dashboard', label: 'Tablero', icon: LayoutDashboard, roles: ['admin', 'teacher', 'caja', 'student', 'supervisor'] },
-  { href: '/qr-login', label: 'Escanear QR', icon: QrCode, roles: ['student'] },
   { href: '/attendance-log', label: 'Registrar Asistencia', icon: ClipboardEdit, roles: ['admin', 'teacher', 'caja', 'supervisor'] },
   { href: '/attendance-records', label: 'Ver Registros', icon: BookUser, roles: ['admin', 'teacher', 'caja', 'supervisor'] },
   { href: '/reports', label: 'Reportes de Asistencia', icon: BarChart3, roles: ['admin', 'teacher', 'caja', 'supervisor'] },
@@ -109,7 +108,7 @@ export function SidebarNav() {
 
   const visibleNavItems = filterNavItemsForRole(navItems);
 
-  const generalItems = visibleNavItems.filter(item => ['/dashboard', '/qr-login', '/attendance-log', '/attendance-records', '/reports', '/student-grades', '/classroom/my-tasks', '/my-attendance'].includes(item.href));
+  const generalItems = visibleNavItems.filter(item => ['/dashboard', '/attendance-log', '/attendance-records', '/reports', '/student-grades', '/classroom/my-tasks', '/my-attendance'].includes(item.href));
   const classroomItems = visibleNavItems.filter(item => ['/classroom/assignments'].includes(item.href));
   const aiItems = visibleNavItems.filter(item => ['/ai-analysis', '/lesson-planner', '/ai-performance-report'].includes(item.href));
   const managementItems = visibleNavItems.filter(item => ['/student-management', '/group-management', '/grades-management', '/partial-grades-report', '/certificate-management'].includes(item.href));

@@ -223,7 +223,7 @@ export default function AttendanceLogPage() {
           userId: att.userId,
           sessionId: finalSessionId!,
           status: att.status,
-          timestamp: Timestamp.now().toDate().toISOString(),
+          timestamp: new Date().toISOString(),
           institutionId: firestoreUser.institutionId,
         };
         if (att.status === 'absent' && att.observation) {
@@ -235,8 +235,8 @@ export default function AttendanceLogPage() {
       await batch.commit();
 
       toast({
-        title: 'Attendance Logged',
-        description: `Attendance for group recorded successfully for session ID: ${finalSessionId}.`,
+        title: 'Asistencia Registrada',
+        description: `La asistencia para el grupo ha sido registrada exitosamente para la sesión ID: ${finalSessionId}.`,
       });
       form.reset({
         groupId: '',
@@ -247,7 +247,7 @@ export default function AttendanceLogPage() {
       remove(); 
     } catch (error) {
       console.error("Error logging attendance: ", error);
-      toast({ title: 'Logging Failed', description: 'Could not save attendance records.', variant: 'destructive' });
+      toast({ title: 'Registro Fallido', description: 'No se pudieron guardar los registros de asistencia.', variant: 'destructive' });
     }
     setIsSubmitting(false);
   }
@@ -256,12 +256,12 @@ export default function AttendanceLogPage() {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Log Group Attendance</CardTitle>
-          <CardDescription>Record student attendance for a specific group, date, and time.</CardDescription>
+          <CardTitle>Registrar Asistencia de Grupo</CardTitle>
+          <CardDescription>Registra la asistencia de los estudiantes para un grupo, fecha y hora específicos.</CardDescription>
         </CardHeader>
         <CardContent className="flex items-center justify-center py-10">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
-          <p className="ml-2">{!firestoreUser ? "Verifying user..." : "Loading data..."}</p>
+          <p className="ml-2">{!firestoreUser ? "Verificando usuario..." : "Cargando datos..."}</p>
         </CardContent>
       </Card>
     );
@@ -270,8 +270,8 @@ export default function AttendanceLogPage() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Log Group Attendance</CardTitle>
-        <CardDescription>Select a group, date, and time to generate a QR code for the session, or mark attendance manually below.
+        <CardTitle>Registrar Asistencia de Grupo</CardTitle>
+        <CardDescription>Selecciona un grupo, fecha y hora para generar un código QR para la sesión, o marca la asistencia manualmente abajo.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -283,7 +283,7 @@ export default function AttendanceLogPage() {
                 name="groupId"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Group</FormLabel>
+                    <FormLabel>Grupo</FormLabel>
                     <Select
                       onValueChange={(value) => {
                         field.onChange(value);
@@ -293,7 +293,7 @@ export default function AttendanceLogPage() {
                     >
                       <FormControl>
                         <SelectTrigger>
-                          <SelectValue placeholder="Select a group" />
+                          <SelectValue placeholder="Selecciona un grupo" />
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
@@ -313,7 +313,7 @@ export default function AttendanceLogPage() {
                 name="sessionDate"
                 render={({ field }) => (
                   <FormItem className="flex flex-col">
-                    <FormLabel>Session Date</FormLabel>
+                    <FormLabel>Fecha de la Sesión</FormLabel>
                     <Popover>
                       <PopoverTrigger asChild>
                         <FormControl>
@@ -328,7 +328,7 @@ export default function AttendanceLogPage() {
                             {field.value ? (
                               format(field.value, "PPP")
                             ) : (
-                              <span>Pick a date</span>
+                              <span>Elige una fecha</span>
                             )}
                             <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
                           </Button>
@@ -355,11 +355,11 @@ export default function AttendanceLogPage() {
                 name="sessionTime"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Session Time (HH:MM)</FormLabel>
+                    <FormLabel>Hora de la Sesión (HH:MM)</FormLabel>
                     <FormControl>
                       <Input type="time" {...field} disabled={isLoadingData} />
                     </FormControl>
-                     <FormDescription>Enter time in 24-hour format (e.g., 14:30). Default based on App Settings.</FormDescription>
+                     <FormDescription>Ingresa la hora en formato de 24 horas (ej., 14:30). El valor predeterminado se basa en la Configuración de la Aplicación.</FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -369,8 +369,8 @@ export default function AttendanceLogPage() {
             { (qrCodeValue || isGeneratingQr) && (
               <Card>
                 <CardHeader>
-                  <CardTitle className="flex items-center gap-2"><QrCodeIcon /> Session QR Code</CardTitle>
-                  <CardDescription>Display this code for your students to scan. It's unique to the selected group, date, and time.</CardDescription>
+                  <CardTitle className="flex items-center gap-2"><QrCodeIcon /> Código QR de la Sesión</CardTitle>
+                  <CardDescription>Muestra este código a tus estudiantes para que lo escaneen. Es único para el grupo, fecha y hora seleccionados.</CardDescription>
                 </CardHeader>
                 <CardContent className="flex items-center justify-center p-6">
                   {isGeneratingQr ? (
@@ -386,7 +386,7 @@ export default function AttendanceLogPage() {
 
             {fields.length > 0 && (
               <div className="space-y-6">
-                <h3 className="text-lg font-medium">Manual Attendance Entry</h3>
+                <h3 className="text-lg font-medium">Registro de Asistencia Manual</h3>
                 {fields.map((item, index) => (
                   <Card key={item.fieldId} className="p-4">
                     <div className="flex flex-col md:flex-row md:items-center gap-4">
@@ -412,13 +412,13 @@ export default function AttendanceLogPage() {
                                   <FormControl>
                                     <RadioGroupItem value="present" />
                                   </FormControl>
-                                  <FormLabel className="font-normal">Present</FormLabel>
+                                  <FormLabel className="font-normal">Presente</FormLabel>
                                 </FormItem>
                                 <FormItem className="flex items-center space-x-1 space-y-0">
                                   <FormControl>
                                     <RadioGroupItem value="absent" />
                                   </FormControl>
-                                  <FormLabel className="font-normal">Absent</FormLabel>
+                                  <FormLabel className="font-normal">Ausente</FormLabel>
                                 </FormItem>
                               </RadioGroup>
                             </FormControl>
@@ -433,10 +433,10 @@ export default function AttendanceLogPage() {
                           name={`attendances.${index}.observation`}
                           render={({ field: obsField }) => (
                             <FormItem className="flex-1 min-w-[200px]">
-                              <FormLabel className="sr-only">Observation</FormLabel>
+                              <FormLabel className="sr-only">Observación</FormLabel>
                               <FormControl>
                                 <Textarea
-                                  placeholder="Reason for absence..."
+                                  placeholder="Motivo de la ausencia..."
                                   {...obsField}
                                   rows={1}
                                 />
@@ -451,13 +451,13 @@ export default function AttendanceLogPage() {
                 ))}
                 <Button type="submit" disabled={isSubmitting || isLoadingData || fields.length === 0}>
                   {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  Log All Attendance Manually
+                  Registrar Toda la Asistencia Manualmente
                 </Button>
               </div>
             )}
 
             {fields.length === 0 && watchedGroupId && !isLoadingData && (
-                <p className="text-muted-foreground">No students found in the selected group or group data is still loading.</p>
+                <p className="text-muted-foreground">No se encontraron estudiantes en el grupo seleccionado o los datos del grupo aún se están cargando.</p>
             )}
 
           </form>
