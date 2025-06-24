@@ -66,7 +66,7 @@ export interface User {
   attendanceCode?: string | null;
   requiresPasswordChange?: boolean;
   sedeId?: string | null; 
-  institutionId: string;
+  institutionId: string | null;
 
   // Student-specific fields
   level?: 'Beginner' | 'Intermediate' | 'Advanced' | 'Other';
