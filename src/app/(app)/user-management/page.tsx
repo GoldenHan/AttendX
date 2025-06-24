@@ -336,7 +336,7 @@ export default function StaffManagementPage() {
   const handleOpenAddDialog = () => {
     setEditingStaff(null);
     const defaultValues: StaffFormValues = {
-      name: '', username: '', email: '', phoneNumber: '', role: 'teacher', photoUrl: '', assignedGroupId: undefined, attendanceCode: '',
+      name: '', username: '', email: '', phoneNumber: '', role: 'teacher', photoUrl: '', assignedGroupId: undefined, attendanceCode: '', 
       sedeId: firestoreUser?.role === 'supervisor' ? (firestoreUser.sedeId || '') : '',
     };
     if (firestoreUser?.role === 'supervisor') {
@@ -544,9 +544,13 @@ export default function StaffManagementPage() {
     } catch (error: any) {
       console.error("Password reset error:", error);
       let errorMessage = "No se pudo enviar el correo de restablecimiento de contraseña.";
-      if (error.code === 'auth/user-not-found') errorMessage = `No se encontró una cuenta de Firebase Authentication para ${staffEmail}. Es posible que deba agregarse primero o haya un error tipográfico.`;
-      else if (error.code === 'auth/invalid-email') errorMessage = `La dirección de correo electrónico ${staffEmail} no es válida.`;
-      else errorMessage = `Error: ${error.message} (Código: ${error.code})`;
+      if (error.code === 'auth/user-not-found') {
+         errorMessage = `No se encontró una cuenta de Firebase Authentication para ${staffEmail}. Es posible que deba agregarse primero o haya un error tipográfico.`;
+      } else if (error.code === 'auth/invalid-email') {
+        errorMessage = `La dirección de correo electrónico ${staffEmail} no es válida.`;
+      } else {
+        errorMessage = `Error: ${error.message} (Código: ${error.code})`;
+      }
       toast({ title: 'Fallo en el Restablecimiento de Contraseña', description: errorMessage, variant: 'destructive'});
     } finally {
       setIsSendingResetEmail(null);
