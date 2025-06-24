@@ -34,7 +34,7 @@ import {
 import { useRouter } from 'next/navigation';
 
 const loginFormSchema = z.object({
-  identifier: z.string().email({ message: "Por favor, ingresa un correo electrónico válido." }),
+  identifier: z.string().min(1, { message: "Por favor, ingresa tu correo electrónico o nombre de usuario." }),
   password: z.string().min(1, { message: "La contraseña es requerida." }),
 });
 
@@ -203,10 +203,10 @@ export default function AuthPage() {
                 <form onSubmit={loginForm.handleSubmit(handleLoginSubmit)} className="space-y-4">
                     <FormField control={loginForm.control} name="identifier" render={({ field }) => (
                       <FormItem>
-                        <FormLabel className="sr-only">Email</FormLabel>
+                        <FormLabel className="sr-only">Email o Nombre de Usuario</FormLabel>
                          <div className="relative">
-                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Mail className="h-5 w-5 text-muted-foreground" /></div>
-                            <FormControl><Input placeholder="Email" {...field} disabled={currentLoadingState} className="bg-input pl-10" /></FormControl>
+                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><UserIcon className="h-5 w-5 text-muted-foreground" /></div>
+                            <FormControl><Input placeholder="Email o Nombre de Usuario" {...field} disabled={currentLoadingState} className="bg-input pl-10" /></FormControl>
                         </div>
                         <FormMessage className="text-xs text-left"/>
                       </FormItem>

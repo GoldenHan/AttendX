@@ -179,14 +179,38 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const signIn = async (identifier: string, pass: string) => {
     try {
-        if (!identifier.includes('@')) {
-            throw new Error('Por favor, usa tu correo electrónico para iniciar sesión. Los nombres de usuario no son compatibles para el inicio de sesión.');
+      let emailToSignIn: string;
+
+      // If identifier is not an email, treat it as a username
+      if (!identifier.includes('@')) {
+        const usersRef = collection(db, 'users');
+        const q = query(usersRef, where("username", "==", identifier.trim()));
+        const querySnapshot = await getDocs(q);
+
+        if (querySnapshot.empty) {
+          throw new Error("El usuario o la contraseña son incorrectos.");
         }
-        await signInWithEmailAndPassword(auth, identifier, pass);
+        
+        if (querySnapshot.size > 1) {
+          throw new Error("Este nombre de usuario existe en múltiples instituciones. Por favor, inicia sesión con tu correo electrónico para desambiguar.");
+        }
+        
+        const userDoc = querySnapshot.docs[0].data();
+        if (!userDoc.email) {
+          throw new Error("La cuenta de usuario no tiene un correo electrónico asociado. Por favor, contacta al administrador.");
+        }
+        emailToSignIn = userDoc.email;
+      } else {
+        // If it looks like an email, use it directly
+        emailToSignIn = identifier.trim();
+      }
+
+      await signInWithEmailAndPassword(auth, emailToSignIn, pass);
     } catch (error: any) {
         if (error.code === 'auth/invalid-credential' || error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
-            throw new Error('El correo electrónico o la contraseña son incorrectos.');
+            throw new Error('El usuario o la contraseña son incorrectos.');
         }
+        // Re-throw custom messages from our logic or Firebase errors
         throw error;
     }
   };
