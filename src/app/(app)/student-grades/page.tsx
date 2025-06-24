@@ -78,7 +78,7 @@ export default function StudentGradesPage() {
   const fetchData = useCallback(async () => {
     if (authLoading || !isStudentRole || !authUser?.uid) {
         if (!authLoading && !isStudentRole) {
-             toast({ title: 'Access Denied', description: 'This page is for students to view their own grades.', variant: 'destructive'});
+             toast({ title: 'Acceso Denegado', description: 'Esta página es para que los estudiantes vean sus propias calificaciones.', variant: 'destructive'});
         }
         return;
     }
@@ -125,11 +125,11 @@ export default function StudentGradesPage() {
            }
            setStudentData(processedData);
         } else {
-            toast({ title: 'Error', description: 'Could not find your student record.', variant: 'destructive'});
+            toast({ title: 'Error', description: 'No se pudo encontrar tu registro de estudiante.', variant: 'destructive'});
         }
     } catch (error) {
       console.error("Error fetching student data:", error);
-      toast({ title: 'Error fetching data', description: 'Could not load your grades.', variant: 'destructive' });
+      toast({ title: 'Error al Obtener Datos', description: 'No se pudieron cargar tus calificaciones.', variant: 'destructive' });
     }
   }, [toast, gradingConfig, authLoading, firestoreUser, authUser, isStudentRole]);
 
@@ -179,11 +179,11 @@ export default function StudentGradesPage() {
     return (
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2"><ClipboardCheck className="h-6 w-6 text-primary" />My Grades</CardTitle>
-          <CardDescription>Loading your grading information...</CardDescription>
+          <CardTitle className="flex items-center gap-2"><ClipboardCheck className="h-6 w-6 text-primary" />Mis Calificaciones</CardTitle>
+          <CardDescription>Cargando tu información de calificaciones...</CardDescription>
         </CardHeader>
         <CardContent className="flex items-center justify-center py-10">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" /><p className="ml-2">Loading...</p>
+          <Loader2 className="h-8 w-8 animate-spin text-primary" /><p className="ml-2">Cargando...</p>
         </CardContent>
       </Card>
     );
@@ -196,10 +196,10 @@ export default function StudentGradesPage() {
         <Card>
             <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                    <ClipboardCheck className="h-6 w-6 text-primary" /> My Grades
+                    <ClipboardCheck className="h-6 w-6 text-primary" /> Mis Calificaciones
                 </CardTitle>
                 <CardDescription>
-                    Viewing your grades. Institution Configuration: {currentNumberOfPartials} partials, passing with {gradingConfig.passingGrade}pts.
+                    Viendo tus calificaciones. Configuración de la Institución: {currentNumberOfPartials} parciales, aprobación con {gradingConfig.passingGrade}pts.
                 </CardDescription>
             </CardHeader>
             <CardContent>
@@ -207,24 +207,24 @@ export default function StudentGradesPage() {
                     <Accordion type="single" collapsible defaultValue={studentData.level || Object.keys(studentData.gradesByLevel)[0]} className="w-full">
                         {Object.entries(studentData.gradesByLevel).map(([levelName, levelData]) => {
                              const partialHeaders = Array.from({ length: currentNumberOfPartials }).map((_, i) => (
-                                <TableHead key={`h-p${i+1}`} colSpan={MAX_ACCUMULATED_ACTIVITIES_DISPLAY + 2} className="text-center">{i+1}{i === 0 ? 'st' : i === 1 ? 'nd' : i === 2 ? 'rd' : 'th'} Partial</TableHead>
+                                <TableHead key={`h-p${i+1}`} colSpan={MAX_ACCUMULATED_ACTIVITIES_DISPLAY + 2} className="text-center">{i+1}{i === 0 ? 'er' : i === 1 ? 'do' : i === 2 ? 'er' : 'to'} Parcial</TableHead>
                             ));
                              const subPartialHeaders = Array.from({ length: currentNumberOfPartials }).flatMap((_, pNum) => ([
                                 ...Array.from({ length: MAX_ACCUMULATED_ACTIVITIES_DISPLAY }).map((_, i) => <TableHead key={`p${pNum}-acc${i+1}`} className="text-center text-xs">Ac. {i+1}</TableHead>),
-                                <TableHead key={`p${pNum}-exam`} className="text-center text-xs">Exam</TableHead>,
-                                <TableHead key={`p${pNum}-total`} className="text-center font-bold text-xs">Total Partial</TableHead>
+                                <TableHead key={`p${pNum}-exam`} className="text-center text-xs">Examen</TableHead>,
+                                <TableHead key={`p${pNum}-total`} className="text-center font-bold text-xs">Total Parcial</TableHead>
                             ]));
 
                             return (
                                 <AccordionItem key={levelName} value={levelName}>
-                                    <AccordionTrigger className="text-lg font-semibold">Grades for Level: {levelName}</AccordionTrigger>
+                                    <AccordionTrigger className="text-lg font-semibold">Calificaciones para el Nivel: {levelName}</AccordionTrigger>
                                     <AccordionContent>
                                         <div className="overflow-x-auto">
                                             <Table>
                                                 <TableHeader>
                                                     <TableRow>
                                                         {partialHeaders}
-                                                        <TableHead rowSpan={2} className="text-center align-bottom">Final Grade</TableHead>
+                                                        <TableHead rowSpan={2} className="text-center align-bottom">Nota Final</TableHead>
                                                     </TableRow>
                                                     <TableRow>
                                                         {subPartialHeaders}
@@ -240,7 +240,7 @@ export default function StudentGradesPage() {
                                                             return (
                                                                 <React.Fragment key={`student-level-${levelName}-p${pNum}`}>
                                                                     {renderAccumulatedActivitiesScores(partialData?.accumulatedActivities, `p${pNum}`)}
-                                                                    <TableCell className="text-center">{getScoreDisplay(partialData?.exam?.score, partialData?.exam?.name, "Exam")}</TableCell>
+                                                                    <TableCell className="text-center">{getScoreDisplay(partialData?.exam?.score, partialData?.exam?.name, "Examen")}</TableCell>
                                                                     <TableCell className="text-center font-semibold">{getScoreDisplay(studentPartialTotal, null, null, true)}</TableCell>
                                                                 </React.Fragment>
                                                             );
@@ -257,7 +257,7 @@ export default function StudentGradesPage() {
                     </Accordion>
                 ) : (
                      <div className="text-center py-10">
-                        <p className="text-muted-foreground">Your grades are not yet available or not recorded.</p>
+                        <p className="text-muted-foreground">Tus calificaciones aún no están disponibles o no han sido registradas.</p>
                      </div>
                 )}
             </CardContent>
