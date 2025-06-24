@@ -163,7 +163,7 @@ export default function DashboardPage() {
         }
 
       } else if (firestoreUser.role === 'supervisor' && firestoreUser.sedeId) {
-          const sedeQuery = query(collection(db, 'sedes'), where('id', '==', firestoreUser.sedeId), where('institutionId', '==', institutionId), limit(1));
+          const sedeQuery = query(collection(db, 'sedes'), where('__name__', '==', firestoreUser.sedeId), where('institutionId', '==', institutionId), limit(1));
           const teachersInSedeQuery = query(collection(db, 'users'), where('role', '==', 'teacher'), where('sedeId', '==', firestoreUser.sedeId), where('institutionId', '==', institutionId));
           const groupsInSedeQuery = query(collection(db, 'groups'), where('sedeId', '==', firestoreUser.sedeId), where('institutionId', '==', institutionId));
           const studentsInSedeQuery = query(collection(db, 'users'), where('role', '==', 'student'), where('sedeId', '==', firestoreUser.sedeId), where('institutionId', '==', institutionId));
@@ -624,4 +624,3 @@ export default function DashboardPage() {
     </div>
   );
 }
-
