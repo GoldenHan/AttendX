@@ -19,11 +19,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
 import type { AttendanceRecord, User, Group, Session, ClassScheduleConfiguration } from '@/types';
-// DEFAULT_CLASS_SCHEDULE_CONFIG removed, will use from AuthContext
 import React, { useState, useEffect, useCallback } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, Timestamp, query, where, doc, writeBatch } from 'firebase/firestore';
-import { Loader2, CalendarIcon } from 'lucide-react';
+import { Loader2, CalendarIcon, QrCode as QrCodeIcon } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -31,6 +30,7 @@ import { Calendar } from '@/components/ui/calendar';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
+import QRCode from 'qrcode.react';
 
 const studentAttendanceSchema = z.object({
   userId: z.string(),
@@ -50,14 +50,15 @@ type AttendanceLogFormValues = z.infer<typeof attendanceLogFormSchema>;
 
 export default function AttendanceLogPage() {
   const { toast } = useToast();
-  const { firestoreUser, classScheduleConfig, loading: authLoading } = useAuth(); // Get classScheduleConfig from AuthContext
+  const { firestoreUser, classScheduleConfig, loading: authLoading } = useAuth();
 
   const [groups, setGroups] = useState<Group[]>([]);
   const [allStudents, setAllStudents] = useState<User[]>([]);
-  // classScheduleConfig state removed, using from AuthContext
+  const [qrCodeValue, setQrCodeValue] = useState<string | null>(null);
   
   const [isLoadingData, setIsLoadingData] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isGeneratingQr, setIsGeneratingQr] = useState(false);
   
 
   const form = useForm<AttendanceLogFormValues>({
@@ -65,12 +66,11 @@ export default function AttendanceLogPage() {
     defaultValues: {
       groupId: '',
       sessionDate: new Date(),
-      sessionTime: classScheduleConfig.startTime, // Use initial from context
+      sessionTime: classScheduleConfig.startTime,
       attendances: [],
     },
   });
 
-  // Update default sessionTime when classScheduleConfig from context changes
   useEffect(() => {
     if (classScheduleConfig.startTime) {
         form.setValue('sessionTime', classScheduleConfig.startTime);
@@ -83,8 +83,6 @@ export default function AttendanceLogPage() {
     name: 'attendances',
     keyName: 'fieldId',
   });
-
-  const watchedGroupId = form.watch('groupId');
 
   const populateStudentsForGroup = useCallback((groupId: string) => {
     remove(); 
@@ -101,6 +99,7 @@ export default function AttendanceLogPage() {
     }
   }, [groups, allStudents, append, remove]);
 
+  const watchedGroupId = form.watch('groupId');
   useEffect(() => {
     if (watchedGroupId && groups.length > 0 && allStudents.length > 0) {
       populateStudentsForGroup(watchedGroupId);
@@ -109,7 +108,7 @@ export default function AttendanceLogPage() {
 
   useEffect(() => {
     const fetchData = async () => {
-      if (!firestoreUser?.institutionId || authLoading) { // Wait for auth and institution ID
+      if (!firestoreUser?.institutionId || authLoading) {
         setIsLoadingData(false);
         if(firestoreUser && !firestoreUser.institutionId) toast({ title: "Error", description: "Cannot load data without institution context.", variant: "destructive" });
         return;
@@ -118,10 +117,8 @@ export default function AttendanceLogPage() {
       try {
         const groupsQuery = query(collection(db, 'groups'), where('institutionId', '==', firestoreUser.institutionId));
         const studentsQuery = query(collection(db, 'users'), where('role', '==', 'student'), where('institutionId', '==', firestoreUser.institutionId));
-        // Schedule config now comes from AuthContext, no need to fetch here explicitly
-        // const scheduleConfigPromise = getDoc(doc(db, 'appConfiguration', 'currentClassScheduleConfig')); Removed
-
-        const [groupsSnapshot, studentsSnapshot] = await Promise.all([ // scheduleConfigPromise removed
+       
+        const [groupsSnapshot, studentsSnapshot] = await Promise.all([
             getDocs(groupsQuery),
             getDocs(studentsQuery),
         ]);
@@ -129,22 +126,21 @@ export default function AttendanceLogPage() {
         setGroups(groupsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as Group)));
         setAllStudents(studentsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as User)));
 
-        // classScheduleConfig is now from AuthContext
         form.reset({
             groupId: '', 
             sessionDate: new Date(),
-            sessionTime: classScheduleConfig.startTime || '09:00', // Use context's config
+            sessionTime: classScheduleConfig.startTime || '09:00',
             attendances: [],
         });
         remove(); 
 
       } catch (error) {
         console.error("Error fetching data: ", error);
-        toast({ title: 'Error fetching data', description: 'Could not load groups or students.', variant: 'destructive' }); // Removed schedule config from msg
+        toast({ title: 'Error fetching data', description: 'Could not load groups or students.', variant: 'destructive' });
         form.reset({
             groupId: '',
             sessionDate: new Date(),
-            sessionTime: classScheduleConfig.startTime || '09:00', // Use context's config
+            sessionTime: classScheduleConfig.startTime || '09:00',
             attendances: [],
         });
         remove();
@@ -152,9 +148,9 @@ export default function AttendanceLogPage() {
       setIsLoadingData(false);
     };
     fetchData();
-  }, [toast, form, remove, firestoreUser, authLoading, classScheduleConfig]); // Added classScheduleConfig from context as dependency
+  }, [toast, form, remove, firestoreUser, authLoading, classScheduleConfig]);
 
-  const findOrCreateSession = async (groupId: string, date: Date, time: string): Promise<string> => {
+  const findOrCreateSession = useCallback(async (groupId: string, date: Date, time: string): Promise<string> => {
     if (!firestoreUser?.institutionId) {
         throw new Error("User institution not found. Cannot create session.");
     }
@@ -182,8 +178,33 @@ export default function AttendanceLogPage() {
       const sessionDocRef = await addDoc(sessionsRef, newSessionData);
       return sessionDocRef.id;
     }
-  };
+  }, [firestoreUser, groups]);
   
+  const watchedSessionDate = form.watch('sessionDate');
+  const watchedSessionTime = form.watch('sessionTime');
+  
+  useEffect(() => {
+    const generateQrCodeForSession = async () => {
+      if (watchedGroupId && watchedSessionDate && /^\d{2}:\d{2}$/.test(watchedSessionTime)) {
+        setIsGeneratingQr(true);
+        try {
+          const sessionId = await findOrCreateSession(watchedGroupId, watchedSessionDate, watchedSessionTime);
+          setQrCodeValue(sessionId);
+        } catch (e) {
+          console.error("Failed to generate session ID for QR code", e);
+          setQrCodeValue(null);
+          toast({ title: "Error", description: "Could not generate QR code for this session.", variant: "destructive" });
+        } finally {
+          setIsGeneratingQr(false);
+        }
+      } else {
+        setQrCodeValue(null);
+      }
+    };
+    generateQrCodeForSession();
+  }, [watchedGroupId, watchedSessionDate, watchedSessionTime, findOrCreateSession, toast]);
+
+
   async function onSubmit(data: AttendanceLogFormValues) {
     if (!firestoreUser?.institutionId) {
       toast({ title: 'Error', description: 'Cannot log attendance without institution context.', variant: 'destructive' });
@@ -203,7 +224,7 @@ export default function AttendanceLogPage() {
           sessionId: finalSessionId!,
           status: att.status,
           timestamp: Timestamp.now().toDate().toISOString(),
-          institutionId: firestoreUser.institutionId, // Ensure institutionId is set
+          institutionId: firestoreUser.institutionId,
         };
         if (att.status === 'absent' && att.observation) {
           record.observation = att.observation;
@@ -231,7 +252,7 @@ export default function AttendanceLogPage() {
     setIsSubmitting(false);
   }
   
-  if (authLoading || isLoadingData || !firestoreUser) { // Check authLoading as well
+  if (authLoading || isLoadingData || !firestoreUser) {
     return (
       <Card>
         <CardHeader>
@@ -250,7 +271,7 @@ export default function AttendanceLogPage() {
     <Card>
       <CardHeader>
         <CardTitle>Log Group Attendance</CardTitle>
-        <CardDescription>Select a group, date, and time, then mark attendance for each student.
+        <CardDescription>Select a group, date, and time to generate a QR code for the session, or mark attendance manually below.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -344,10 +365,28 @@ export default function AttendanceLogPage() {
                 )}
               />
             </div>
+            
+            { (qrCodeValue || isGeneratingQr) && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2"><QrCodeIcon /> Session QR Code</CardTitle>
+                  <CardDescription>Display this code for your students to scan. It's unique to the selected group, date, and time.</CardDescription>
+                </CardHeader>
+                <CardContent className="flex items-center justify-center p-6">
+                  {isGeneratingQr ? (
+                      <Loader2 className="h-10 w-10 animate-spin text-primary" />
+                  ) : qrCodeValue ? (
+                      <div className="bg-white p-4 rounded-lg shadow-md">
+                        <QRCode value={qrCodeValue} size={256} />
+                      </div>
+                  ) : null}
+                </CardContent>
+              </Card>
+            )}
 
             {fields.length > 0 && (
               <div className="space-y-6">
-                <h3 className="text-lg font-medium">Student Attendance</h3>
+                <h3 className="text-lg font-medium">Manual Attendance Entry</h3>
                 {fields.map((item, index) => (
                   <Card key={item.fieldId} className="p-4">
                     <div className="flex flex-col md:flex-row md:items-center gap-4">
@@ -410,6 +449,10 @@ export default function AttendanceLogPage() {
                     </div>
                   </Card>
                 ))}
+                <Button type="submit" disabled={isSubmitting || isLoadingData || fields.length === 0}>
+                  {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Log All Attendance Manually
+                </Button>
               </div>
             )}
 
@@ -417,11 +460,6 @@ export default function AttendanceLogPage() {
                 <p className="text-muted-foreground">No students found in the selected group or group data is still loading.</p>
             )}
 
-
-            <Button type="submit" disabled={isSubmitting || isLoadingData || fields.length === 0}>
-              {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Log All Attendance
-            </Button>
           </form>
         </Form>
       </CardContent>
