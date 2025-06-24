@@ -31,6 +31,7 @@ import {
   Receipt,
   ListChecks,
   FilePenLine,
+  UserCheck,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import type { User } from '@/types';
@@ -56,6 +57,7 @@ const navItems: NavItem[] = [
 
   // Student specific views
   { href: '/student-grades', label: 'Mis Calificaciones', icon: ClipboardCheck, roles: ['student'] },
+  { href: '/my-attendance', label: 'Mi Asistencia', icon: UserCheck, roles: ['student'] },
   
   // AI Tools
   { href: '/ai-analysis', label: 'Análisis IA (Asistencia)', icon: Brain, roles: ['admin', 'teacher', 'supervisor'] },
@@ -105,7 +107,7 @@ export function SidebarNav() {
 
   const visibleNavItems = filterNavItemsForRole(navItems);
 
-  const generalItems = visibleNavItems.filter(item => ['/dashboard', '/attendance-log', '/attendance-records', '/reports', '/student-grades', '/classroom/my-tasks'].includes(item.href));
+  const generalItems = visibleNavItems.filter(item => ['/dashboard', '/attendance-log', '/attendance-records', '/reports', '/student-grades', '/classroom/my-tasks', '/my-attendance'].includes(item.href));
   const classroomItems = visibleNavItems.filter(item => ['/classroom/assignments'].includes(item.href));
   const aiItems = visibleNavItems.filter(item => ['/ai-analysis', '/lesson-planner', '/ai-performance-report'].includes(item.href));
   const managementItems = visibleNavItems.filter(item => ['/student-management', '/group-management', '/grades-management', '/partial-grades-report', '/certificate-management'].includes(item.href));
