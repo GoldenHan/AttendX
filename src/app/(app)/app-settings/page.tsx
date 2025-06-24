@@ -8,27 +8,31 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
-import { Settings, Download, RefreshCw, Moon, Sun, Save, Loader2, AlertTriangle, Clock, Image as ImageIcon, UploadCloud, Trash2 as RemoveIcon } from 'lucide-react';
+import { Settings, Download, RefreshCw, Moon, Sun, Save, Loader2, AlertTriangle, Clock, Image as ImageIcon, Trash2 as RemoveIcon } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import React, { useState, useEffect, useCallback, ChangeEvent } from 'react';
 import { db } from '@/lib/firebase';
-import { doc, getDoc, setDoc, collection, getDocs, query, where } from 'firebase/firestore';
+import { doc, getDoc, setDoc, collection, getDocs, query, where, updateDoc } from 'firebase/firestore';
 import type { GradingConfiguration, User, ClassScheduleConfiguration } from '@/types';
 import { DEFAULT_GRADING_CONFIG, DEFAULT_CLASS_SCHEDULE_CONFIG } from '@/types';
 import Image from 'next/image';
-import { useAuth } from '@/contexts/AuthContext'; // Import useAuth
+import { useAuth } from '@/contexts/AuthContext';
 
-const MAX_LOGO_SIZE_MB = 1; 
-const DEFAULT_APP_NAME = ""; 
+const MAX_LOGO_SIZE_MB = 1;
 
 export default function AppSettingsPage() {
   const { toast } = useToast();
-  const { firestoreUser, fetchGradingConfigForInstitution } = useAuth(); // Get firestoreUser and fetchGradingConfig
+  const { firestoreUser, institution, refreshInstitutionData, fetchGradingConfigForInstitution } = useAuth();
 
   const [isDarkMode, setIsDarkMode] = useState(false);
-  const [appName, setAppName] = useState(DEFAULT_APP_NAME);
   const [isExporting, setIsExporting] = useState(false);
   
+  // Institution Branding States
+  const [appName, setAppName] = useState('');
+  const [logoPreviewUrl, setLogoPreviewUrl] = useState<string | null>(null);
+  const [isSavingAppearance, setIsSavingAppearance] = useState(false);
+  const [isProcessingLogo, setIsProcessingLogo] = useState(false);
+
   const [isSavingGradingConfig, setIsSavingGradingConfig] = useState(false);
   const [gradingConfig, setGradingConfig] = useState<GradingConfiguration>(DEFAULT_GRADING_CONFIG);
   const [isLoadingGradingConfig, setIsLoadingGradingConfig] = useState(true);
@@ -37,10 +41,7 @@ export default function AppSettingsPage() {
   const [classScheduleConfig, setClassScheduleConfig] = useState<ClassScheduleConfiguration>(DEFAULT_CLASS_SCHEDULE_CONFIG);
   const [isLoadingScheduleConfig, setIsLoadingScheduleConfig] = useState(true);
 
-  const [logoPreviewUrl, setLogoPreviewUrl] = useState<string | null>(null);
-  const [isProcessingLogo, setIsProcessingLogo] = useState(false);
-
-
+  // Effect to handle local theme preference
   useEffect(() => {
     const storedTheme = localStorage.getItem('theme');
     if (storedTheme === 'dark') {
@@ -50,17 +51,16 @@ export default function AppSettingsPage() {
       document.documentElement.classList.remove('dark');
       setIsDarkMode(false);
     }
-    const storedAppName = localStorage.getItem('appName');
-    if (storedAppName) {
-      setAppName(storedAppName);
-    } else {
-      setAppName(DEFAULT_APP_NAME); 
-    }
-    const storedLogoDataUrl = localStorage.getItem('appLogoDataUrl');
-    if (storedLogoDataUrl) {
-      setLogoPreviewUrl(storedLogoDataUrl);
-    }
   }, []);
+
+  // Effect to load institution-specific settings from AuthContext
+  useEffect(() => {
+    if (institution) {
+      setAppName(institution.appName || institution.name || '');
+      setLogoPreviewUrl(institution.logoDataUrl || null);
+    }
+  }, [institution]);
+
 
   const loadGradingConfiguration = useCallback(async () => {
     if (!firestoreUser?.institutionId) {
@@ -72,20 +72,15 @@ export default function AppSettingsPage() {
     setIsLoadingGradingConfig(true);
     try {
       const config = await fetchGradingConfigForInstitution(firestoreUser.institutionId);
-      setGradingConfig(config); // fetchGradingConfigForInstitution returns default if not found
-      if (JSON.stringify(config) === JSON.stringify(DEFAULT_GRADING_CONFIG)) {
-         // This check might be tricky if default values are modified or if a saved config happens to be identical to default
-         // A better check would be if the document existed in Firestore. fetchGradingConfigForInstitution doesn't expose this directly.
-         // For now, this implies it's using default.
-        const configDocRef = doc(db, 'institutionGradingConfigs', firestoreUser.institutionId);
-        const docSnap = await getDoc(configDocRef);
-        if (!docSnap.exists()) {
-          toast({
-            title: "Default Grading Config",
-            description: "No specific grading configuration found for your institution. Loaded default values. Save to create one.",
-            variant: "default",
-          });
-        }
+      setGradingConfig(config);
+      const configDocRef = doc(db, 'institutionGradingConfigs', firestoreUser.institutionId);
+      const docSnap = await getDoc(configDocRef);
+      if (!docSnap.exists()) {
+        toast({
+          title: "Default Grading Config",
+          description: "No specific grading configuration found for your institution. Loaded default values. Save to create one.",
+          variant: "default",
+        });
       }
     } catch (error) {
       console.error("Error fetching institution grading configuration:", error);
@@ -158,13 +153,29 @@ export default function AppSettingsPage() {
     }
     toast({ title: 'Theme Changed', description: `Switched to ${checked ? 'Dark' : 'Light'} Mode.` });
   };
+  
+  const handleSaveAppearance = async () => {
+    if (!firestoreUser?.institutionId) {
+      toast({ title: "Error", description: "No institution found to save settings to.", variant: 'destructive'});
+      return;
+    }
+    setIsSavingAppearance(true);
+    try {
+      const institutionRef = doc(db, 'institutions', firestoreUser.institutionId);
+      await updateDoc(institutionRef, {
+        appName: appName,
+        logoDataUrl: logoPreviewUrl,
+      });
+      await refreshInstitutionData(); 
+      toast({ title: "Branding Saved", description: "Institution name and logo have been updated for all users." });
+    } catch (error) {
+      console.error("Error saving appearance settings:", error);
+      toast({ title: "Save Failed", description: "Could not save appearance settings.", variant: 'destructive'});
+    } finally {
+      setIsSavingAppearance(false);
+    }
+  }
 
-  const handleAppNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const newName = e.target.value;
-    setAppName(newName);
-    localStorage.setItem('appName', newName);
-    window.dispatchEvent(new CustomEvent('appNameChanged', { detail: newName }));
-  };
 
   const handleLogoFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -182,10 +193,7 @@ export default function AppSettingsPage() {
       const reader = new FileReader();
       reader.onloadend = () => {
         const dataUrl = reader.result as string;
-        localStorage.setItem('appLogoDataUrl', dataUrl);
         setLogoPreviewUrl(dataUrl);
-        window.dispatchEvent(new CustomEvent('logoUrlChanged', { detail: dataUrl }));
-        toast({ title: 'Logo Updated', description: 'New logo has been set from the uploaded file.' });
         setIsProcessingLogo(false);
       };
       reader.onerror = () => {
@@ -198,10 +206,7 @@ export default function AppSettingsPage() {
   };
 
   const handleRemoveLogo = () => {
-    localStorage.removeItem('appLogoDataUrl');
     setLogoPreviewUrl(null);
-    window.dispatchEvent(new CustomEvent('logoUrlChanged', { detail: null }));
-    toast({ title: 'Logo Removed', description: 'The application logo has been cleared.' });
   };
 
 
@@ -274,11 +279,9 @@ export default function AppSettingsPage() {
     setIsSavingGradingConfig(true);
     try {
       const configDocRef = doc(db, 'institutionGradingConfigs', firestoreUser.institutionId);
-      // The GradingConfiguration type no longer has 'id' or 'institutionId' as fields.
       const { ...configToSave } = gradingConfig; 
       await setDoc(configDocRef, configToSave, { merge: true });
       toast({ title: 'Configuration Saved', description: 'Grading configuration for your institution has been saved.' });
-       // Trigger AuthContext to refetch this specific config (optional, or rely on next login/page load)
        if (typeof fetchGradingConfigForInstitution === 'function') {
         await fetchGradingConfigForInstitution(firestoreUser.institutionId);
       }
@@ -302,7 +305,6 @@ export default function AppSettingsPage() {
     setIsSavingScheduleConfig(true);
     try {
       const configDocRef = doc(db, 'institutionScheduleConfigs', firestoreUser.institutionId);
-       // The ClassScheduleConfiguration type no longer has 'id' or 'institutionId' as fields.
       const { ...configToSave } = classScheduleConfig;
       await setDoc(configDocRef, configToSave, { merge: true });
       toast({ title: 'Configuration Saved', description: 'Class schedule configuration for your institution has been saved.' });
@@ -341,31 +343,16 @@ export default function AppSettingsPage() {
         <CardContent className="space-y-8">
 
           <div className="space-y-3">
-            <h3 className="text-lg font-medium text-foreground">General Appearance</h3>
+            <h3 className="text-lg font-medium text-foreground">Branding de la Institución (Global)</h3>
             <Separator />
             <div className="space-y-4 pt-2">
               <div className="flex flex-col space-y-1.5">
-                <Label htmlFor="appName">Application Name (Local Setting)</Label>
-                <Input id="appName" value={appName} onChange={handleAppNameChange} placeholder="Enter application name" />
-                <p className="text-xs text-muted-foreground">This name is stored locally in your browser and used in exports.</p>
+                <Label htmlFor="appName">Nombre de la Aplicación</Label>
+                <Input id="appName" value={appName} onChange={(e) => setAppName(e.target.value)} placeholder="Enter application name" />
+                <p className="text-xs text-muted-foreground">Este nombre se mostrará a todos los usuarios de tu institución.</p>
               </div>
-              <div className="flex items-center justify-between rounded-lg border p-3 shadow-sm">
-                <div className="space-y-0.5">
-                  <Label htmlFor="darkModeToggle" className="text-base">Dark Mode (Local Setting)</Label>
-                  <p className="text-xs text-muted-foreground">
-                    Toggle between light and dark themes. This preference is stored locally in your browser.
-                  </p>
-                </div>
-                <Switch
-                  id="darkModeToggle"
-                  checked={isDarkMode}
-                  onCheckedChange={handleThemeToggle}
-                  aria-label="Toggle dark mode"
-                />
-                {isDarkMode ? <Moon className="ml-2 h-5 w-5" /> : <Sun className="ml-2 h-5 w-5" />}
-              </div>
-               <div className="space-y-2">
-                <Label htmlFor="logoFile">Application Logo (Local Setting)</Label>
+              <div className="space-y-2">
+                <Label htmlFor="logoFile">Logo de la Aplicación</Label>
                 <Input 
                     id="logoFile" 
                     type="file" 
@@ -384,7 +371,7 @@ export default function AppSettingsPage() {
                     {isProcessingLogo && <Loader2 className="h-5 w-5 animate-spin text-primary" />}
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Upload a logo (PNG, JPG, GIF, SVG, max {MAX_LOGO_SIZE_MB}MB). Stored locally in your browser.
+                  Sube un logo (PNG, JPG, GIF, SVG, max {MAX_LOGO_SIZE_MB}MB). Se mostrará a todos los usuarios de tu institución.
                 </p>
                 {logoPreviewUrl && (
                   <div className="mt-2 p-2 border rounded-md inline-block bg-muted">
@@ -394,6 +381,32 @@ export default function AppSettingsPage() {
                     }} />
                   </div>
                 )}
+              </div>
+               <Button onClick={handleSaveAppearance} disabled={isSavingAppearance}>
+                  {isSavingAppearance ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                  Guardar Branding
+                </Button>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <h3 className="text-lg font-medium text-foreground">Configuración Local del Navegador</h3>
+            <Separator />
+            <div className="space-y-4 pt-2">
+               <div className="flex items-center justify-between rounded-lg border p-3 shadow-sm">
+                <div className="space-y-0.5">
+                  <Label htmlFor="darkModeToggle" className="text-base">Dark Mode</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Alterna entre temas claro y oscuro. Esta preferencia es solo para este navegador.
+                  </p>
+                </div>
+                <Switch
+                  id="darkModeToggle"
+                  checked={isDarkMode}
+                  onCheckedChange={handleThemeToggle}
+                  aria-label="Toggle dark mode"
+                />
+                {isDarkMode ? <Moon className="ml-2 h-5 w-5" /> : <Sun className="ml-2 h-5 w-5" />}
               </div>
             </div>
           </div>
@@ -532,12 +545,12 @@ export default function AppSettingsPage() {
                  </div>
                 <Button variant="outline" onClick={handleExportStudentData} disabled={isExporting}>
                   {isExporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
-                  Export Students (JSON)
+                  Exportar Estudiantes (JSON)
                 </Button>
               </div>
               <div className="flex items-center justify-between rounded-lg border p-3 shadow-sm">
                 <div>
-                    <Label className="text-base">Refresh Application Data</Label>
+                    <Label className="text-base">Refrescar Datos de la Aplicación</Label>
                     <p className="text-xs text-muted-foreground">
                         Reload the current page to fetch the latest data from the server.
                     </p>

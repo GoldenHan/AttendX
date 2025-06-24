@@ -41,6 +41,8 @@ export interface StudentGradeStructure {
 export interface Institution {
   id: string;
   name: string;
+  appName?: string | null;
+  logoDataUrl?: string | null;
   adminUids: string[]; // UIDs of users with admin role for this institution
   createdAt: string; // ISO date string
 }

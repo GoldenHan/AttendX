@@ -3,51 +3,16 @@
 import { MainAppShell } from '@/components/main-app-shell';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter, usePathname } from 'next/navigation'; 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 import { Loader2 } from 'lucide-react';
-
-const DEFAULT_APP_NAME_LAYOUT = "AttendX";
 
 export default function AppLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const { authUser, firestoreUser, loading } = useAuth();
-  const pathname = usePathname(); 
-  const [appLogoUrl, setAppLogoUrl] = useState<string | null>(null);
-  const [appName, setAppName] = useState<string>(DEFAULT_APP_NAME_LAYOUT);
-
-  useEffect(() => {
-    const storedLogoDataUrl = localStorage.getItem('appLogoDataUrl');
-    if (storedLogoDataUrl) {
-      setAppLogoUrl(storedLogoDataUrl);
-    }
-    const storedAppName = localStorage.getItem('appName');
-    if (storedAppName) {
-      setAppName(storedAppName);
-    } else {
-      setAppName(DEFAULT_APP_NAME_LAYOUT);
-    }
-
-    const handleLogoChange = (event: Event) => {
-      const customEvent = event as CustomEvent<string | null>;
-      setAppLogoUrl(customEvent.detail);
-    };
-    const handleAppNameChange = (event: Event) => {
-      const customEvent = event as CustomEvent<string>;
-      setAppName(customEvent.detail || DEFAULT_APP_NAME_LAYOUT);
-    };
-
-    window.addEventListener('logoUrlChanged', handleLogoChange);
-    window.addEventListener('appNameChanged', handleAppNameChange);
-
-    return () => {
-      window.removeEventListener('logoUrlChanged', handleLogoChange);
-      window.removeEventListener('appNameChanged', handleAppNameChange);
-    };
-  }, []);
-
+  const { authUser, firestoreUser, loading, institution } = useAuth();
+  const pathname = usePathname();
 
   useEffect(() => {
     const storedTheme = localStorage.getItem('theme');
@@ -70,5 +35,8 @@ export default function AppLayout({
       return <>{children}</>;
   }
 
-  return <MainAppShell appLogoUrl={appLogoUrl} appName={appName}>{children}</MainAppShell>;
+  const effectiveAppName = institution?.appName || institution?.name;
+  const effectiveLogoUrl = institution?.logoDataUrl;
+
+  return <MainAppShell appLogoUrl={effectiveLogoUrl} appName={effectiveAppName}>{children}</MainAppShell>;
 }
