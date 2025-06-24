@@ -164,8 +164,8 @@ export default function GroupManagementPage() {
 
   const availableTeachersForAssignment = useMemo(() => {
     if (!firestoreUser || !allTeachers.length) return [];
+    const currentSedeId = form.getValues('sedeId');
     if (firestoreUser.role === 'admin') {
-      const currentSedeId = form.getValues('sedeId');
       if (currentSedeId && currentSedeId !== NO_SEDE_ASSIGNED_VALUE) {
         return allTeachers.filter(t => t.sedeId === currentSedeId || !t.sedeId); 
       }
@@ -638,6 +638,8 @@ export default function GroupManagementPage() {
     </>
   );
 }
+    
+
     
 
     

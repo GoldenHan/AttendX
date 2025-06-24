@@ -137,16 +137,17 @@ export default function SedeManagementPage() {
       const batch = writeBatch(db);
       const institutionId = firestoreUser.institutionId;
 
+      // Handle un-assigning the new supervisor from their old Sede, if any
       if (supervisorIdToSave && (!editingSede || editingSede.supervisorId !== supervisorIdToSave)) {
         const currentSedeOfNewSupervisor = sedes.find(s => s.supervisorId === supervisorIdToSave && s.id !== editingSede?.id && s.institutionId === institutionId);
         if (currentSedeOfNewSupervisor) {
           const oldSedeRef = doc(db, 'sedes', currentSedeOfNewSupervisor.id);
           batch.update(oldSedeRef, { supervisorId: null });
         }
-        const supervisorUserRef = doc(db, 'users', supervisorIdToSave);
-        batch.update(supervisorUserRef, { sedeId: editingSede ? editingSede.id : null });
       }
-      if (editingSede && editingSede.supervisorId && supervisorIdToSave === null && editingSede.supervisorId !== supervisorIdToSave) {
+      
+      // Handle un-assigning the old supervisor from this Sede
+      if (editingSede && editingSede.supervisorId && editingSede.supervisorId !== supervisorIdToSave) {
          const supervisorUserRef = doc(db, 'users', editingSede.supervisorId);
          batch.update(supervisorUserRef, { sedeId: null });
       }
@@ -154,13 +155,8 @@ export default function SedeManagementPage() {
       if (editingSede) {
         const sedeRef = doc(db, 'sedes', editingSede.id);
         batch.update(sedeRef, { name: data.name, supervisorId: supervisorIdToSave, institutionId });
-        if (editingSede.supervisorId && editingSede.supervisorId !== supervisorIdToSave) {
-            const oldSupervisorUserRef = doc(db, 'users', editingSede.supervisorId);
-            const isOldSupervisorStillAssignedElsewhereInInstitution = sedes.some(s => s.supervisorId === editingSede.supervisorId && s.id !== editingSede.id && s.institutionId === institutionId);
-            if (!isOldSupervisorStillAssignedElsewhereInInstitution) {
-                 batch.update(oldSupervisorUserRef, { sedeId: null });
-            }
-        }
+        
+        // Update new supervisor's user doc
         if (supervisorIdToSave) {
             const newSupervisorUserRef = doc(db, 'users', supervisorIdToSave);
             batch.update(newSupervisorUserRef, { sedeId: editingSede.id });
@@ -169,11 +165,15 @@ export default function SedeManagementPage() {
         toast({ title: 'Sede Updated', description: `Sede "${data.name}" updated successfully.` });
       } else {
         const newSedeData: Omit<Sede, 'id'> = { name: data.name, supervisorId: supervisorIdToSave, institutionId };
-        const newSedeRef = await addDoc(collection(db, 'sedes'), newSedeData);
+        const newSedeRef = doc(collection(db, 'sedes')); // Prepare ref to get ID
+        batch.set(newSedeRef, newSedeData);
+        
+        // Update new supervisor's user doc with the new Sede ID
         if (supervisorIdToSave) {
             const supervisorUserRef = doc(db, 'users', supervisorIdToSave);
-            await updateDoc(supervisorUserRef, { sedeId: newSedeRef.id });
+            batch.update(supervisorUserRef, { sedeId: newSedeRef.id });
         }
+        await batch.commit();
         toast({ title: 'Sede Created', description: `Sede "${data.name}" created successfully.` });
       }
 
@@ -357,3 +357,5 @@ export default function SedeManagementPage() {
     </>
   );
 }
+
+    

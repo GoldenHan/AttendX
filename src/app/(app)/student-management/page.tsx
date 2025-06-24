@@ -449,15 +449,16 @@ export default function StudentManagementPage() {
             // This is a common challenge post-creation. AuthContext might need to return new user's ID.
             // For now, we'll assume fetchData() will update groups correctly if student is added to user list first.
             // Or, make adding to group a secondary step after student is confirmed in Firestore.
-            // For simplicity here, we'll fetch users again.
-            await fetchData(); // Re-fetch to get new student ID
-            const newStudent = allStudents.find(s => s.email === data.email && s.institutionId === firestoreUser.institutionId);
-            if (newStudent?.id) {
-                 const groupRef = doc(db, 'groups', newAssignedGroupId);
-                 await updateDoc(groupRef, { studentIds: arrayUnion(newStudent.id) });
-                 toast({ title: 'Student Added', description: `${data.name} added. Login with username as password. Assigned to group.` });
+            await fetchData(); // Re-fetch to get new student ID and then assign to group
+            const studentQuery = query(collection(db, 'users'), where('email', '==', data.email), where('institutionId', '==', firestoreUser.institutionId), limit(1));
+            const studentSnapshot = await getDocs(studentQuery);
+            if (!studentSnapshot.empty) {
+                const newStudentId = studentSnapshot.docs[0].id;
+                const groupRef = doc(db, 'groups', newAssignedGroupId);
+                await updateDoc(groupRef, { studentIds: arrayUnion(newStudentId) });
+                toast({ title: 'Student Added', description: `${data.name} added. Login with username as password. Assigned to group.` });
             } else {
-                 toast({ title: 'Student Added', description: `${data.name} added. Login with username as password. Group assignment may need manual check.`, variant: 'default' });
+                 toast({ title: 'Student Added', description: `${data.name} added. Login with username as password. Could not automatically assign to group, please do it manually.`, variant: 'default' });
             }
         } else {
             toast({ title: 'Student Added', description: `${data.name} added. Login with username as password.` });
@@ -563,6 +564,15 @@ export default function StudentManagementPage() {
     const group = allGroups.find(g => Array.isArray(g.studentIds) && g.studentIds.includes(studentId));
     return group ? group.name : "Unassigned";
   };
+  
+  const getStudentSedeName = (student: User): string => {
+    if (!student.sedeId) return "N/A";
+    const sede = allGroups.find(g => g.sedeId === student.sedeId); // Simplistic, assumes student is in a group with that Sede
+    if (sede) return sede.name;
+    // Fallback if student has a sedeId but no group is found (e.g. direct assignment)
+    // This part requires fetching Sedes list if not already available. For now, this is a placeholder.
+    return `Sede ID: ${student.sedeId.substring(0, 5)}...`;
+  }
 
   if (isLoading && allStudents.length === 0 && allGroups.length === 0) {
     return (
@@ -778,7 +788,7 @@ export default function StudentManagementPage() {
                 <TableCell>{student.email || 'N/A'}</TableCell>
                 <TableCell>{student.level || 'N/A'}</TableCell>
                 <TableCell><span className={`px-2 py-1 text-xs font-medium rounded-full ${getStudentGroupName(student.id) === "Unassigned" ? "bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300" : "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300"}`}>{getStudentGroupName(student.id)}</span></TableCell>
-                <TableCell>{student.sedeId ? allGroups.find(g => g.studentIds.includes(student.id) && g.sedeId === student.sedeId)?.name || allGroups.find(g=>g.sedeId === student.sedeId)?.name || 'N/A (Direct Sede)' : 'N/A'}</TableCell> {/* Simplification for display */}
+                <TableCell>{getStudentSedeName(student)}</TableCell>
                 <TableCell className="space-x-1">
                   <Button variant="ghost" size="icon" onClick={() => handleGoToManageGrades(student.id)} title="Manage Grades"><NotebookPen className="h-4 w-4" /><span className="sr-only">Manage Grades</span></Button>
                   {canManageStudents && (
@@ -826,3 +836,5 @@ export default function StudentManagementPage() {
     </>
   );
 }
+
+    
