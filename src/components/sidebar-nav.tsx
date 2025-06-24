@@ -62,6 +62,7 @@ const navItems: NavItem[] = [
   // Student specific views
   { href: '/student-grades', label: 'Mis Calificaciones', icon: ClipboardCheck, roles: ['student'] },
   { href: '/my-attendance', label: 'Mi Asistencia', icon: UserCheck, roles: ['student'] },
+  { href: '/student-qr-scan', label: 'Escanear QR (Asistencia)', icon: QrCode, roles: ['student'] },
 
   // AI Tools
   { href: '/ai-analysis', label: 'Análisis IA (Asistencia)', icon: Brain, roles: ['admin', 'teacher', 'supervisor'] },
@@ -120,7 +121,7 @@ export function SidebarNav() {
 
   // Group items for display in the sidebar
   const generalItems = visibleNavItems.filter(item => ['/dashboard', '/reports'].includes(item.href));
-  const studentItems = visibleNavItems.filter(item => ['/classroom/my-tasks', '/student-grades', '/my-attendance'].includes(item.href));
+  const studentItems = visibleNavItems.filter(item => ['/classroom/my-tasks', '/student-grades', '/my-attendance', '/student-qr-scan'].includes(item.href));
   const teacherItems = visibleNavItems.filter(item => ['/attendance-log', '/staff-qr-check-in', '/attendance-records', '/classroom/assignments'].includes(item.href));
   const managementItems = visibleNavItems.filter(item => ['/student-management', '/group-management', '/grades-management', '/certificate-management'].includes(item.href));
   const financialItems = visibleNavItems.filter(item => ['/payment-registration'].includes(item.href));
