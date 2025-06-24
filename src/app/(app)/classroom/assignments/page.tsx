@@ -862,7 +862,7 @@ export default function ClassroomAssignmentsPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Are you sure?</AlertDialogTitle>
             <AlertDialogDescription>
-              This action cannot be undone. This will permanently delete the item "{itemToDelete?.title}" and all its attachments. Student submissions for this item will NOT be deleted by this action.
+              This action cannot be undone. This will permanently delete the item "{itemToDelete?.title}" and its attachments. Student submissions for this item will NOT be deleted by this action.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
