@@ -39,9 +39,9 @@
 
     --radius: 0.5rem;
 
-    /* Signup Panel: Using a shade of primary blue for consistency */
-    --signup-panel-bg: 231 48% 30%;
-    --signup-panel-fg: 0 0% 100%;
+    /* Signup Panel: A distinct teal for new registrations */
+    --signup-panel-bg: 173 80% 40%; /* Teal */
+    --signup-panel-fg: 210 20% 98%;
 
     /* Sidebar - White background for clean look */
     --sidebar-background: 0 0% 100%;
@@ -93,8 +93,9 @@
     --input: 231 30% 22%;
     --ring: 231 50% 65%;
 
-    --signup-panel-bg: 231 48% 25%;
-    --signup-panel-fg: 0 0% 100%;
+    /* Signup Panel: A distinct teal for new registrations */
+    --signup-panel-bg: 173 75% 35%; /* Dark Teal */
+    --signup-panel-fg: 210 20% 98%;
 
     /* Sidebar Dark */
     --sidebar-background: 231 30% 14%;
