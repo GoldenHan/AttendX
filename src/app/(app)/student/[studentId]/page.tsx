@@ -1,7 +1,7 @@
 
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { db } from '@/lib/firebase';
@@ -12,8 +12,14 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, ArrowLeft, Mail, Phone, GraduationCap, Calendar, Group as GroupIcon, NotebookPen, DollarSign, ListChecks, Paperclip } from 'lucide-react';
+import { Loader2, ArrowLeft, Mail, Phone, GraduationCap, Calendar, Group as GroupIcon, NotebookPen, DollarSign, ListChecks, Paperclip, Sparkles, Clipboard } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
+import { generateStudentPerformanceReport, type StudentPerformanceOutput } from '@/ai/flows/student-performance-report';
+import { useToast } from '@/hooks/use-toast';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Label } from '@/components/ui/label';
+import ReactMarkdown from 'react-markdown';
+
 
 const calculateAccumulatedTotal = (activities: ActivityScore[] | undefined | null, config: GradingConfiguration): number | null => {
   if (!activities || activities.length === 0) return null;
@@ -56,10 +62,15 @@ export default function StudentProfilePage() {
   const { studentId } = useParams();
   const router = useRouter();
   const { firestoreUser, gradingConfig } = useAuth();
+  const { toast } = useToast();
   
   const [profileData, setProfileData] = useState<StudentProfileData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  
+  const [selectedLevelForReport, setSelectedLevelForReport] = useState<string>('');
+  const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+  const [aiReport, setAiReport] = useState<StudentPerformanceOutput | null>(null);
 
   const fetchData = useCallback(async () => {
     if (!studentId || !firestoreUser?.institutionId) {
@@ -108,6 +119,9 @@ export default function StudentProfilePage() {
       const submissions = submissionsSnap.docs.map(d => ({id: d.id, ...d.data()}) as ClassroomItemSubmission);
       
       setProfileData({ student, group, sede, payments, attendance, submissions });
+      if (student.gradesByLevel && Object.keys(student.gradesByLevel).length > 0) {
+        setSelectedLevelForReport(Object.keys(student.gradesByLevel)[0]);
+      }
 
     } catch (err: any) {
       setError(err.message || "Failed to load student profile.");
@@ -119,6 +133,78 @@ export default function StudentProfilePage() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+  
+  useEffect(() => {
+    setAiReport(null); // Reset AI report when selected level changes
+  }, [selectedLevelForReport]);
+
+  const handleGenerateReport = async () => {
+      if (!profileData || !selectedLevelForReport) {
+        toast({ title: "Información Faltante", description: "Por favor selecciona un estudiante y un nivel.", variant: "destructive" });
+        return;
+      }
+      setIsGeneratingReport(true);
+      setAiReport(null);
+
+      try {
+        const { student, attendance } = profileData;
+        const levelGrades = student.gradesByLevel?.[selectedLevelForReport];
+        if (!levelGrades) throw new Error("No se encontraron datos de calificación para este nivel.");
+
+        // 1. Format Grades Summary
+        let gradesSummary = `Nivel: ${selectedLevelForReport}. `;
+        const partialTotals: number[] = [];
+        for (let i = 1; i <= gradingConfig.numberOfPartials; i++) {
+          const key = `partial${i}` as keyof StudentGradeStructure;
+          const partialData = levelGrades[key];
+          if (partialData) {
+            const total = calculatePartialTotal(partialData, gradingConfig);
+            if(total !== null){
+                gradesSummary += `Total Parcial ${i}: ${total.toFixed(1)}/${(gradingConfig.maxTotalAccumulatedScore + gradingConfig.maxExamScore)}. `;
+                partialTotals.push(total);
+            }
+          }
+        }
+        if (partialTotals.length === gradingConfig.numberOfPartials) {
+            const finalGrade = partialTotals.reduce((sum, val) => sum + val, 0) / gradingConfig.numberOfPartials;
+            gradesSummary += `Calificación Final: ${finalGrade.toFixed(2)}/${(gradingConfig.maxTotalAccumulatedScore + gradingConfig.maxExamScore)}.`;
+        }
+        
+        // 2. Format Attendance Summary
+        const presentCount = attendance.filter(r => r.status === 'present').length;
+        const absentCount = attendance.filter(r => r.status === 'absent').length;
+        const lateCount = attendance.filter(r => r.status === 'late').length;
+        const totalRecords = presentCount + absentCount + lateCount;
+        const attendanceRate = totalRecords > 0 ? ((presentCount + lateCount) / totalRecords) * 100 : 100;
+        const attendanceSummary = `Presente: ${presentCount}, Ausente: ${absentCount}, Tarde: ${lateCount}. Tasa de Asistencia: ${attendanceRate.toFixed(0)}%.`;
+        
+        // 3. Format Teacher Observations
+        const teacherObservations = attendance
+            .filter(r => r.status === 'absent' && r.observation)
+            .map(r => `- Observación de ausencia: ${r.observation}`)
+            .join('\n') || 'No se registraron observaciones específicas para las ausencias.';
+
+        toast({ title: "Generando Reporte...", description: "La IA está analizando los datos del estudiante. Esto puede tomar un momento." });
+
+        const result = await generateStudentPerformanceReport({
+          studentName: student.name,
+          levelName: selectedLevelForReport,
+          gradesSummary: gradesSummary,
+          attendanceSummary: attendanceSummary,
+          teacherObservations: teacherObservations,
+        });
+
+        setAiReport(result);
+        toast({ title: '¡Reporte Generado!', description: 'El reporte de desempeño de IA está listo para su revisión.' });
+
+      } catch (error) {
+        console.error('Error al generar reporte de IA:', error);
+        toast({ title: 'Fallo al Generar', description: 'Ocurrió un error al generar el reporte. Por favor, inténtalo de nuevo.', variant: 'destructive' });
+      } finally {
+        setIsGeneratingReport(false);
+      }
+    };
+
 
   const attendanceSummary = useMemo(() => {
     if (!profileData) return { present: 0, absent: 0, late: 0, rate: 0 };
@@ -143,6 +229,12 @@ export default function StudentProfilePage() {
   }
 
   const { student, group, sede, payments, submissions } = profileData;
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    toast({ title: 'Copiado al Portapapeles!', description: 'El reporte ha sido copiado.' });
+  };
+
 
   return (
     <div className="space-y-6">
@@ -238,6 +330,51 @@ export default function StudentProfilePage() {
           </CardContent>
       </Card>
       
+      {firestoreUser?.role !== 'caja' && (
+        <Card>
+            <CardHeader><CardTitle className="flex items-center gap-2"><Sparkles className="h-5 w-5 text-primary" /> AI Actions</CardTitle></CardHeader>
+            <CardContent>
+                <div className="flex gap-4 items-end">
+                    <div className="flex-grow">
+                        <Label htmlFor="level-select-ai">Select Level for Report</Label>
+                        <Select 
+                            value={selectedLevelForReport} 
+                            onValueChange={setSelectedLevelForReport} 
+                            disabled={!student.gradesByLevel || Object.keys(student.gradesByLevel).length === 0}
+                        >
+                          <SelectTrigger id="level-select-ai"><SelectValue placeholder="Select a level..." /></SelectTrigger>
+                          <SelectContent>
+                              {student.gradesByLevel && Object.keys(student.gradesByLevel).map(level => (
+                                <SelectItem key={level} value={level}>{level}</SelectItem>
+                              ))}
+                          </SelectContent>
+                        </Select>
+                    </div>
+                    <Button onClick={handleGenerateReport} disabled={isGeneratingReport || !selectedLevelForReport}>
+                        {isGeneratingReport ? <><Loader2 className="mr-2 h-4 w-4 animate-spin"/>Generating...</> : <><Sparkles className="mr-2 h-4 w-4"/>Generate Report</>}
+                    </Button>
+                </div>
+                {aiReport && (
+                    <Card className="mt-6 bg-secondary/20">
+                        <CardHeader>
+                            <CardTitle className="flex justify-between items-center text-lg">
+                                AI Performance Report for {selectedLevelForReport}
+                                <Button variant="outline" size="sm" onClick={() => copyToClipboard(aiReport.report)}>
+                                    <Clipboard className="mr-2 h-4 w-4"/> Copy
+                                </Button>
+                            </CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            <div className="prose prose-sm dark:prose-invert max-w-none bg-background p-4 rounded-md border">
+                                <ReactMarkdown>{aiReport.report}</ReactMarkdown>
+                            </div>
+                        </CardContent>
+                    </Card>
+                )}
+            </CardContent>
+        </Card>
+      )}
+
       <Card>
         <CardHeader><CardTitle className="flex items-center gap-2"><Paperclip className="h-5 w-5 text-primary" />Recent Submissions</CardTitle></CardHeader>
         <CardContent>
@@ -263,5 +400,3 @@ export default function StudentProfilePage() {
     </div>
   );
 }
-
-    
