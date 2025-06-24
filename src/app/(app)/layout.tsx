@@ -23,15 +23,27 @@ export default function AppLayout({
     }
   }, []);
 
-  if (loading || !authUser || (authUser && firestoreUser?.requiresPasswordChange && pathname !== '/force-password-change')) {
+  if (loading || (authUser && !firestoreUser)) {
     return (
       <div className="flex h-screen w-screen items-center justify-center bg-background">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
       </div>
     );
   }
+
+  if (!authUser && pathname !== '/login') {
+    return null; // or a redirect component
+  }
   
-  if (pathname === '/force-password-change') {
+  if (authUser && firestoreUser?.requiresPasswordChange && pathname !== '/force-password-change') {
+    return (
+       <div className="flex h-screen w-screen items-center justify-center bg-background">
+        <Loader2 className="h-12 w-12 animate-spin text-primary" />
+      </div>
+    );
+  }
+  
+  if (pathname === '/force-password-change' || pathname === '/login') {
       return <>{children}</>;
   }
 

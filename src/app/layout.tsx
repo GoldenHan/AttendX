@@ -1,35 +1,20 @@
 
-'use client'; // Add "use client" for useEffect
-
-import type {Metadata} from 'next'; // Keep if you still export metadata conditionally
+import type { Metadata } from 'next';
 import './globals.css';
 import { Toaster } from "@/components/ui/toaster";
 import { AuthProvider } from '@/contexts/AuthContext';
-import React, { useEffect } from 'react'; // Import useEffect
+import React from 'react';
 
-// Conditional metadata export (optional, but often done in root layout if "use client" is used)
-// export const metadata: Metadata = {
-//   title: 'SERVEX - Attendance Management',
-//   description: 'Professional attendance tracking for students and staff.',
-// };
-// If you keep metadata here, ensure it's exported conditionally or Next.js might complain with "use client"
+export const metadata: Metadata = {
+  title: 'AttendX - Attendance Management',
+  description: 'Professional attendance tracking for students and staff.',
+};
 
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  useEffect(() => {
-    // Apply theme on initial client-side load
-    const storedTheme = localStorage.getItem('theme');
-    if (storedTheme === 'dark') {
-      document.documentElement.classList.add('dark');
-    } else {
-      // Default to light mode if no theme is stored or if it's 'light'
-      document.documentElement.classList.remove('dark');
-    }
-  }, []);
-
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
@@ -46,4 +31,3 @@ export default function RootLayout({
     </html>
   );
 }
-
