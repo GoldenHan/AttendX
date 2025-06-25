@@ -37,7 +37,7 @@ interface AuthContextType {
     password: string,
     role: FirestoreUserType['role'],
     studentSpecifics?: { level: FirestoreUserType['level']; sedeId?: string | null },
-    creatorContext?: { institutionId: string; creatorSedeId?: string | null; attendanceCode?: string },
+    creatorContext?: { institutionId: string | null; creatorSedeId?: string | null; attendanceCode?: string },
     institutionName?: string
   ) => Promise<void>;
   signOut: () => Promise<void>;
@@ -219,7 +219,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     password: string,
     role: FirestoreUserType['role'],
     studentSpecifics?: { level: FirestoreUserType['level']; sedeId?: string | null },
-    creatorContext?: { institutionId: string; creatorSedeId?: string | null; attendanceCode?: string },
+    creatorContext?: { institutionId: string | null; creatorSedeId?: string | null; attendanceCode?: string },
     institutionName?: string
   ) => {
     setLoading(true);
@@ -273,7 +273,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         console.log(`[AuthContext] Step 4: Created config documents.`);
 
       } else { // Standard flow for adding a user to an existing institution.
-        effectiveInstitutionId = creatorContext?.institutionId;
+        effectiveInstitutionId = creatorContext?.institutionId || undefined;
         if (!effectiveInstitutionId) throw new Error("An Institution ID is required to add a new user.");
 
         const usernameQuery = query(collection(db, 'users'), where('username', '==', username.trim()), where('institutionId', '==', effectiveInstitutionId), limit(1));
